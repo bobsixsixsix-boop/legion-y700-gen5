@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stand-in for pactl in the headless bed (see wpctl next to it: the level is the line in $XDG_RUNTIME_DIR/sb-audio).
+#   set-sink-volume @DEFAULT_SINK@ N%   set-sink-mute @DEFAULT_SINK@ 0|1   (what the control centre's drag runs)
+#   subscribe                           the events wpctl/pactl stand-ins append, from now on (tail -F; killing this
+#                                       process kills the follower: exec)
+D=$(dirname "$0"); S=$XDG_RUNTIME_DIR/sb-audio
+case "$1" in
+set-sink-volume) exec "$D/wpctl" set-volume @DEFAULT_AUDIO_SINK@ "$3" ;;
+set-sink-mute)   exec "$D/wpctl" set-mute @DEFAULT_AUDIO_SINK@ "$3" ;;
+subscribe)       : >> "$S.events"; exec tail -n 0 -F "$S.events" ;;
+*)               echo "sb pactl stand-in: '$*' is not faked" >&2; exit 1 ;;
+esac

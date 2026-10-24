@@ -1,0 +1,9 @@
+# Rerun after the stale-Edge fix (70be038): the static pair of ps120.txt (the 21:01
+# static run showed a frozen leftover page and was discarded), then novgk.txt.
+# label codec WxH fps kbps secs ps content
+l120-sta-pson         HEVC  2560x1600 120 60000  600 on  static
+l120-sta-psoff        HEVC  2560x1600 120 60000  600 off static
+l120-dyn-pson-novgk   HEVC  2560x1600 120 60000  600 on  dynamic
+n120-hevc-native-80   HEVC  3040x1904 120 80000  180 on  dynamic
+n120-hevc-1920-40     HEVC  1920x1200 120 40000  180 on  dynamic
+n120-h264-2560-60     H.264 2560x1600 120 60000  180 on  dynamic

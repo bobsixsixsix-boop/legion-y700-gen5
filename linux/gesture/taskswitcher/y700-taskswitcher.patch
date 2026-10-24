@@ -1,0 +1,121 @@
+--- a/contents/ui/main.qml
++++ b/contents/ui/main.qml
+@@ -12,18 +12,100 @@
+ SceneEffect {
+     id: root
+ 
++    // y700: the bottom edge is off while our on-screen keyboard (y700-osk, or the fcitx5-osk fallback =
++    // KWin's inputMethod) or the right-edge control centre is mapped: the edge strip would eat taps on
++    // the keyboard's bottom row, and with the control centre open the cards would come up behind it.
++    // Both are layer-shell windows (resourceClass = executable) that unmap when closed. Same rule as
++    // the y700-home script (linux/gesture/kwin-script). windowRemoved may come while the window is
++    // still listed and windowAdded before it is: say which one.
++    // Never while a finger is on the edge or the cards are up (2026-10-21, owner: "在桌面上上滑唤出后台，
++    // 卡片无法滑动"): opening the cards from the desktop makes KWin's input method active on plasmashell,
++    // y700-osk takes that for a KWin-initiated activation and maps (under the cards). Dropping the edge
++    // then unregisters the touch border mid-gesture, the release never reaches the switcher and it
++    // hangs half-open with gestureInProgress set. Upstream's setGestureEnabled also re-registers on
++    // every write, same value or not, so y700Blocked must not even be re-assigned then: y700BlockerUp
++    // follows the windows, y700Blocked takes it over once the gesture is over and the cards are gone.
++    // "Cards up" = a TaskSwitcher view exists (y700Views): SceneEffect.visible does not follow the
++    // plugin's C++ setRunning().
++    readonly property var y700Blockers: ["y700-osk", "y700-control-center"]
++    property bool y700BlockerUp: false
++    property bool y700Blocked: false
++    property int y700Views: 0
++    // Nothing reads taskSwitcherState before its init(): gestureInProgress dereferences the C++
++    // m_effectState, null until then, and QML may complete the root before that child (2026-10-21:
++    // y700Update in the root's onCompleted crashed kwin_wayland at every login, five times, then SDDM
++    // gave up and showed the greeter). The first update runs right after init() instead.
++    property bool y700Ready: false
++    function y700IsBlocker(w) {
++        return !!w && (w.inputMethod || y700Blockers.indexOf(w.resourceClass) >= 0);
++    }
++    function y700Update(added, removed) {
++        y700BlockerUp = (added !== null && y700IsBlocker(added))
++            || Workspace.stackingOrder.some(w => w !== removed && y700IsBlocker(w));
++        y700Apply(added === null && removed === null);
++    }
++    function y700Apply(log) {
++        if (!y700Ready) {
++            return;
++        }
++        if (taskSwitcherState.gestureInProgress || y700Views > 0) {
++            if (y700Blocked !== y700BlockerUp) {
++                console.info("y700-taskswitcher: edge change held while a gesture or the cards are up");
++            }
++            return;
++        }
++        if (y700Blocked !== y700BlockerUp || log) {
++            y700Blocked = y700BlockerUp;
++            console.info("y700-taskswitcher: bottom edge " + (taskSwitcherState.gestureEnabled ? "on" : "off"));
++        }
++    }
++    Connections {
++        target: Workspace
++        function onWindowAdded(w) { if (root.y700IsBlocker(w)) root.y700Update(w, null); }
++        function onWindowRemoved(w) { if (root.y700IsBlocker(w)) root.y700Update(null, w); }
++    }
++    Connections {
++        target: taskSwitcherState
++        function onGestureInProgressChanged() { root.y700Apply(false); }
++    }
++    // y700: install.sh writes the patch's hash here. KWin keeps compiled QML in memory by file URL, so a
++    // reinstall only takes effect after the next login (KWin restart); the checklist compares this
++    // "loaded" line of the current boot with the installed file to say so.
++    readonly property string y700Build: "@Y700_BUILD@"
++    signal y700DismissRequested()
++    Component.onCompleted: console.info("y700-taskswitcher: loaded " + y700Build)
++
+     // Created per screen
+     delegate: TaskSwitcher {
+         id: taskSwitcher
+         state: taskSwitcherState
++        Component.onCompleted: root.y700Views++
++        Connections {
++            target: root
++            function onY700DismissRequested() { taskSwitcher.dismiss(); }
++        }
++        Component.onDestruction: {
++            root.y700Views--;
++            root.y700Apply(false);
++        }
+     }
+ 
++    // y700: own name so it does not clash with the upstream effect's; the G9 pad's home double tap
++    // invokes it over kglobalaccel (y700-padkeys)
+     ShortcutHandler {
+-        name: 'Mobile Task Switcher'
+-        text: i18n("Toggle Mobile Task Switcher")
++        name: 'y700-taskswitcher'
++        text: "Y700: 多任务卡片"
+         sequence: 'Meta+C'
+ 
+-        onActivated: taskSwitcherState.toggle()
++        // y700: with the cards up the shortcut means "never mind": back to the app they were opened
++        // from (TaskSwitcher.dismiss); upstream's toggle would just fade them out over the desktop
++        onActivated: {
++            if (root.y700Views > 0) {
++                root.y700DismissRequested();
++            } else {
++                taskSwitcherState.toggle();
++            }
++        }
+     }
+ 
+     TaskSwitcherPlugin.MobileTaskSwitcherState {
+@@ -33,10 +115,14 @@
+             && !MobileShellState.ShellDBusClient.isActionDrawerOpen
+             && !MobileShellState.ShellDBusClient.isVolumeOSDOpen
+             && !MobileShellState.ShellDBusClient.isNotificationPopupDrawerOpen
++            && !root.y700Blocked
+ 
+         Component.onCompleted: {
+             // Initialize with effect
+             taskSwitcherState.init(root);
++            // y700: now gestureInProgress is safe to read (see y700Ready)
++            root.y700Ready = true;
++            root.y700Update(null, null);
+         }
+     }
+ }

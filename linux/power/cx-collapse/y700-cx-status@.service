@@ -1,0 +1,18 @@
+# /etc/systemd/system/y700-cx-status@.service - one instance per connection of y700-cx-status.socket.
+# Read-only status text; runs as an unprivileged dynamic user (the log, sysfs files and systemctl is-active
+# are all readable without privileges).
+[Unit]
+Description=y700: CX experiment status response
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/local/libexec/y700-cx-status
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RuntimeMaxSec=10

@@ -1,0 +1,6 @@
+id=y700_vrr
+name=Y700 VRR Bridge
+version=1
+versionCode=1
+author=y700
+description=把抖音等应用通过 OPPO 私有接口发出的 30Hz 请求翻译成真正的 60Hz 显示模式切换（联想面板没有 LTPO 空闲降频）

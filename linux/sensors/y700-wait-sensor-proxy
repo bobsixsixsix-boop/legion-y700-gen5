@@ -1,0 +1,15 @@
+#!/bin/sh
+# y700-wait-sensor-proxy: ExecStartPre of the KWin user unit (plasma-kwin_wayland.service), 2026-10-16.
+# KWin looks for the orientation sensor once, at start; if iio-sensor-proxy is not up yet (boot race, see
+# y700-wait-ssc) auto-rotation stays dead all session and the panel's rotation-unlock is silently ignored.
+# Wait until the proxy is on the system bus and reports an accelerometer, at most 10 s, then let KWin start
+# either way. Done here instead of ordering SDDM after the proxy: that forms an ordering cycle with
+# multi-user.target (fcitx5-osk-key-helper -> sddm -> proxy -> hexagonrpcd -> multi-user.target).
+i=0
+while [ $i -lt 40 ]; do
+	busctl --system get-property net.hadess.SensorProxy /net/hadess/SensorProxy net.hadess.SensorProxy \
+		HasAccelerometer 2>/dev/null | grep -q true && { echo "sensor proxy ready after $((i / 4)).$((i % 4 * 25)) s"; exit 0; }
+	sleep 0.25; i=$((i + 1))
+done
+echo "sensor proxy not ready after 10 s - starting KWin anyway (auto-rotation may not work this session)"
+exit 0

@@ -1,0 +1,6 @@
+# y700: poll the CPUCP memlat devfreq read-back once a second instead of every 2 ms (2026-10-15).
+# The ddr / llcc / ddr-qos devfreq devices use the "remote" governor (kernel patches 0124-0126): the
+# CPUCP firmware scales DDR/LLCC by itself, and the kernel's polling only copies the firmware's vote
+# into cur_freq/trans_stat (11 SCMI round trips per 2 ms tick). Measured: apss_cpucp_mbox 953 -> 11
+# IRQ/s on CPU0, IPI1 -700/s. cur_freq still answers on demand (sysfs read calls get_cur_freq).
+SUBSYSTEM=="devfreq", KERNEL=="ddr|llcc|ddr-qos", ATTR{polling_interval}="1000"

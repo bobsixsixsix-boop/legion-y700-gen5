@@ -1,0 +1,645 @@
+# y8 trim fragment (2026-10-15, final): config options for hardware/features the owner does not use.
+# 538 "is not set" + 10 "=m" lines. Every symbol below is =y or =m in inventory/config-running and was
+# checked against inventory/bound-drivers, lsmod, modules.builtin, class-members, input-devices, mounts,
+# packages, apps and the board DT (tb323fu-linux/kernel/dts). Unused drivers that are not bound cost
+# RAM/boot time when built in (=y) and only disk/build time when =m; they do NOT cost runtime power.
+#
+# Apply AFTER config-t49.release (kbuild-y8.sh): for each line run
+#   scripts/config --file .config --disable X   (for "# CONFIG_X is not set")
+#   scripts/config --file .config --module  X   (for "CONFIG_X=m")
+# then `make olddefconfig`, then check the MUST-KEEP list (y8-must-keep.txt) mechanically: every symbol
+# there must still be =y / =m. kbuild-y8.sh must DROP the "CONFIG_ANDROID_BINDERFS=y must survive" check
+# (section K) and keep the ntsync / zram zstd / exfat / MGLRU / BTF checks.
+#
+# Provenance: many of these were switched ON deliberately upstream - the OnePlus 15 defconfig (patch 0011:
+# IR_SPI, RC_CORE, TYPEC_TCPM/QCOM_PMIC, QRTR_TUN, binder, PM_WAKELOCKS, BLK_DEV_RAM, F2FS=y) and the t49
+# baldur-extra.fragment test devices (VKMS/VGEM, IIO dummy, SND_DUMMY, DUMMY_HCD, RAW_GADGET, GPIO_SIM,
+# VIVID/VIMC, F_UVC/F_MIDI/F_PRINTER, USB_PRINTER). This file reverses those on purpose for this tablet;
+# when the base config is upgraded (t5x), re-apply it rather than treating the lines as omissions.
+# Risk legend in the comments: [low] / [medium]. Nothing here touches a stability workaround
+# (QCOM_WDT, DPM_WATCHDOG, lockup/hung-task panics, allow_cluster_off, MMU-500 CPRE errata stay).
+
+# ---- A. Virtualisation [low]: Linux runs at EL1 under the firmware hypervisor (dmesg "All CPU(s) started at EL1"),
+#      KVM is not even configured, qemu is installed but never used (README: qemu-kvm.service is a stray enablement).
+#      All built in today: xen frontends, virtio pci/mmio/blk/net/console/balloon/rng, vfio-pci, pv steal clock.
+# CONFIG_XEN is not set
+# CONFIG_XEN_DOM0 is not set
+# CONFIG_PARAVIRT is not set
+# CONFIG_VFIO is not set
+# CONFIG_VHOST_MENU is not set
+# CONFIG_VIRTIO_PCI is not set
+# CONFIG_VIRTIO_MMIO is not set
+# CONFIG_VIRTIO_BALLOON is not set
+# CONFIG_VIRTIO_BLK is not set
+# CONFIG_VIRTIO_NET is not set
+# CONFIG_VIRTIO_CONSOLE is not set
+# CONFIG_HW_RANDOM_VIRTIO is not set
+# CONFIG_RPMSG_VIRTIO is not set
+# CONFIG_PTP_1588_CLOCK_KVM is not set
+# CONFIG_PTP_1588_CLOCK_VMCLOCK is not set
+# CONFIG_NET_FAILOVER is not set
+# CONFIG_FAILOVER is not set
+# CONFIG_PAGE_REPORTING is not set
+
+# ---- B. Other SoCs' clock / pinctrl / interconnect / power-domain / firmware drivers [low]
+#      (Kconfig "default ARCH_QCOM" pulls every Qualcomm SoC in; the board is kaanapali only:
+#      bound-drivers shows gcc/camcc/cambistmclkcc/dispcc/gpucc/gxclkctl/tcsrcc/videocc-kaanapali,
+#      kaanapali-tlmm, qnoc-kaanapali, clk-rpmh, rpmhpd, scmi-cpufreq; no older-SoC driver is bound)
+# built in (=y) today -> RAM + boot time
+# CONFIG_CLK_ELIZA_GCC is not set
+# CONFIG_CLK_GLYMUR_GCC is not set
+# CONFIG_CLK_NORD_GCC is not set
+# CONFIG_CLK_SHIKRA_GCC is not set
+# CONFIG_CLK_HAWI_GCC is not set
+# CONFIG_IPQ_APSS_PLL is not set
+# CONFIG_IPQ_GCC_5210 is not set
+# CONFIG_IPQ_GCC_9650 is not set
+# CONFIG_MSM_GCC_8976 is not set
+# CONFIG_SDM_GCC_660 is not set
+# CONFIG_SM_GCC_6125 is not set
+# CONFIG_SM_GCC_6375 is not set
+# CONFIG_SM_GCC_7150 is not set
+# CONFIG_SM_GCC_8450 is not set
+# CONFIG_SM_CAMCC_8450 is not set
+# CONFIG_SM_DISPCC_8450 is not set
+# CONFIG_SM_GPUCC_8450 is not set
+# CONFIG_SM_VIDEOCC_8450 is not set
+# CONFIG_QCOM_HFPLL is not set
+# CONFIG_QCOM_CLK_SMD_RPM is not set
+# CONFIG_CLK_VEXPRESS_OSC is not set
+# CONFIG_COMMON_CLK_SCPI is not set
+# CONFIG_COMMON_CLK_SCMI is not set
+# CONFIG_COMMON_CLK_PWM is not set
+# CONFIG_PINCTRL_ELIZA is not set
+# CONFIG_PINCTRL_GLYMUR is not set
+# CONFIG_PINCTRL_HAWI is not set
+# CONFIG_PINCTRL_IPQ5210 is not set
+# CONFIG_PINCTRL_IPQ9650 is not set
+# CONFIG_PINCTRL_MAILI is not set
+# CONFIG_PINCTRL_NORD is not set
+# CONFIG_PINCTRL_SHIKRA is not set
+# CONFIG_PINCTRL_SM7150 is not set
+# CONFIG_PINCTRL_SM8450 is not set
+# CONFIG_PINCTRL_SM8450_LPASS_LPI is not set
+# CONFIG_PINCTRL_SINGLE is not set
+# CONFIG_INTERCONNECT_QCOM_ELIZA is not set
+# CONFIG_INTERCONNECT_QCOM_GLYMUR is not set
+# CONFIG_INTERCONNECT_QCOM_MAILI is not set
+# CONFIG_INTERCONNECT_QCOM_SM8450 is not set
+# CONFIG_INTERCONNECT_QCOM_OSM_L3 is not set
+# CONFIG_QCOM_CPR is not set
+# CONFIG_QCOM_RPMPD is not set
+# CONFIG_QCOM_SMD_RPM is not set
+# CONFIG_QCOM_SMSM is not set
+# CONFIG_QCOM_OCMEM is not set
+# CONFIG_QCOM_MPM is not set
+# CONFIG_QCOM_APCS_IPC is not set
+# CONFIG_QCOM_IOMMU is not set
+# CONFIG_QCOM_QSEECOM is not set
+# CONFIG_QCOM_EBI2 is not set
+# CONFIG_RPMSG_QCOM_SMD is not set
+# CONFIG_RPMSG_QCOM_GLINK_RPM is not set
+# CONFIG_RESET_QCOM_AOSS is not set
+# CONFIG_SYSCON_REBOOT_MODE is not set
+# CONFIG_NVMEM_REBOOT_MODE is not set
+# CONFIG_ARM_QCOM_CPUFREQ_HW is not set
+# CONFIG_ARM_QCOM_CPUFREQ_NVMEM is not set
+# CONFIG_CPUFREQ_DT is not set
+# CONFIG_CPUFREQ_DT_PLATDEV is not set
+# CONFIG_ARM_SCPI_PROTOCOL is not set
+# CONFIG_ARM_SCPI_CPUFREQ is not set
+# CONFIG_ARM_SCPI_POWER_DOMAIN is not set
+# CONFIG_ARM_SCMI_POWER_DOMAIN is not set
+# CONFIG_ARM_SCMI_TRANSPORT_SMC is not set
+# CONFIG_OPTEE is not set
+# CONFIG_IMX_SCMI_BBM_EXT is not set
+# CONFIG_ARM_SDE_INTERFACE is not set
+# CONFIG_ARM_MHU is not set
+# CONFIG_PLATFORM_MHU is not set
+# CONFIG_ARM_SMMU_V3 is not set
+# CONFIG_IOMMU_IO_PGTABLE_DART is not set
+# CONFIG_IOMMU_IO_PGTABLE_ARMV7S is not set
+# CONFIG_ARM_CCI_PMU is not set
+# CONFIG_ARM_CCI400_PMU is not set
+# CONFIG_ARM_CCI5xx_PMU is not set
+# CONFIG_VEXPRESS_CONFIG is not set
+# CONFIG_MFD_VEXPRESS_SYSREG is not set
+# CONFIG_ARM_TIMER_SP804 is not set
+# CONFIG_XILINX_INTC is not set
+# CONFIG_RESET_TI_SYSCON is not set
+# CONFIG_RESET_SCMI is not set
+# CONFIG_SOC_TI is not set
+# CONFIG_HTE is not set
+# other-vendor CPU / timer / GIC errata (MIDR/IIDR/DT gated, never match Oryon; gain is a few KB only)
+# CONFIG_FSL_ERRATUM_A008585 is not set
+# CONFIG_HISILICON_ERRATUM_161010101 is not set
+# CONFIG_ARM64_ERRATUM_858921 is not set
+# CONFIG_NVIDIA_OLYMPUS_1027_ERRATUM is not set
+# CONFIG_RENESAS_ERRATUM_GEN4GICITS1 is not set
+# CONFIG_ARM64_ERRATUM_4193714 is not set
+# modules (=m) today -> build time only
+# CONFIG_CLK_ELIZA_DISPCC is not set
+# CONFIG_CLK_ELIZA_TCSRCC is not set
+# CONFIG_CLK_GLYMUR_CAMCC is not set
+# CONFIG_CLK_GLYMUR_DISPCC is not set
+# CONFIG_CLK_GLYMUR_EVACC is not set
+# CONFIG_CLK_GLYMUR_TCSRCC is not set
+# CONFIG_CLK_GLYMUR_VIDEOCC is not set
+# CONFIG_CLK_NORD_DISPCC is not set
+# CONFIG_CLK_NORD_GPUCC is not set
+# CONFIG_CLK_NORD_TCSRCC is not set
+# CONFIG_CLK_MAILI_VIDEOCC is not set
+# CONFIG_CLK_SHIKRA_AUDIOCORECC is not set
+# CONFIG_CLK_X1E80100_GCC is not set
+# CONFIG_CLK_X1P42100_CAMCC is not set
+# CONFIG_CLK_X1P42100_VIDEOCC is not set
+# CONFIG_CLK_HAWI_TCSRCC is not set
+# CONFIG_CLK_HAWI_VIDEOCC is not set
+# CONFIG_IPQ_CMN_PLL is not set
+# CONFIG_MSM_GCC_8998 is not set
+# CONFIG_MSM_GPUCC_8998 is not set
+# CONFIG_SC_CAMCC_7180 is not set
+# CONFIG_SC_CAMCC_8180X is not set
+# CONFIG_SC_DISPCC_7180 is not set
+# CONFIG_SC_GCC_7180 is not set
+# CONFIG_SC_GCC_7280 is not set
+# CONFIG_SC_GCC_8180X is not set
+# CONFIG_SC_GPUCC_7180 is not set
+# CONFIG_SC_LPASSCC_7280 is not set
+# CONFIG_SC_VIDEOCC_7180 is not set
+# CONFIG_SDM_MMCC_660 is not set
+# CONFIG_SDM_GPUCC_660 is not set
+# CONFIG_QDU_GCC_1000 is not set
+# CONFIG_QDU_ECPRICC_1000 is not set
+# CONFIG_SM_CAMCC_4450 is not set
+# CONFIG_SM_CAMCC_7150 is not set
+# CONFIG_SM_CAMCC_8150 is not set
+# CONFIG_SM_CAMCC_8750 is not set
+# CONFIG_SM_DISPCC_4450 is not set
+# CONFIG_SM_DISPCC_6115 is not set
+# CONFIG_SM_DISPCC_6125 is not set
+# CONFIG_SM_DISPCC_7150 is not set
+# CONFIG_SM_DISPCC_8250 is not set
+# CONFIG_SM_DISPCC_6375 is not set
+# CONFIG_SM_GCC_4450 is not set
+# CONFIG_SM_GCC_6115 is not set
+# CONFIG_SM_GCC_8150 is not set
+# CONFIG_SM_GCC_8750 is not set
+# CONFIG_SM_GPUCC_4450 is not set
+# CONFIG_SM_GPUCC_6125 is not set
+# CONFIG_SM_GPUCC_6375 is not set
+# CONFIG_SM_GPUCC_8750 is not set
+# CONFIG_SM_LPASSCC_6115 is not set
+# CONFIG_SM_VIDEOCC_7150 is not set
+# CONFIG_SM_VIDEOCC_8150 is not set
+# CONFIG_SM_VIDEOCC_8750 is not set
+# CONFIG_PINCTRL_MILOS_LPASS_LPI is not set
+# CONFIG_PINCTRL_SM6350_LPASS_LPI is not set
+# CONFIG_PINCTRL_MCP23S08 is not set
+# CONFIG_QCOM_SPM is not set
+# CONFIG_QCOM_WCNSS_CTRL is not set
+# CONFIG_QCOM_Q6V5_ADSP is not set
+# CONFIG_QCOM_Q6V5_MSS is not set
+# CONFIG_QCOM_WCNSS_PIL is not set
+# CONFIG_QCOM_LMH is not set
+# CONFIG_QCOM_BAM_DMUX is not set
+# CONFIG_QCOM_PBS is not set
+# CONFIG_RESET_QCOM_PDC is not set
+# CONFIG_ARM_CCN is not set
+# CONFIG_ARM_CMN is not set
+# CONFIG_ARM_SMMU_V3_PMU is not set
+# CONFIG_ARM_DSU_PMU is not set
+# CONFIG_ARM_SPE_PMU is not set
+# CONFIG_ARM_CORESIGHT_PMU_ARCH_SYSTEM_PMU is not set
+# CONFIG_NVIDIA_CORESIGHT_PMU_ARCH_SYSTEM_PMU is not set
+# CONFIG_GOOGLE_FIRMWARE is not set
+# CONFIG_CRYPTO_DEV_AMLOGIC_GXL is not set
+# CONFIG_NVMEM_LAYOUT_SL28_VPD is not set
+# CONFIG_BCM_SBA_RAID is not set
+
+# ---- C. Old-SoC / other-board PHYs, buses and controllers [low] (built in, none bound; the board's
+#      PHYs are qcom-qmp-combo/pcie/ufs, qcom-m31eusb2-phy, qcom-eusb2-repeater, qcom-mipi-csi2-phy)
+# CONFIG_PHY_QCOM_EDP is not set
+# CONFIG_PHY_QCOM_PCIE2 is not set
+# CONFIG_PHY_QCOM_QMP_PCIE_8996 is not set
+# CONFIG_PHY_QCOM_QMP_USB is not set
+# CONFIG_PHY_QCOM_QUSB2 is not set
+# CONFIG_PHY_QCOM_M31_USB is not set
+# CONFIG_PHY_QCOM_USB_HS is not set
+# CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2 is not set
+# CONFIG_PHY_QCOM_USB_HSIC is not set
+# CONFIG_PHY_QCOM_USB_HS_28NM is not set
+# CONFIG_PHY_QCOM_USB_SS is not set
+# CONFIG_PHY_QCOM_SGMII_ETH is not set
+# CONFIG_PHY_CAN_TRANSCEIVER is not set
+# CONFIG_PHY_NXP_PTN3222 is not set
+# CONFIG_PHY_SNPS_EUSB2 is not set
+# CONFIG_PHY_CADENCE_TORRENT is not set
+# CONFIG_PHY_CADENCE_DPHY is not set
+# CONFIG_PHY_CADENCE_DPHY_RX is not set
+# CONFIG_PHY_CADENCE_SIERRA is not set
+# CONFIG_PHY_CADENCE_SALVO is not set
+# CONFIG_PCIE_XILINX is not set
+# CONFIG_PCI_HOST_GENERIC is not set
+# CONFIG_PCI_ENDPOINT is not set
+# CONFIG_PCI_ENDPOINT_TEST is not set
+# CONFIG_PCI_PWRCTRL_TC9563 is not set
+# CONFIG_POWER_SEQUENCING_PCIE_M2 is not set
+# CONFIG_PCI_IOV is not set
+# CONFIG_HOTPLUG_PCI is not set
+# CONFIG_VGA_ARB is not set
+# CONFIG_QCOM_HIDMA_MGMT is not set
+# CONFIG_QCOM_HIDMA is not set
+# CONFIG_I2C_QUP is not set
+# CONFIG_I2C_DESIGNWARE_CORE is not set
+# CONFIG_I2C_CADENCE is not set
+# CONFIG_I2C_XILINX is not set
+# CONFIG_I2C_MUX_PINCTRL is not set
+# (I2C_MUX itself stays: MEDIA_SUBDRV_AUTOSELECT selects it for the camera sensors)
+# CONFIG_SPI_QUP is not set
+# CONFIG_SPI_QCOM_QSPI is not set
+# CONFIG_SLIMBUS is not set
+# CONFIG_MMC_ARMMMCI is not set
+# CONFIG_MMC_SDHCI_OF_DWCMSHC is not set
+# CONFIG_MMC_SPI is not set
+# CONFIG_MMC_DW is not set
+# CONFIG_MMC_HSQ is not set
+# CONFIG_PWRSEQ_EMMC is not set
+# CONFIG_SCSI_SAS_ATTRS is not set
+# CONFIG_SCSI_SAS_LIBSAS is not set
+# CONFIG_RAID_ATTRS is not set
+# CONFIG_SCSI_UFS_CDNS_PLATFORM is not set
+# CONFIG_SERIAL_8250 is not set
+# CONFIG_SERIAL_AMBA_PL011 is not set
+# CONFIG_SERIAL_MSM is not set
+# CONFIG_IPMI_HANDLER is not set
+# CONFIG_HW_RANDOM_CN10K is not set
+# CONFIG_GPIO_SYSCON is not set
+# CONFIG_GPIO_GENERIC_PLATFORM is not set
+# CONFIG_GPIO_CADENCE is not set
+# CONFIG_PWM is not set
+# CONFIG_PWM_XILINX is not set
+# CONFIG_MUX_MMIO is not set
+# CONFIG_EXTCON_USB_GPIO is not set
+# CONFIG_POWER_RESET_GPIO is not set
+# CONFIG_POWER_RESET_GPIO_RESTART is not set
+# CONFIG_POWER_RESET_MSM is not set
+# CONFIG_POWER_RESET_SYSCON_POWEROFF is not set
+# CONFIG_REGULATOR_GPIO is not set
+# CONFIG_REGULATOR_PWM is not set
+# CONFIG_REGULATOR_ARM_SCMI is not set
+# CONFIG_REGULATOR_QCOM_SMD_RPM is not set
+# CONFIG_REGULATOR_QCOM_SPMI is not set
+# CONFIG_REGULATOR_DA9211 is not set
+# CONFIG_REGULATOR_MAX20411 is not set
+# CONFIG_REGULATOR_QCOM_PM8008 is not set
+# CONFIG_REGULATOR_QCOM_REFGEN is not set
+# CONFIG_REGULATOR_QCOM_USB_VBUS is not set
+# CONFIG_MFD_QCOM_PM8008 is not set
+# CONFIG_BATTERY_BQ27XXX is not set
+# CONFIG_CHARGER_BQ25890 is not set
+# CONFIG_CHARGER_BQ25980 is not set
+# CONFIG_SENSORS_ARM_SCMI is not set
+# CONFIG_SENSORS_GPIO_FAN is not set
+# CONFIG_SENSORS_JC42 is not set
+# CONFIG_SENSORS_SHT4x is not set
+# CONFIG_SENSORS_AMC6821 is not set
+# CONFIG_SENSORS_TMP102 is not set
+# CONFIG_GENERIC_ADC_THERMAL is not set
+# CONFIG_QCOM_SPMI_ADC5 is not set
+# CONFIG_QCOM_SPMI_ADC_TM5 is not set
+# CONFIG_QCOM_SPMI_VADC is not set
+# CONFIG_XILINX_WATCHDOG is not set
+# CONFIG_XILINX_WINDOW_WATCHDOG is not set
+# CONFIG_PM8916_WATCHDOG is not set
+# CONFIG_LEDS_GPIO is not set
+# CONFIG_LEDS_PWM is not set
+# CONFIG_LEDS_SYSCON is not set
+# CONFIG_LEDS_LM3692X is not set
+# CONFIG_LEDS_PCA9532 is not set
+# CONFIG_LEDS_PWM_MULTICOLOR is not set
+# CONFIG_LEDS_QCOM_LPG is not set
+# CONFIG_EEPROM_93CX6 is not set
+# CONFIG_QCOM_COINCELL is not set
+# CONFIG_NVMEM_QCOM_SEC_QFPROM is not set
+# CONFIG_COUNTER is not set
+# CONFIG_GREYBUS is not set
+# CONFIG_STAGING is not set
+# CONFIG_AUXDISPLAY is not set
+# CONFIG_FW_UPLOAD is not set
+# CONFIG_CRYPTO_BENCHMARK is not set
+# CONFIG_DM_THIN_PROVISIONING is not set
+
+# ---- D. USB [low]: PCI host glue, legacy HCDs, other vendors' UDC/DRD, gadget functions the initramfs
+#      does not build (init uses acm.GS0 + ncm.usb0 only), Type-C parts not on this board (UCSI over
+#      pmic_glink + fsa4480 are what is bound; no TCPM, no retimer/redriver in the DT)
+# CONFIG_USB_PCI is not set
+# CONFIG_USB_EHCI_HCD is not set
+# CONFIG_USB_OHCI_HCD is not set
+# CONFIG_USB_DWC3_HAPS is not set
+# CONFIG_USB_DWC3_OF_SIMPLE is not set
+# CONFIG_USB_DWC3_GENERIC_PLAT is not set
+# CONFIG_USB_CDNS_SUPPORT is not set
+# CONFIG_USB_ULPI is not set
+# CONFIG_USB_ULPI_BUS is not set
+# CONFIG_USB_SNP_UDC_PLAT is not set
+# CONFIG_USB_BDC_UDC is not set
+# CONFIG_USB_ONBOARD_DEV is not set
+# CONFIG_USB_QCOM_EUD is not set
+# CONFIG_USB_PRINTER is not set
+# CONFIG_USB_SERIAL_OPTION is not set
+# CONFIG_USB_CONFIGFS_SERIAL is not set
+# CONFIG_USB_CONFIGFS_OBEX is not set
+# CONFIG_USB_CONFIGFS_ECM is not set
+# CONFIG_USB_CONFIGFS_ECM_SUBSET is not set
+# CONFIG_USB_CONFIGFS_RNDIS is not set
+# CONFIG_USB_CONFIGFS_EEM is not set
+# CONFIG_USB_CONFIGFS_MASS_STORAGE is not set
+# CONFIG_USB_CONFIGFS_F_FS is not set
+# CONFIG_USB_CONFIGFS_F_HID is not set
+# CONFIG_USB_CONFIGFS_F_UVC is not set
+# CONFIG_USB_CONFIGFS_F_MIDI is not set
+# CONFIG_USB_CONFIGFS_F_PRINTER is not set
+# CONFIG_USB_MASS_STORAGE is not set
+# CONFIG_USB_RAW_GADGET is not set
+# CONFIG_USB_DUMMY_HCD is not set
+# CONFIG_TYPEC_TCPM is not set
+# CONFIG_TYPEC_QCOM_PMIC is not set
+# CONFIG_TYPEC_TCPCI is not set
+# CONFIG_TYPEC_RT1711H is not set
+# CONFIG_TYPEC_TCPCI_MAXIM is not set
+# CONFIG_UCSI_CCG is not set
+# CONFIG_TYPEC_TPS6598X is not set
+# CONFIG_TYPEC_MUX_GPIO_SBU is not set
+# CONFIG_TYPEC_MUX_IT5205 is not set
+# CONFIG_TYPEC_MUX_NB7VPQ904M is not set
+# CONFIG_TYPEC_MUX_PS883X is not set
+# CONFIG_TYPEC_MUX_PTN36502 is not set
+# CONFIG_TYPEC_MUX_WCD939X_USBSS is not set
+
+# ---- E. Input / IR / misc human-interface hardware not present [low]
+#      (input-devices: pmic pwrkey/resin, gpio-keys, NVT touch + pen, aw86927 x2, uinput helper, headset jack;
+#      PS/2, serio, DT I2C-HID, IR, other touch controllers are absent)
+# CONFIG_SERIO is not set
+# CONFIG_KEYBOARD_ATKBD is not set
+# CONFIG_MOUSE_PS2 is not set
+# CONFIG_KEYBOARD_IMX_BBM_SCMI is not set
+# CONFIG_KEYBOARD_GPIO_POLLED is not set
+# CONFIG_INPUT_PM8XXX_VIBRATOR is not set
+# CONFIG_INPUT_PWM_BEEPER is not set
+# CONFIG_INPUT_PWM_VIBRA is not set
+# CONFIG_TOUCHSCREEN_GOODIX_BERLIN_SPI is not set
+# CONFIG_TOUCHSCREEN_ILI210X is not set
+# CONFIG_TOUCHSCREEN_HIMAX_HX83112B is not set
+# CONFIG_I2C_HID_OF is not set
+# CONFIG_I2C_HID_OF_ELAN is not set
+# CONFIG_RC_CORE is not set
+# CONFIG_IR_SPI is not set
+# CONFIG_LIRC is not set
+# CONFIG_CEC_NXP_TDA9950 is not set
+
+# ---- F. Display [low]: other panels / bridges / old MSM blocks / test drivers
+#      (bound: panel-novatek-nt36523, aw99706, msm dsi/dpu/dp, aux_bridge, aux_hpd_bridge; DP alt-mode kept)
+# CONFIG_DRM_MSM_HDMI is not set
+# CONFIG_DRM_MSM_HDMI_HDCP is not set
+# CONFIG_DRM_MSM_DSI_28NM_PHY is not set
+# CONFIG_DRM_CDNS_DSI is not set
+# CONFIG_DRM_CDNS_DSI_J721E is not set
+# CONFIG_DRM_LONTIUM_LT8713SX is not set
+# CONFIG_DRM_DISPLAY_CONNECTOR is not set
+# CONFIG_DRM_GUD is not set
+# CONFIG_DRM_VGEM is not set
+# CONFIG_DRM_VKMS is not set
+# CONFIG_DRM_PANEL_HIMAX_HX8279 is not set
+# CONFIG_DRM_PANEL_HIMAX_HX83112A is not set
+# CONFIG_DRM_PANEL_HIMAX_HX83112B is not set
+# CONFIG_DRM_PANEL_ILITEK_ILI9882T is not set
+# CONFIG_DRM_PANEL_KHADAS_TS050 is not set
+# CONFIG_DRM_PANEL_NOVATEK_NT36672A is not set
+# CONFIG_DRM_PANEL_NOVATEK_NT36672E is not set
+# CONFIG_DRM_PANEL_NOVATEK_NT37801 is not set
+# CONFIG_DRM_PANEL_RAYDIUM_RM692E5 is not set
+# CONFIG_DRM_PANEL_SAMSUNG_ATNA33XC20 is not set
+# CONFIG_DRM_PANEL_STARTEK_KD070FHFID015 is not set
+# CONFIG_DRM_PANEL_EDP is not set
+# CONFIG_DRM_PANEL_SIMPLE is not set
+# CONFIG_DRM_PANEL_SUMMIT is not set
+# CONFIG_BACKLIGHT_PWM is not set
+# CONFIG_BACKLIGHT_QCOM_WLED is not set
+# CONFIG_BACKLIGHT_GPIO is not set
+
+# ---- G. Media [low]: old video codec, sister sensors not on this board, test drivers
+#      (cameras ARE used and stay: qcom-camss, s5kjns, gc08a8, dw9719, i2c-qcom-cci, mipi-csi2-phy, iris, v4l2/videobuf2;
+#      S5KJN5 and GC08A3 are the sibling sensors from the imported series, not in baldur-camera.dtsi)
+# CONFIG_VIDEO_QCOM_VENUS is not set
+# CONFIG_VIDEO_CADENCE_CSI2RX is not set
+# CONFIG_VIDEO_S5KJN1 is not set
+# CONFIG_VIDEO_S5KJN5 is not set
+# CONFIG_VIDEO_GC08A3 is not set
+# CONFIG_MEDIA_TEST_SUPPORT is not set
+# CONFIG_V4L_TEST_DRIVERS is not set
+# CONFIG_VIDEO_VIMC is not set
+# CONFIG_VIDEO_VIVID is not set
+
+# ---- H. Sound [low]: other boards' machine drivers, other codecs, other vendors' DAIs, Intel/MTK SOF
+#      (bound: snd-sc8280xp card, q6apm/q6prm AudioReach, rx/tx/va/wsa macros, wcd939x + wcd9390 SoundWire,
+#      hdmi-audio-codec for DP, aw882xx out of tree; the legacy q6afe/q6adm/q6asm modules are selected by
+#      SND_SOC_QDSP6 and cannot be switched off separately -- they stay as unloaded modules)
+# CONFIG_SND_PCI is not set
+# CONFIG_SND_SPI is not set
+# CONFIG_SND_SOC_FSL_SSI is not set
+# CONFIG_SND_SOC_FSL_ESAI is not set
+# CONFIG_SND_SOC_IMX_AUDMUX is not set
+# CONFIG_SND_SOC_APQ8016_SBC is not set
+# CONFIG_SND_SOC_MSM8996 is not set
+# CONFIG_SND_SOC_SDM845 is not set
+# CONFIG_SND_SOC_SM8250 is not set
+# CONFIG_SND_SOC_SC7180 is not set
+# CONFIG_SND_SOC_SC7280 is not set
+# CONFIG_SND_SOC_X1E80100 is not set
+# CONFIG_SND_SOC_XILINX_I2S is not set
+# CONFIG_SND_SOC_XILINX_AUDIO_FORMATTER is not set
+# CONFIG_SND_SOC_XILINX_SPDIF is not set
+# CONFIG_SND_SOC_SOF_TOPLEVEL is not set
+# CONFIG_SND_SOC_ADAU7002 is not set
+# CONFIG_SND_SOC_AK4619 is not set
+# CONFIG_SND_SOC_BT_SCO is not set
+# CONFIG_SND_SOC_CS35L41_I2C is not set
+# CONFIG_SND_SOC_ES8326 is not set
+# CONFIG_SND_SOC_ES8328_I2C is not set
+# CONFIG_SND_SOC_MAX98090 is not set
+# CONFIG_SND_SOC_MAX98357A is not set
+# CONFIG_SND_SOC_MAX98927 is not set
+# CONFIG_SND_SOC_MAX98390 is not set
+# CONFIG_SND_SOC_RT5645 is not set
+# CONFIG_SND_SOC_SIMPLE_AMPLIFIER is not set
+# CONFIG_SND_SOC_SIMPLE_MUX is not set
+# CONFIG_SND_SOC_SPDIF is not set
+# CONFIG_SND_SOC_TLV320AIC32X4_I2C is not set
+# CONFIG_SND_SOC_TLV320AIC3X_I2C is not set
+# CONFIG_SND_SOC_WCD937X_SDW is not set
+# CONFIG_SND_SOC_WCD938X_SDW is not set
+# (SND_SOC_WCD937X / WCD938X have no prompt and follow the _SDW symbols above)
+# CONFIG_SND_SOC_WSA883X is not set
+# CONFIG_SND_SOC_WSA884X is not set
+# CONFIG_SND_SOC_MT6357 is not set
+# CONFIG_SND_SOC_NAU8315 is not set
+# CONFIG_SND_AUDIO_GRAPH_CARD2 is not set
+# CONFIG_SND_DUMMY is not set
+# CONFIG_SND_ALOOP is not set
+# CONFIG_SND_SOC_DMIC is not set
+# CONFIG_SND_SOC_WM_ADSP is not set
+
+# ---- I. Sensors / IIO [low]: the tablet's sensors come through the ADSP (fastrpc + hexagonrpcd + iio-sensor-proxy),
+#      /sys/class/iio is empty; only the PMIC ADC5-gen3 (board thermistors) uses IIO and needs no buffers/triggers.
+#      Power-allocator thermal governor: no "sustainable-power" in any DT, step_wise is the default (patch 0069).
+# CONFIG_IIO_ST_LSM6DSX is not set
+# CONFIG_IIO_ST_MAGN_3AXIS is not set
+# CONFIG_VCNL4000 is not set
+# CONFIG_TI_ADS1015 is not set
+# CONFIG_XILINX_XADC is not set
+# CONFIG_IIO_SIMPLE_DUMMY is not set
+# CONFIG_IIO_CONFIGFS is not set
+# CONFIG_IIO_SW_DEVICE is not set
+# CONFIG_IIO_SW_TRIGGER is not set
+# CONFIG_IIO_BUFFER is not set
+# CONFIG_IIO_TRIGGERED_BUFFER is not set
+# CONFIG_IIO_KFIFO_BUF is not set
+# CONFIG_IIO_TRIGGER is not set
+# CONFIG_GPIO_SIM is not set
+# CONFIG_THERMAL_GOV_POWER_ALLOCATOR is not set
+
+# ---- J. Networking [low unless noted]: wired NICs that cannot be on this tablet (lspci: only the WCN7860),
+#      Ethernet PHYs for them, other Wi-Fi/BT vendors, WWAN/NFC/GNSS, VM/container-only netdevs.
+#      KEPT: USB Ethernet adapters (drivers/net/usb, not under ETHERNET), their PHYs (AX88796B/SMSC/MICROCHIP are
+#      selected by the USB drivers), TUN, nftables/iptables-nft, conntrack, policy routing, WireGuard module,
+#      USB Bluetooth dongles (BT_HCIBTUSB), WLAN_VENDOR_ATH + ATH_REG_DYNAMIC_USER_REG_HINTS (baldur.fragment).
+# CONFIG_ETHERNET is not set
+# CONFIG_QCOM_IPA is not set
+# CONFIG_MARVELL_10G_PHY is not set
+# CONFIG_MARVELL_88Q2XXX_PHY is not set
+# CONFIG_AT803X_PHY is not set
+# CONFIG_QCA808X_PHY is not set
+# CONFIG_ROCKCHIP_PHY is not set
+# CONFIG_DP83867_PHY is not set
+# CONFIG_DP83TD510_PHY is not set
+# CONFIG_DP83822_PHY is not set
+# CONFIG_DP83869_PHY is not set
+# CONFIG_DP83TG720_PHY is not set
+# CONFIG_BROADCOM_PHY is not set
+# CONFIG_BCM54140_PHY is not set
+# CONFIG_BCM7XXX_PHY is not set
+# CONFIG_MARVELL_PHY is not set
+# CONFIG_XILINX_GMII2RGMII is not set
+# CONFIG_MDIO_BCM_UNIMAC is not set
+# CONFIG_MDIO_GPIO is not set
+# CONFIG_MDIO_BITBANG is not set
+# CONFIG_MDIO_THUNDER is not set
+# CONFIG_MVMDIO is not set
+# CONFIG_PCS_XPCS is not set
+# CONFIG_PTP_1588_CLOCK is not set
+# CONFIG_PPS is not set
+# CONFIG_ATH11K is not set
+# CONFIG_RSI_91X is not set
+# CONFIG_RTL_CARDS is not set
+# Wi-Fi vendor menus with no driver left under them (menu bools, no code): everything except WLAN_VENDOR_ATH
+# CONFIG_WLAN_VENDOR_ADMTEK is not set
+# CONFIG_WLAN_VENDOR_ATMEL is not set
+# CONFIG_WLAN_VENDOR_BROADCOM is not set
+# CONFIG_WLAN_VENDOR_INTERSIL is not set
+# CONFIG_WLAN_VENDOR_MEDIATEK is not set
+# CONFIG_WLAN_VENDOR_MORSEMICRO is not set
+# CONFIG_WLAN_VENDOR_NXP is not set
+# CONFIG_WLAN_VENDOR_REALTEK is not set
+# CONFIG_WLAN_VENDOR_RSI is not set
+# CONFIG_WLAN_VENDOR_SILABS is not set
+# CONFIG_WLAN_VENDOR_ST is not set
+# CONFIG_WLAN_VENDOR_TI is not set
+# CONFIG_WLAN_VENDOR_ZYDAS is not set
+# CONFIG_WWAN is not set
+# CONFIG_MHI_NET is not set
+# CONFIG_MHI_BUS_PCI_GENERIC is not set
+# CONFIG_NFC is not set
+# CONFIG_GNSS is not set
+# CONFIG_RFKILL_GPIO is not set
+# CONFIG_BT_HCIUART_LL is not set
+# CONFIG_BT_HCIUART_BCM is not set
+# CONFIG_BT_HCIUART_MRVL is not set
+# CONFIG_BT_MRVL is not set
+# CONFIG_BT_QCOMSMD is not set
+# CONFIG_BT_NXPUART is not set
+# CONFIG_QRTR_TUN is not set
+# CONFIG_IP_VS is not set
+# [medium] bridge/vlan/veth/macvlan/vxlan: Docker/libvirt/LXC style networking; Tailscale, NM Wi-Fi hotspot
+#          (NAT + dnsmasq), flatpak/bwrap (--unshare-net: netns + lo only) and Steam do not use them
+# CONFIG_BRIDGE is not set
+# CONFIG_BRIDGE_NETFILTER is not set
+# CONFIG_NF_TABLES_BRIDGE is not set
+# CONFIG_NETFILTER_XT_MATCH_PHYSDEV is not set
+# CONFIG_VLAN_8021Q is not set
+# CONFIG_MACVLAN is not set
+# CONFIG_MACVTAP is not set
+# CONFIG_IPVLAN is not set
+# CONFIG_VXLAN is not set
+# CONFIG_VETH is not set
+# CONFIG_HSR is not set
+# CONFIG_IPV6_SIT is not set
+# CONFIG_NET_SWITCHDEV is not set
+# CONFIG_IP_PNP is not set
+# CONFIG_ROOT_NFS is not set
+# CONFIG_NET_L3_MASTER_DEV is not set
+# CONFIG_NETWORK_SECMARK is not set
+# built-in qdiscs nobody configures (fq_codel is the default and stays =m): keep them loadable
+CONFIG_NET_SCH_HTB=m
+CONFIG_NET_SCH_PRIO=m
+CONFIG_NET_SCH_MULTIQ=m
+
+# ---- K. Android-only / VM-only / dead-LSM / kexec / 32-bit / unused kernel features
+# [medium] binder: only Waydroid/anbox need it; neither is installed (packages, apps), README calls the port
+#          "not feasible". kbuild-y7.sh forced CONFIG_ANDROID_BINDERFS=y "t49 features must survive" -> drop that check.
+# CONFIG_ANDROID_BINDER_IPC is not set
+# CONFIG_ANDROID_BINDERFS is not set
+# [low] Android wakelock/autosleep sysfs API: no user in tb323fu-linux, our tools or systemd (grep)
+# CONFIG_PM_AUTOSLEEP is not set
+# CONFIG_PM_WAKELOCKS is not set
+# [low] brd ramdisk: the initramfs is a cpio, not an initrd image
+# CONFIG_BLK_DEV_RAM is not set
+# [low] SELinux/AppArmor are compiled in but can never run: CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,ipe,bpf",
+#       CMDLINE_FORCE forbids lsm=, the apparmor userspace package is not installed (README y5: "实际 LSM 是 capability,landlock,yama,bpf")
+# CONFIG_SECURITY_SELINUX is not set
+# CONFIG_SECURITY_APPARMOR is not set
+# [low] integrity subsystem without IMA/EVM only creates two empty keyrings
+# CONFIG_INTEGRITY is not set
+# [medium] audit: disabled at runtime (dmesg "audit: initializing netlink subsys (disabled)", journald "Collecting
+#          audit messages is disabled"), no auditd; sudo/sshd/systemd tolerate a kernel without CONFIG_AUDIT
+#          (EPROTONOSUPPORT path). Removes the per-syscall audit hooks and ~100 KB.
+# CONFIG_AUDIT is not set
+# [low] kexec/crash dump: only used for the kexec-from-Android bring-up (baldur-kexec.fragment); kernel install/
+#       rollback goes through the boot slots (tb323fu-ctl), no kexec-tools/kdump packages, no crashkernel= on the cmdline
+# CONFIG_KEXEC is not set
+# CONFIG_KEXEC_FILE is not set
+# CONFIG_CRASH_DUMP is not set
+# [low] AArch32 userspace: the Oryon cores have no 32-bit EL0 (dmesg "CPU features" list has no "32-bit EL0 Support"),
+#       FEX/Proton/Steam are AArch64 processes; frees the compat syscall table, vdso32, kuser helpers
+# CONFIG_COMPAT is not set
+# [low] zswap: compiled in, default off (README y5), zram is the swap device; KSM: ksmd never enabled
+#       (/sys/kernel/mm/ksm/run = 0, README), no qemu use
+# CONFIG_ZSWAP is not set
+# CONFIG_KSM is not set
+
+# ---- L. Debug-only hardware tracing [low]: CoreSight funnel/STM/TMC are bound and loaded today (~275 KB of modules,
+#      lsmod coresight*, stm_core, stm_p_basic) but nothing reads them; our driver debugging uses kprobes/ftrace/debugfs
+# CONFIG_CORESIGHT is not set
+# CONFIG_STM is not set
+
+# ---- M. Filesystems [low]: demote built-ins that are never mounted (mounts: ext4 root, squashfs, tmpfs, fuse.portal;
+#      /proc/filesystems lists f2fs and nfs but nothing uses them; nfs-common is not installed). Kept as =m so a
+#      future `mount -t f2fs/nfs` still works; cifs/btrfs/erofs/iso9660/udf were already =m and stay.
+CONFIG_F2FS_FS=m
+CONFIG_NFS_FS=m
+# NFS=m frees these from vmlinux too (they have prompts, so they would stay =y by inertia)
+CONFIG_RPCSEC_GSS_KRB5=m
+CONFIG_CRYPTO_KRB5=m
+CONFIG_CRYPTO_KRB5ENC=m
+CONFIG_CRYPTO_CAMELLIA=m
+# CONFIG_DNS_RESOLVER stays =y: NFS_USE_KERNEL_DNS (no prompt, y while NFS_V4=m) selects it back; harmless

@@ -1,0 +1,40 @@
+#!/bin/bash
+# Present FEX's x86 guest rootfs at /usr/share/guestos/fex-mesa, the path Steam's FEX compat tool hardcodes
+# (steamapps/common/FEX-Emu/fex-compat-tool: g_fex_rootfs_with_mesa) for x86 Linux games and the x86 Proton chain.
+# Same layout as ArmadaOS' armada-guestos-mount (armada-os/armada packages/fex-rootfs-archlinux): FEX's official
+# ArchLinux image (it carries x86_64/i386 Mesa 26.2 with Turnip and graphics_provider.json), optionally with an
+# x86 Turnip image overlaid on top (Mesa.sqsh, not built yet: only if the image's own Mesa is not good enough).
+set -u
+D=/usr/local/share/y700/guestos
+ROOTFS_SQSH=$D/ArchLinux.sqsh
+MESA_SQSH=$D/Mesa.sqsh
+RUN=/run/y700-guestos            # lower mounts live outside /usr
+TARGET=/usr/share/guestos/fex-mesa
+
+mount_ro() { mountpoint -q "$2" || mount -t squashfs -o ro,loop "$1" "$2"; }
+umount_if() { if mountpoint -q "$1"; then umount "$1"; fi; }
+
+case "${1:-start}" in
+start)
+	[ -f "$ROOTFS_SQSH" ] || exit 0
+	mkdir -p "$TARGET"
+	if [ -f "$MESA_SQSH" ]; then
+		mkdir -p "$RUN/rootfs" "$RUN/mesa"
+		mount_ro "$ROOTFS_SQSH" "$RUN/rootfs" && mount_ro "$MESA_SQSH" "$RUN/mesa" &&
+			{ mountpoint -q "$TARGET" || mount -t overlay overlay -o "lowerdir=$RUN/mesa:$RUN/rootfs" "$TARGET"; } ||
+			{ umount_if "$RUN/mesa"; umount_if "$RUN/rootfs"; exit 1; }
+	else
+		mount_ro "$ROOTFS_SQSH" "$TARGET" || exit 1
+	fi
+	[ -f "$TARGET/graphics_provider.json" ] || { echo "no graphics_provider.json in $TARGET" >&2; exit 1; }
+	;;
+stop)
+	umount_if "$TARGET" || exit 1
+	umount_if "$RUN/mesa" || exit 1
+	umount_if "$RUN/rootfs" || exit 1
+	;;
+*)
+	echo "usage: $0 start|stop" >&2; exit 2
+	;;
+esac
+exit 0

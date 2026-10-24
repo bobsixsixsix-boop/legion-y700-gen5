@@ -1,0 +1,263 @@
+diff --git a/src/plugins/upscale/eligibility.cpp b/src/plugins/upscale/eligibility.cpp
+index d12695a..cca1629 100644
+--- a/src/plugins/upscale/eligibility.cpp
++++ b/src/plugins/upscale/eligibility.cpp
+@@ -282,9 +282,7 @@ static UpscaleRefusal placementRefusal(EffectWindow *window)
+     if (!window->windowItem() || !window->windowItem()->surfaceItem()) {
+         return UpscaleRefusal::NoSurface;
+     }
+-    if (window->screen()->transform() != OutputTransform::Normal) {
+-        return UpscaleRefusal::TransformedOutput;
+-    }
++    // y700: a rotated output is drawn through the viewport projection like a flipped one; not refused.
+     if (!upscaleCoversOutput(window) && !upscaleDrawnOverOutput(window)) {
+         return UpscaleRefusal::NotCoveringOutput;
+     }
+@@ -485,9 +483,7 @@ UpscaleRefusal passRefusal(const RenderTarget &target, const RenderViewport &vie
+     // flip stay refused because nothing has drawn through one: a rotated
+     // output is already refused by its own condition, above.
+     const OutputTransform transform = target.transform();
+-    if (transform != OutputTransform::Normal && transform != OutputTransform::FlipY) {
+-        return UpscaleRefusal::TransformedRenderTarget;
+-    }
++    (void)transform; // y700: rotated targets are allowed, the projection matrix carries the rotation
+     return UpscaleRefusal::None;
+ }
+ 
+diff --git a/src/plugins/upscale/picture.h b/src/plugins/upscale/picture.h
+index d801a21..31478d6 100644
+--- a/src/plugins/upscale/picture.h
++++ b/src/plugins/upscale/picture.h
+@@ -35,6 +35,7 @@ enum class UpscaleGeometry {
+ enum class UpscaleFilter {
+     Fsr,
+     Nearest,
++    Sgsr, // Snapdragon Game Super Resolution 1 (y700)
+ };
+ 
+ /** Where the picture goes on its output, or why it cannot go anywhere. */
+diff --git a/src/plugins/upscale/resolution.h b/src/plugins/upscale/resolution.h
+index e5f054e..dad428d 100644
+--- a/src/plugins/upscale/resolution.h
++++ b/src/plugins/upscale/resolution.h
+@@ -103,7 +103,9 @@ enum class UpscaleSizing {
+ inline bool upscaleSameAspect(UpscaleSize input, UpscaleSize output)
+ {
+     const double difference = std::abs((double(input.width) * output.height) - (double(input.height) * output.width));
+-    return difference <= 0.5 * (double(output.width) + output.height);
++    // y700: the panel is 3040x1904 (not an exact 16:10) and Xwayland lists only standard 16:10 modes,
++    // so a 1% aspect difference (a few pixels of letterbox under Fit) is accepted as the same shape.
++    return difference <= std::max(0.5 * (double(output.width) + output.height), 0.01 * double(input.height) * output.width);
+ }
+ 
+ inline UpscaleSizing upscaleSizing(UpscaleSize input, UpscaleSize output)
+diff --git a/src/plugins/upscale/scaler.cpp b/src/plugins/upscale/scaler.cpp
+index a51e86b..19c75d0 100644
+--- a/src/plugins/upscale/scaler.cpp
++++ b/src/plugins/upscale/scaler.cpp
+@@ -93,11 +93,14 @@ bool UpscaleScaler::initialize()
+     m_rcas = loadShader(QStringLiteral(":/effects/upscale/shaders/sharpen.frag"));
+     m_easuDirect = loadShader(QStringLiteral(":/effects/upscale/shaders/upscale.frag"), true);
+     m_rcasDirect = loadShader(QStringLiteral(":/effects/upscale/shaders/sharpen.frag"), true);
++    m_sgsr = loadShader(QStringLiteral(":/effects/upscale/shaders/sgsr.frag"));
++    m_sgsrDirect = loadShader(QStringLiteral(":/effects/upscale/shaders/sgsr.frag"), true);
+     QImage black(1, 1, QImage::Format_RGB32);
+     black.fill(Qt::black);
+     m_black = GLTexture::upload(black);
+     return m_black && validShader(m_easu.get()) && validShader(m_rcas.get())
+-        && validShader(m_easuDirect.get()) && validShader(m_rcasDirect.get());
++        && validShader(m_easuDirect.get()) && validShader(m_rcasDirect.get())
++        && validShader(m_sgsr.get()) && validShader(m_sgsrDirect.get());
+ }
+ 
+ void UpscaleScaler::setColorUniforms(GLShader *shader, const RenderTarget &target)
+@@ -193,12 +196,14 @@ void UpscaleScaler::bars(const RenderViewport &viewport, const UpscaleRectF &fra
+ // EASU, the enlargement. With sharpening wanted it writes the intermediate
+ // that RCAS then sharpens; otherwise it draws straight to the destination.
+ void UpscaleScaler::scale(const RenderTarget &target, const RenderViewport &viewport, GLTexture *input,
+-                          const UpscaleRectF &destination, const UpscaleRegion &region, double strength)
++                          const UpscaleRectF &destination, const UpscaleRegion &region, UpscaleFilter filter, double strength)
+ {
+     const QSize inputSize = input->size();
+     const QSize outputSize = (destination.size() * viewport.scale()).toSize();
+     const bool direct = upscaleFiltersDirectly(targetColors(target));
+-    GLShader *easu = direct ? m_easuDirect.get() : m_easu.get();
++    // Snapdragon GSR 1 takes the same uniforms and the same place in the pipeline as EASU (y700)
++    GLShader *easu = filter == UpscaleFilter::Sgsr ? (direct ? m_sgsrDirect.get() : m_sgsr.get())
++                                                  : (direct ? m_easuDirect.get() : m_easu.get());
+     const ShaderBinder binder(easu);
+     easu->setUniform("inputSize", QVector2D(float(inputSize.width()), float(inputSize.height())));
+     easu->setUniform("outputSize", QVector2D(float(outputSize.width()), float(outputSize.height())));
+@@ -286,7 +291,7 @@ bool UpscaleScaler::renderTexture(const RenderTarget &target, const RenderViewpo
+ 
+     // The input is opaque. Blending stays off, as set above, also where KWin's
+     // item renderer enabled it for a buffer with an unused alpha channel.
+-    scale(target, viewport, input, destination, region, strength);
++    scale(target, viewport, input, destination, region, drawing.filter, strength);
+     if (strength > 0) {
+         sharpen(target, viewport, destination, region, strength);
+     }
+diff --git a/src/plugins/upscale/scaler.h b/src/plugins/upscale/scaler.h
+index fa33681..1a68b7b 100644
+--- a/src/plugins/upscale/scaler.h
++++ b/src/plugins/upscale/scaler.h
+@@ -65,7 +65,7 @@ private:
+     };
+ 
+     void scale(const RenderTarget &target, const RenderViewport &viewport, GLTexture *input,
+-               const UpscaleRectF &destination, const UpscaleRegion &region, double strength);
++               const UpscaleRectF &destination, const UpscaleRegion &region, UpscaleFilter filter, double strength);
+     void sharpen(const RenderTarget &target, const RenderViewport &viewport,
+                  const UpscaleRectF &destination, const UpscaleRegion &region, double strength);
+     void bars(const RenderViewport &viewport, const UpscaleRectF &frame, const UpscaleRectF &destination,
+@@ -82,6 +82,8 @@ private:
+     std::unique_ptr<GLShader> m_rcas;
+     std::unique_ptr<GLShader> m_easuDirect;
+     std::unique_ptr<GLShader> m_rcasDirect;
++    std::unique_ptr<GLShader> m_sgsr; // Snapdragon GSR 1 (y700)
++    std::unique_ptr<GLShader> m_sgsrDirect;
+     // One black pixel, stretched over each bar.
+     std::unique_ptr<GLTexture> m_black;
+     ItemRenderer *m_renderer;
+diff --git a/src/plugins/upscale/settings.cpp b/src/plugins/upscale/settings.cpp
+index a8ecb8c..3a142e3 100644
+--- a/src/plugins/upscale/settings.cpp
++++ b/src/plugins/upscale/settings.cpp
+@@ -103,6 +103,9 @@ static int geometryValue(const QString &name, int absent)
+ 
+ static QString filterName(int value)
+ {
++    if (value == int(UpscaleFilter::Sgsr)) {
++        return QStringLiteral("SGSR");
++    }
+     return value == int(UpscaleFilter::Nearest) ? QStringLiteral("Nearest") : QStringLiteral("FSR");
+ }
+ 
+@@ -111,6 +114,9 @@ static int filterValue(const QString &name, int absent)
+     if (name == QLatin1String("FSR")) {
+         return int(UpscaleFilter::Fsr);
+     }
++    if (name == QLatin1String("SGSR")) {
++        return int(UpscaleFilter::Sgsr);
++    }
+     return name == QLatin1String("Nearest") ? int(UpscaleFilter::Nearest) : absent;
+ }
+ 
+@@ -208,7 +214,7 @@ static const std::array<UpscaleSettingInfo, upscaleSettingCount> settingTable{{
+     {UpscaleSetting::Sharpening, "Sharpening", UpscaleSettingType::Switch, 0, 1, globalSharpening, nullptr, nullptr},
+     {UpscaleSetting::Strength, "Strength", UpscaleSettingType::Number, 0, 100, globalStrength, nullptr, nullptr},
+     {UpscaleSetting::Geometry, "Geometry", UpscaleSettingType::Choice, 0, 1, globalGeometry, geometryName, geometryValue},
+-    {UpscaleSetting::Filter, "Filter", UpscaleSettingType::Choice, 0, 1, globalFilter, filterName, filterValue},
++    {UpscaleSetting::Filter, "Filter", UpscaleSettingType::Choice, 0, 2, globalFilter, filterName, filterValue},
+     {UpscaleSetting::Osd, "Osd", UpscaleSettingType::Switch, 0, 1, globalOsd, nullptr, nullptr},
+     {UpscaleSetting::OsdDetection, "OsdDetection", UpscaleSettingType::Switch, 0, 1, globalOsdDetection, nullptr, nullptr},
+     {UpscaleSetting::OsdSummary, "OsdSummary", UpscaleSettingType::Switch, 0, 1, globalOsdSummary, nullptr, nullptr},
+@@ -337,7 +343,14 @@ UpscaleGeometry UpscaleSettings::geometry() const
+ 
+ UpscaleFilter UpscaleSettings::filter() const
+ {
+-    return value(UpscaleSetting::Filter) == int(UpscaleFilter::Nearest) ? UpscaleFilter::Nearest : UpscaleFilter::Fsr;
++    switch (value(UpscaleSetting::Filter)) {
++    case int(UpscaleFilter::Nearest):
++        return UpscaleFilter::Nearest;
++    case int(UpscaleFilter::Sgsr):
++        return UpscaleFilter::Sgsr;
++    default:
++        return UpscaleFilter::Fsr;
++    }
+ }
+ 
+ // The global layer as the effect last read it, once it asks for that; see
+diff --git a/src/plugins/upscale/settingtext.cpp b/src/plugins/upscale/settingtext.cpp
+index 688cfe5..1ec5b54 100644
+--- a/src/plugins/upscale/settingtext.cpp
++++ b/src/plugins/upscale/settingtext.cpp
+@@ -112,6 +112,8 @@ QString upscaleSettingChoiceLabel(UpscaleSetting setting, int value)
+             return i18nc("Scaling filter", "FSR 1");
+         case int(UpscaleFilter::Nearest):
+             return i18nc("Scaling filter", "Nearest neighbor");
++        case int(UpscaleFilter::Sgsr):
++            return i18nc("Scaling filter", "Snapdragon GSR 1");
+         default:
+             return QString();
+         }
+diff --git a/src/plugins/upscale/snapshot.cpp b/src/plugins/upscale/snapshot.cpp
+index 774dddd..e752a25 100644
+--- a/src/plugins/upscale/snapshot.cpp
++++ b/src/plugins/upscale/snapshot.cpp
+@@ -278,7 +278,8 @@ static QString wishText(const UpscaleSnapshot &snapshot)
+ // The filter at work, and how the picture lies where it leaves bars.
+ static QString pictureText(const UpscaleSnapshot &snapshot)
+ {
+-    QString filter = snapshot.filter == UpscaleFilter::Nearest ? i18n("Nearest neighbor")
++    QString filter = snapshot.filter == UpscaleFilter::Sgsr ? i18n("Snapdragon GSR 1, sharpening %1%", qRound(snapshot.sharpening * 100))
++                   : snapshot.filter == UpscaleFilter::Nearest ? i18n("Nearest neighbor")
+                                                                : i18n("FSR 1, sharpening %1%", qRound(snapshot.sharpening * 100));
+     if (snapshot.factor > 0) {
+         return i18np("%2, enlarged %1 time", "%2, enlarged %1 times", snapshot.factor, filter);
+diff --git a/src/plugins/upscale/snapshot_headsup.cpp b/src/plugins/upscale/snapshot_headsup.cpp
+index 41ea7a0..996e009 100644
+--- a/src/plugins/upscale/snapshot_headsup.cpp
++++ b/src/plugins/upscale/snapshot_headsup.cpp
+@@ -142,6 +142,9 @@ QString upscaleHeadsUp(const UpscaleSnapshot &snapshot)
+     QStringList picture;
+     if (snapshot.scaling) {
+         QString filter = i18n("FSR 1");
++        if (snapshot.filter == UpscaleFilter::Sgsr) {
++            filter = i18n("SGSR 1");
++        }
+         if (snapshot.filter == UpscaleFilter::Nearest) {
+             filter = i18n("Nearest neighbor");
+         } else if (snapshot.sharpening > 0) {
+diff --git a/src/plugins/upscale/upscale.qrc b/src/plugins/upscale/upscale.qrc
+index dc45cc5..430d53d 100644
+--- a/src/plugins/upscale/upscale.qrc
++++ b/src/plugins/upscale/upscale.qrc
+@@ -6,6 +6,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
+     <qresource prefix="/effects/upscale">
+         <file>shaders/upscale.frag</file>
+         <file>shaders/sharpen.frag</file>
++        <file>shaders/sgsr.frag</file>
+     </qresource>
+     <qresource prefix="/opengl/upscale">
+         <file alias="workingcolor.glsl">shaders/workingcolor.glsl</file>
+diff --git a/src/plugins/upscale/upscaleconfig.kcfg b/src/plugins/upscale/upscaleconfig.kcfg
+index f30f851..ce2a0e2 100644
+--- a/src/plugins/upscale/upscaleconfig.kcfg
++++ b/src/plugins/upscale/upscaleconfig.kcfg
+@@ -45,7 +45,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
+              aspect ratio, 1 enlarges it by a whole number. And how it is
+              sampled: 0 FSR 1, 1 nearest neighbour. A game's entry names them. -->
+         <entry name="Geometry" type="Int"><default>0</default><min>0</min><max>1</max></entry>
+-        <entry name="Filter" type="Int"><default>0</default><min>0</min><max>1</max></entry>
++        <entry name="Filter" type="Int"><default>0</default><min>0</min><max>2</max></entry>
+         <!-- What the global profile says to a program no profile claimed, one
+              answer per way the program can present itself. Auto throughout,
+              so that All games asks every game it answers for in the way that
+diff --git a/src/plugins/upscale/waylandinitial.cpp b/src/plugins/upscale/waylandinitial.cpp
+index c8aae2c..da83a41 100644
+--- a/src/plugins/upscale/waylandinitial.cpp
++++ b/src/plugins/upscale/waylandinitial.cpp
+@@ -75,7 +75,7 @@ void UpscaleWaylandScale::requestInitialSize(Window *window)
+     }
+     // Keep the established high-density route. This path addresses the lower
+     // bound of the integer protocol, rather than changing its rounding policy.
+-    if (std::abs(window->output()->scale() - 1.0) > 0.001 || window->output()->transform() != OutputTransform::Normal) {
++    if (std::abs(window->output()->scale() - 1.0) > 0.001) { // y700: rotated output allowed
+         return;
+     }
+     const UpscaleApplication *claimed = upscaleApplicationForWindow(window);
+diff --git a/src/plugins/upscale/x11resolution.cpp b/src/plugins/upscale/x11resolution.cpp
+index d563eaf..3e8155e 100644
+--- a/src/plugins/upscale/x11resolution.cpp
++++ b/src/plugins/upscale/x11resolution.cpp
+@@ -301,8 +301,7 @@ void UpscaleX11Resolution::schedule(X11Window *window)
+ UpscaleX11Resolution::Request UpscaleX11Resolution::requestFor(X11Window *window, bool enteringFullscreen) const
+ {
+     if (!m_enabled || m_restoring || !kwinApp()->x11Connection() || window->isDeleted()
+-        || window->isUnmanaged() || !window->isNormalWindow() || !window->output()
+-        || window->output()->transform() != OutputTransform::Normal
++        || window->isUnmanaged() || !window->isNormalWindow() || !window->output() // y700: rotated output allowed
+         || upscaleKeepsItsOwnScreen(window)) {
+         return {};
+     }

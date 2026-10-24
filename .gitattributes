@@ -1,0 +1,2 @@
+# Scripts here run on the tablet / Android: keep LF everywhere (CRLF broke the Android switcher scripts once).
+* text=auto eol=lf

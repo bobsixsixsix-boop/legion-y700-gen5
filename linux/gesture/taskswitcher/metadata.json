@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KWin/Effect",
+    "KPlugin": {
+        "Authors": [ { "Name": "Devin Lin (upstream mobiletaskswitcher)", "Email": "devin@kde.org" }, { "Name": "bobsixsixsix-boop", "Email": "304558835+bobsixsixsix-boop@users.noreply.github.com" } ],
+        "Category": "Window Management",
+        "Description": "底边上滑：快划回桌面，停住出多任务卡片，卡片上划关闭（Plasma Mobile 任务切换器 + y700 补丁）",
+        "EnabledByDefault": false,
+        "Icon": "preferences-system-windows",
+        "Id": "y700-taskswitcher",
+        "License": "GPL-2.0-or-later",
+        "Name": "Y700 多任务卡片"
+    },
+    "X-KDE-Ordering": 60,
+    "X-KWin-Border-Activate": true,
+    "X-Plasma-API": "declarativescript"
+}

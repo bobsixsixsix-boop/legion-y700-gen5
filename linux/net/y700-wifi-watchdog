@@ -1,0 +1,54 @@
+#!/bin/sh
+# y700-wifi-watchdog: reload ath12k when the WCN7860 firmware's TX path is stuck.
+#
+# Seen 2026-10-13: an s2idle cycle where the PCIe link failed to enter L2 ("Timeout waiting for L2
+# entry") left the card re-powered with a firmware that could not transmit: every association lasted
+# ~20 s, then "ath12k_wifi7_pci: failed to flush transmit queue, data pkts pending N" and
+# "Connection to AP lost" (reason 4, locally generated), on every band and every AP, for hours.
+# Unloading and reloading ath12k (fresh firmware load) fixed it at once. This runs from a timer every
+# minute: two or more flush failures within the last 3 minutes -> reload. After a reload that worked
+# the next attempt waits 10 minutes; after one that failed, 3 minutes, and from the third failure in a
+# row 10 minutes (the journal keeps the reason; exit 1 makes the unit show as failed).
+# Needs the y700 modprobe install rules (/etc/modprobe.d/y700-ath12k.conf), which pick the right module.
+# The user's radio switch is respected: a Wi-Fi the user turned off is not turned back on.
+# Leaves Wi-Fi alone while CarPlay's access point (LIVI's livi-wifi-ap.service, linux/carplay) has it.
+STAMP=/run/y700-wifi-watchdog.last      # "<epoch> ok" | "<epoch> fail <consecutive failures>"
+now=$(date +%s)
+n=$(journalctl -k --since "-3min" -o cat 2>/dev/null | grep -c "failed to flush transmit queue")
+[ "$n" -ge 2 ] || exit 0
+# The station's disconnect when CarPlay starts can log a flush failure; the AP's own start already reloads ath12k
+# (y700-carplay-ap-settle), and a second reload here takes the interface away under hostapd (10-17 23:20: this
+# script reloaded 1 s after the settle had, and the AP never came up).
+case $(systemctl is-active livi-wifi-ap.service 2>/dev/null) in
+active|activating|deactivating|reloading)
+	echo "stuck TX ($n flush failures) but CarPlay's access point has Wi-Fi, leaving it alone"; exit 0 ;;
+esac
+read -r last state fails 2>/dev/null < "$STAMP" || { last=0; state=ok; fails=0; }
+: "${fails:=0}"
+wait=600; [ "$state" = fail ] && [ "$fails" -lt 3 ] && wait=180
+[ $((now - last)) -ge $wait ] || { echo "stuck TX ($n flush failures) but last reload ($state) was $((now - last)) s ago, waiting"; exit 0; }
+echo "$now fail $((fails + 1))" > "$STAMP"      # provisional: rewritten as ok below when every step checked out
+echo "ath12k TX path stuck ($n flush failures in 3 min): reloading the driver"
+radio=$(nmcli -t -f WIFI radio 2>/dev/null)      # enabled | disabled: restored as it was
+err=""
+if [ "$radio" = enabled ]; then nmcli radio wifi off 2>/dev/null || err="$err; radio off failed"; sleep 2; fi
+modprobe -r ath12k_wifi7 2>/dev/null; modprobe -r ath12k 2>/dev/null
+if lsmod | grep -qE '^ath12k(_wifi7)? '; then err="$err; module still loaded after modprobe -r"; fi
+if ! modprobe ath12k_wifi7 2>/dev/null && ! modprobe ath12k 2>/dev/null; then err="$err; modprobe failed"; fi
+sleep 5
+if [ "$radio" = enabled ]; then nmcli radio wifi on 2>/dev/null || err="$err; radio on failed"; fi
+# the device must come back under NetworkManager (the firmware load takes a few seconds)
+i=0; while ! nmcli -t -f DEVICE,TYPE device 2>/dev/null | grep -q ':wifi$'; do
+	i=$((i + 1)); [ $i -ge 15 ] && { err="$err; no wifi device after reload"; break; }; sleep 1
+done
+notify() { for u in /run/user/1000; do [ -S "$u/bus" ] && sudo -u user env XDG_RUNTIME_DIR="$u" DBUS_SESSION_BUS_ADDRESS="unix:path=$u/bus" \
+	notify-send -a "Y700" -i network-wireless "$1" "$2" 2>/dev/null; done; }
+if [ -n "$err" ]; then
+	echo "reload FAILED${err}"
+	notify "Wi‑Fi 驱动自动重载失败" "固件发送队列卡住，重载驱动没有成功${err}。请手动 \`systemctl restart NetworkManager\` 或重启。"
+	exit 1
+fi
+echo "$now ok" > "$STAMP"
+[ "$radio" = enabled ] && notify "Wi‑Fi 驱动已自动重载" "固件发送队列卡住（通常是睡眠唤醒后），已复位，几秒内会自动重连。" \
+	|| notify "Wi‑Fi 驱动已自动重载" "固件发送队列卡住，驱动已复位；Wi‑Fi 开关按你之前的设置保持关闭。"
+echo "reloaded (radio $radio, device back)"

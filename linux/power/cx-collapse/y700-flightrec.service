@@ -1,0 +1,24 @@
+# /etc/systemd/system/y700-flightrec.service -- flight recorder for the CX-collapse experiments (Rust, linux/power/flightrec/).
+# Writes to /dev/pmsg0 (pstore), /run/y700-flightrec/live.log (tmpfs) and /var/log/y700-flightrec/ (UFS). Runs after
+# systemd-pstore so the previous boot's records are already archived when it copies them aside. See
+# linux/power/cx-collapse/PROTOCOL.md section 2. Cadence: a line every second and fdatasync every 5 lines while an
+# experiment is on (a CX knob set, or between `--mark "<STEP> start"` and `--mark "<STEP> end"`), otherwise a line
+# every 10 s and fdatasync every 6 lines (2026-10-17: the Python recorder at 1 Hz around the clock took 0.57 % of a
+# core with the screen off plus a UFS write every second).
+[Unit]
+Description=y700 flight recorder (cpuidle / genpd / qcom_stats / IRQ deltas to pmsg + tmpfs + UFS; 1 s in experiments, 10 s otherwise)
+After=systemd-pstore.service local-fs.target
+ConditionPathExists=/sys/kernel/debug/pm_genpd
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/y700-flightrec --interval 1 --sync 5 --idle-interval 10 --idle-sync 6 --iface wlp1s0
+Restart=always
+RestartSec=5
+Nice=10
+# a stuck recorder must never hold a reboot
+TimeoutStopSec=5
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

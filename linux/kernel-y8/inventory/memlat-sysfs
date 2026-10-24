@@ -1,0 +1,28 @@
+/sys/class/devfreq/ddr/:
+total 0
+drwxr-xr-x 3 root root    0 Oct 15 03:00 .
+drwxr-xr-x 3 root root    0 Oct 15 03:00 ..
+-r--r--r-- 1 root root 4096 Oct 15 12:35 available_frequencies
+-r--r--r-- 1 root root 4096 Oct 15 12:35 available_governors
+-r--r--r-- 1 root root 4096 Oct 15 11:09 cur_freq
+lrwxrwxrwx 1 root root    0 Oct 15 12:35 device -> ../../../ddr
+-rw-r--r-- 1 root root 4096 Oct 15 11:08 governor
+-rw-r--r-- 1 root root 4096 Oct 15 12:35 max_freq
+-rw-r--r-- 1 root root 4096 Oct 15 12:35 min_freq
+-r--r--r-- 1 root root 4096 Oct 15 12:35 name
+-rw-r--r-- 1 root root 4096 Oct 15 11:10 polling_interval
+drwxr-xr-x 2 root root    0 Oct 15 12:35 power
+lrwxrwxrwx 1 root root    0 Oct 15 03:00 subsystem -> ../../../../../../../../class/devfreq
+-r--r--r-- 1 root root 4096 Oct 15 12:35 target_freq
+-rw-r--r-- 1 root root 4096 Oct 15 11:08 timer
+-rw-r--r-- 1 root root 4096 Oct 15 12:35 trans_stat
+-rw-r--r-- 1 root root 4096 Oct 15 03:00 uevent
+
+/sys/class/devfreq/ddr/device/:
+total 0
+drwxr-xr-x 3 root root    0 Oct 15 03:00 .
+drwxr-xr-x 6 root root    0 Oct 15 03:00 ..
+drwxr-xr-x 3 root root    0 Oct 15 03:00 devfreq
+lrwxrwxrwx 1 root root    0 Oct 15 12:35 driver -> ../../../../../../bus/faux/drivers/faux_driver
+lrwxrwxrwx 1 root root    0 Oct 15 03:00 subsystem -> ../../../../../../bus/faux
+-rw-r--r-- 1 root root 4096 Oct 15 03:00 uevent

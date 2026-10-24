@@ -1,0 +1,20 @@
+# /etc/systemd/system/y700-cx-auto.service -- the runtime CX-collapse E3a level while the panel is off on battery
+# (linux/power/cx-auto/, 2026-10-17). Disarms on screen-on, charger, experiments, stop; disables itself after a boot
+# that ended while armed. `y700-cx-auto --status | --enable | --disable`.
+[Unit]
+Description=y700: CX power collapse (E3a level) while the screen is off on battery, self-disabling after a reset
+After=local-fs.target y700-flightrec.service
+ConditionPathExists=/sys/module/cpuidle_psci_domain/parameters/allow_system_off
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/y700-cx-auto
+# any exit (kill -9, a panic, a stop timeout - before Restart= runs): close the knobs it may have left open
+ExecStopPost=/usr/local/libexec/y700-cx-auto --disarm
+Restart=on-failure
+RestartSec=2
+Nice=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

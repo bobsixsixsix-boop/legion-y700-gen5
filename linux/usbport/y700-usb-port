@@ -1,0 +1,128 @@
+#!/bin/sh
+# y700-usb-port -- route the one USB controller to the connector in use.
+# Local replacement for tb323fu-platform 0.4.2's
+# /usr/libexec/tb323fu/tb323fu-usb-port (original kept next to this file as
+# tb323fu-usb-port.upstream-0.4.2). TB323FU has two USB-C ports on one dwc3:
+# the bottom one (USB 3.2 + DP, ucsi port0, connector 1) and the side one
+# (USB 2.0 only, ucsi port1, connector 2); TLMM gpio30 picks which connector
+# gets the HS lines (low = bottom, high = side). Only port0 is in the DT
+# connector graph, so ucsi sets the controller's role for it; for the side
+# port this script does, from port1's power role.
+#
+# The one change: upstream lets the bottom port win whenever both are in use,
+# so a charger on the bottom port takes the controller away from a gamepad on
+# the side port. Here the bottom port wins only if its partner can do USB
+# data: UCSI GET_CONNECTOR_STATUS partner flag "USB" (bit 21; a PD charger
+# clears it through USB Communications Capable = 0 in its source caps, a PC
+# or dock sets it) and not a BC1.2 dedicated charger ([DCP]). If the flag
+# can't be read, upstream behaviour (bottom wins).
+#
+# Run by 70-tb323fu-usb-port.rules on Type-C partner changes and on every
+# usb_role change (ucsi re-sets the role for port0 on its own events, which
+# would otherwise silently take the side port's host role back), and at boot
+# by tb323fu-usb-port.service (drop-in y700.conf). The role is only written
+# when it differs: writing it raises a usb_role change event even when the
+# value is the same, which would loop.
+#
+# With "boot", also recover the gadget as upstream does: after some forced
+# restarts the UDC stays "not attached" although ucsi has the role at device
+# and a PC is on the port; a none -> device toggle brings it up.
+role=/sys/class/usb_role/a600000.usb-role-switch/role
+usb=/sys/class/power_supply/qcom-battmgr-usb
+ucsi=/sys/kernel/debug/usb/ucsi/pmic_glink.ucsi.0
+state=/run/y700-usb-port.state
+
+# does the bottom port's partner talk USB? (0 = yes / can't tell)
+bottom_has_data() {
+	grep -q '\[DCP\]' $usb/usb_type 2>/dev/null && return 1
+	[ -w $ucsi/command ] || return 0
+	# a PD partner's flags settle with the contract: give it up to 3 s
+	i=0
+	while [ $i -lt 15 ] &&
+	      ! grep -q usb_power_delivery /sys/class/typec/port0/power_operation_mode; do
+		sleep 0.2
+		i=$((i + 1))
+	done
+	echo 0x10012 > $ucsi/command 2>/dev/null || return 0
+	r=$(cat $ucsi/response 2>/dev/null)
+	low=${r#"${r%????????}"}
+	case "$low" in *[!0-9a-fA-F]*|"") return 0 ;; esac
+	v=$((0x$low))
+	# PPM says not connected (stale): don't guess
+	[ $(((v >> 19) & 1)) = 1 ] || return 0
+	[ $(((v >> 21) & 1)) = 1 ]
+}
+
+set_role() {
+	# dwc3 switches modes in a work item and only then reads back the new
+	# role (host exit alone takes ~100 ms): when ucsi has just set it, an
+	# early read still shows the old one and the write would be skipped
+	sleep 1
+	[ "$(cat $role 2>/dev/null)" = "$1" ] || echo "$1" > "$role" 2>/dev/null
+}
+
+route() {
+	chip=$(gpiodetect 2>/dev/null | awk '/\[f100000\.pinctrl\]/ {print $1; exit}')
+	[ -n "$chip" ] || return
+	p0=no; p1=no
+	[ -e /sys/class/typec/port0-partner ] && p0=yes
+	[ -e /sys/class/typec/port1-partner ] && p1=yes
+	why=
+	if [ $p1 = yes ] && [ $p0 = yes ] && ! bottom_has_data; then
+		side=yes
+		why="; bottom partner has no USB data (charger)"
+	elif [ $p0 = yes ] || [ $p1 = no ]; then
+		side=no
+	else
+		side=yes
+	fi
+	if [ $side = no ]; then
+		gpioset -c "$chip" -t0 30=0
+		# port0 empty too: back to the default role, ready for a PC
+		[ $p0 = yes ] || set_role device
+		msg="bottom port (gpio30 low)"
+	else
+		gpioset -c "$chip" -t0 30=1
+		# ucsi reports port1's data role as host even with a PC on it
+		# (non-PD, the tablet sinking), so take the role from the power role
+		case "$(cat /sys/class/typec/port1/power_role)" in
+		*"[sink]"*) r=device ;;
+		*) r=host ;;
+		esac
+		set_role $r
+		msg="side port (gpio30 high), role $r$why"
+	fi
+	# log changes only: usb_role events re-run this often
+	if [ "$(cat $state 2>/dev/null)" != "$msg" ]; then
+		echo "$msg" > $state
+		logger -t tb323fu-usb-port "$msg"
+	fi
+}
+
+(
+	flock -w 15 9 || exit 0
+	route
+) 9> /run/y700-usb-port.lock
+
+[ "$1" = boot ] || exit 0
+udc=/sys/class/udc/a600000.usb/state
+# nothing to recover without a USB host on the cable: don't poll at all
+grep -q '\[\(SDP\|CDP\)\]' $usb/usb_type 2>/dev/null || exit 0
+for i in $(seq 1 15); do
+	[ "$(cat $udc 2>/dev/null)" = "not attached" ] || exit 0
+	sleep 1
+done
+# still not attached: only act when a USB host is actually there, and only
+# while the controller is on the bottom port (PD chargers also read [SDP])
+grep -q '\[\(SDP\|CDP\)\]' $usb/usb_type 2>/dev/null || exit 0
+[ "$(cat $usb/online 2>/dev/null)" = 1 ] || exit 0
+case "$(cat $state 2>/dev/null)" in side*) exit 0 ;; esac
+logger -t tb323fu-usb-port "gadget not attached with a host present: role=$(cat $role)" \
+	"port0 data=$(cat /sys/class/typec/port0/data_role) power=$(cat /sys/class/typec/port0/power_role)" \
+	"partner=$([ -e /sys/class/typec/port0-partner ] && echo yes || echo no)" \
+	"usb_type=$(cat $usb/usb_type) uptime=$(cut -d' ' -f1 /proc/uptime); toggling role"
+echo none > "$role"
+sleep 1
+echo device > "$role"
+sleep 3
+logger -t tb323fu-usb-port "after toggle: udc $(cat $udc)"

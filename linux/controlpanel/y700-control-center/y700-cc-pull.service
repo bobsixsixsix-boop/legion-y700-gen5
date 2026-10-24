@@ -1,0 +1,13 @@
+[Unit]
+Description=y700: pull-down strip of the control centre (right half of the top edge)
+PartOf=graphical-session.target
+After=graphical-session.target plasma-kwin_wayland.service
+
+[Service]
+ExecStart=/usr/local/bin/y700-cc-pull
+Restart=on-failure
+RestartSec=2
+Environment=QT_QPA_PLATFORM=wayland
+
+[Install]
+WantedBy=graphical-session.target

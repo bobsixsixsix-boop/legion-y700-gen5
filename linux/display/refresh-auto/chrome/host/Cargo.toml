@@ -1,0 +1,12 @@
+[package]
+name = "y700-chrome-video-state"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

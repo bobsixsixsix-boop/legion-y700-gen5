@@ -1,0 +1,10 @@
+# /etc/systemd/system/y700-dumpmode-off.timer -- see y700-dumpmode-off.service
+[Unit]
+Description=y700: leave Qualcomm download (crash-dump) mode 3 min after boot
+
+[Timer]
+OnBootSec=3min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

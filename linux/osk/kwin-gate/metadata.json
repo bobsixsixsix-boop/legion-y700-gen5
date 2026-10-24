@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "y700"
+            }
+        ],
+        "Category": "Tools",
+        "Description": "Reports touches and text-input show requests over D-Bus so the y700 on-screen keyboard only comes up when a text field is tapped. Watches only; changes nothing.",
+        "EnabledByDefault": false,
+        "License": "GPL-2.0-or-later",
+        "Name": "y700 on-screen keyboard gate"
+    },
+    "org.kde.kwin.effect": {
+        "internal": true
+    }
+}

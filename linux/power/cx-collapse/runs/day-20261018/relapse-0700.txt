@@ -1,0 +1,22 @@
+20 s: cl0 0.6/s  cl1 10.9/s  sys 0.0/s
+   148.7/s 3949/4105 browser:VizCompositorTh
+    74.3/s 3835/3888 browser:VizCompositorTh
+    17.5/s 3636/3965 browser:claude-desktop
+     9.8/s 3636/3636 browser:claude-desktop
+     6.5/s 4423/4423 browser:claude-desktop
+     4.7/s 3637/3637 browser:chrome
+     2.6/s 4423/4426 browser:ThreadPoolForeg
+     2.6/s 4001/4057 browser:ServiceWorker_t
+     2.5/s 3636/3726 browser:Chrome_IOThread
+     2.5/s 3636/3724 browser:ThreadPoolForeg
+     1.7/s 3637/3752 browser:Chrome_IOThread
+     1.6/s 4005/4061 browser:ServiceWorker_t
+     1.5/s 4034/4086 browser:ServiceWorker_t
+     1.5/s 3986/4035 browser:Chrome_ChildIOT
+     1.4/s 3846/3856 browser:ThreadPoolForeg
+     1.1/s 4423/4427 browser:Chrome_ChildIOT
+     1.1/s 4034/4048 browser:Chrome_ChildIOT
+== claude-desktop children (Claude Code etc.)
+4683 cowork-linux-he
+== journal from claude-desktop / kwin since 06:48 (last 15)
+Oct 18 06:52:59.871655 y700-ubuntu kwin_wayland_wrapper[2752]: js: y700chk56478 false

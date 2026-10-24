@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Y700 控制中心
+Comment=Control centre sheet and the back key of the edge swipe (not a launcher)
+Exec=/usr/local/bin/y700-control-center
+Icon=preferences-system
+NoDisplay=true
+X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input

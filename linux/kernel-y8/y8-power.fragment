@@ -1,0 +1,34 @@
+# y8 power fragment (2026-10-15): the config-level power items from the y8 analysis (see PLAN.md).
+# Applied by kbuild-y8.sh after y8-trim.fragment with scripts/config, then make olddefconfig, then
+# asserted line by line. Every line was accepted by the independent review; expected effects are
+# guesses until y700-powerbench says otherwise - y8 is installed as a trial kernel for that reason.
+#
+# RT tasks no longer pin a CPU to its top frequency (Android's logic): the sysctl
+# kernel.sched_util_clamp_min_rt_default (linux/power/90-y700-uclamp.conf, start at 128, not 0:
+# PipeWire runs the speaker-protection DSP chain) only exists with UCLAMP_TASK. Zero cost until used.
+CONFIG_UCLAMP_TASK=y
+CONFIG_UCLAMP_BUCKETS_COUNT=20
+CONFIG_UCLAMP_TASK_GROUP=y
+# TEO idle governor built in next to menu (rating 19 < 20: menu stays the default); switched for an
+# A/B at runtime: echo teo > /sys/devices/system/cpu/cpuidle/current_governor (what Pixel's init.rc does)
+CONFIG_CPU_IDLE_GOV_TEO=y
+# RCU callbacks offloaded to kthreads on every CPU and batched lazily (call_rcu flushed within ~10 s):
+# fewer grace-period wakeups at idle (ChromeOS: -5..10 % idle package power on x86). Android GKI builds
+# it with LAZY_DEFAULT_OFF; here it is on - dmesg must show "Offload RCU callbacks from CPUs: 0-7".
+CONFIG_RCU_EXPERT=y
+CONFIG_RCU_NOCB_CPU=y
+CONFIG_RCU_NOCB_CPU_DEFAULT_ALL=y
+CONFIG_RCU_LAZY=y
+# CONFIG_RCU_LAZY_DEFAULT_OFF is not set
+# 7.3's LLC-aware balancing is for multi-LLC servers; the two L2 clusters here switch it on (per-tick
+# accounting, 10 ms scans of every multithreaded process) for nothing EAS does not already do
+# CONFIG_SCHED_CACHE is not set
+# every firmware load hashed with SHA-256 unconditionally, only the log line is dyndbg-gated
+# CONFIG_FW_LOADER_DEBUG is not set
+# CoreSight STM protocol glue left without an owner once CORESIGHT is off (y8-trim.fragment section L)
+# CONFIG_STM is not set
+# CONFIG_STM_PROTO_BASIC is not set
+# CONFIG_STM_PROTO_SYS_T is not set
+# a task stuck in D state for 60 s already panics the tablet (BOOTPARAM_HUNG_TASK_PANIC=1): with OTG
+# sticks and FUSE that is too eager - 180 s (detection takes 1-2 periods). The panic itself stays.
+CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=180

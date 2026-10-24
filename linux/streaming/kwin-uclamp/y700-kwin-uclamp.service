@@ -1,0 +1,13 @@
+[Unit]
+Description=uclamp.min floor on KWin's threads (y700-kwin-uclamp)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/y700-kwin-uclamp
+# give KWin its 0 back when the daemon stops (systemctl stop/disable, or it died)
+ExecStopPost=/usr/local/sbin/y700-kwin-uclamp --release
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

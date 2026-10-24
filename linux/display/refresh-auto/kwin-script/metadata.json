@@ -1,0 +1,13 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Id": "y700-refresh-auto",
+        "Name": "Y700 刷新率跟随视频（活动窗口上报）",
+        "Description": "把当前活动窗口（resourceClass、是否全屏）报给 y700-refresh-auto（D-Bus fyi.y700.RefreshAuto.activeWindow）",
+        "Authors": [ { "Name": "bobsixsixsix-boop", "Email": "304558835+bobsixsixsix-boop@users.noreply.github.com" } ],
+        "License": "GPL-3.0-or-later",
+        "Version": "1.0",
+        "EnabledByDefault": true
+    },
+    "X-Plasma-API": "javascript"
+}

@@ -1,0 +1,82 @@
+#!/bin/sh
+# y700-taskswitcher-aptcheck: after every dpkg run (apt's DPkg::Post-Invoke, /etc/apt/apt.conf.d/99y700-taskswitcher,
+# installed by install.sh), check that the INSTALLED task switcher still starts under the KWin / plasma-mobile / Qt
+# that apt just put in place - in a headless test KWin (smoke.sh), never in the live session. (2026-10-23)
+#
+# Why: ~user/.local/share/kwin/effects/y700-taskswitcher is upstream's main.qml from the plasma-mobile it was
+# built against + our patch + our ui/. The live KWin keeps running the code it loaded until the next login, so the
+# first run of our QML under a new KWin / plasma-mobile / Qt would be the next login - and a QML that breaks at load
+# crash-looped the login on 10-21 until SDDM gave up. The README duty ("kwin-wayland / plasma-mobile upgrade: rerun
+# install.sh, re-login, taskswitcher-test.sh") stays a manual step; this automates the part that protects the login.
+#
+# Outcomes (journalctl -t y700-taskswitcher):
+#   - the installed build survives: noted. Whether a rebuild on the new plasma-mobile (install.sh --build) applies and
+#     survives too is checked and noted; when it does not, the owner is notified (keep the installed one, fix the patch).
+#   - it does not survive, while a test KWin without it starts: the effect is switched off FOR THE NEXT LOGIN
+#     (kwinrc y700-taskswitcherEnabled=false; y700-home gets the bottom edge back, i.e. the minimize gesture) and the
+#     owner is notified. Nothing is sent to the live KWin. Undo: fix, rerun install.sh (it switches it back on).
+#   - a test KWin does not start even without the effect: nothing can be told and nothing is changed; logged, notified.
+# Cheap when nothing changed (one dpkg-query against a stamp). Never fails the apt run: always exits 0.
+# --force checks even if the stamp matches; --stamp only records the current versions (install.sh). For tests: Y700_TS_DRYRUN=1 (no kwinrc write, no notification, no
+# stamp), Y700_TS_DST / Y700_TS_SMOKE / Y700_TS_STAMP override the installed copy, smoke.sh and the stamp file.
+SRC=/usr/local/src/y700-gesture/taskswitcher
+U=user; H=/home/$U
+DST=${Y700_TS_DST:-$H/.local/share/kwin/effects/y700-taskswitcher}
+SMOKE=${Y700_TS_SMOKE:-$SRC/smoke.sh}
+STAMP=${Y700_TS_STAMP:-/usr/local/share/y700-gesture/taskswitcher.packages}
+DRY=${Y700_TS_DRYRUN:-}
+PKGS="kwin-wayland plasma-mobile libqt6core6t64 libqt6qml6 libqt6quick6"
+RUN="sudo -u $U env HOME=$H XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
+log() { logger -t y700-taskswitcher "$*" 2>/dev/null; echo "y700-taskswitcher: $*"; }
+notify() {
+	if [ -n "$DRY" ]; then echo "DRYRUN notify: $1 / $2"; return; fi
+	$RUN notify-send -a Y700 -u critical -i dialog-warning "$1" "$2" >/dev/null 2>&1 || true
+}
+stamp() {
+	if [ -n "$DRY" ]; then echo "DRYRUN stamp: $vers"; return; fi
+	mkdir -p "$(dirname "$STAMP")" && echo "$vers" > "$STAMP"
+}
+
+vers=$(dpkg-query -W -f '${Package}=${Version} ' $PKGS 2>/dev/null)
+[ -n "$vers" ] || exit 0
+# install.sh, right after its own smoke test passed on these packages: record them, nothing to check
+[ "${1:-}" = --stamp ] && { stamp; exit 0; }
+[ "$(cat "$STAMP" 2>/dev/null)" = "$vers" ] && [ "${1:-}" != --force ] && exit 0
+# not installed or switched off: nothing at stake
+if [ ! -f "$DST/contents/ui/main.qml" ] || [ "$($RUN kreadconfig6 --file kwinrc --group Plugins --key y700-taskswitcherEnabled 2>/dev/null)" != true ]; then
+	stamp; exit 0
+fi
+log "packages now: $vers- checking the installed task switcher in a test KWin"
+out=$(sh "$SMOKE" "$DST" 2>&1)
+if [ $? -eq 0 ]; then
+	log "installed build survives: $(echo "$out" | tail -n 1)"
+	if dpkg -s plasma-mobile >/dev/null 2>&1 && [ -f "$SRC/install.sh" ]; then
+		T=$(mktemp -d /tmp/y700-tsapt-XXXXXX)
+		if b=$(sh "$SRC/install.sh" --build "$T/b" 2>&1) && r=$(sh "$SMOKE" "$T/b" 2>&1); then
+			log "a rebuild on these packages applies and survives too ($(echo "$r" | tail -n 1)): rerun install.sh, re-login, run taskswitcher-test.sh (README 多任务卡片, 周期性义务)"
+		else
+			log "a rebuild on these packages does NOT work: $(printf '%s\n%s\n' "$b" "${r:-}" | grep -m 2 FAIL | tr '\n' ' ')- keep the installed build, fix y700-taskswitcher.patch / ui/ before rerunning install.sh"
+			notify "多任务卡片：新版上重建不过" "已装的那份在新版 KWin/plasma-mobile 下还能起来，照常用；重装之前要先改补丁（journalctl -t y700-taskswitcher）。"
+		fi
+		rm -rf "$T"
+	fi
+	stamp; exit 0
+fi
+log "installed build FAILS under these packages: $(echo "$out" | grep -m 1 SMOKE_FAIL)"
+echo "$out" | grep '^  |' | while IFS= read -r l; do log "$l"; done
+ctl=$(sh "$SMOKE" --control 2>&1)
+if [ $? -ne 0 ]; then
+	log "a test KWin without the effect does not start either ($(echo "$ctl" | grep -m 1 SMOKE_FAIL)): cannot tell, nothing changed - re-login and watch, or run smoke.sh by hand"
+	notify "多任务卡片：新版 KWin 下没法验证" "测试用的 KWin 起不来，没法确认多任务卡片还能不能用。重新登录前先看 journalctl -t y700-taskswitcher。"
+	stamp; exit 0
+fi
+if [ -n "$DRY" ]; then
+	echo "DRYRUN switch off: kwinrc y700-taskswitcherEnabled=false, Script-y700-home BottomEdge deleted"
+else
+	$RUN kwriteconfig6 --file kwinrc --group Plugins --key y700-taskswitcherEnabled false
+	$RUN kwriteconfig6 --file kwinrc --group Script-y700-home --key BottomEdge --delete
+fi
+log "switched off for the next login (kwinrc y700-taskswitcherEnabled=false, y700-home has the bottom edge again); the live session was not touched. Fix y700-taskswitcher.patch / ui/, rerun install.sh (it switches it back on)"
+notify "多任务卡片已停用（下次登录起）" "它在新版 KWin/plasma-mobile 下起不来，为免登录时崩溃已先关掉，底边回到最小化手势。修好后重跑 install.sh。"
+stamp
+exit 0

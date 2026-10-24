@@ -1,0 +1,49 @@
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -4445,6 +4445,30 @@
+ 	return ret;
+ }
+ 
++static void ath12k_mac_vif_setup_ps(struct ath12k_link_vif *arvif);
++
++/* BSS_CHANGED_PS arrives here (vif-level cfg), not in bss_info_changed: apply it to every link */
++static void ath12k_mac_vif_cfg_ps(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
++{
++	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
++	unsigned long links = ahvif->links_map;
++	struct ath12k_link_vif *arvif;
++	u8 link_id;
++
++	lockdep_assert_wiphy(hw->wiphy);
++
++	if (vif->type != NL80211_IFTYPE_STATION)
++		return;
++
++	ahvif->ps = vif->cfg.ps;
++	for_each_set_bit(link_id, &links, IEEE80211_MLD_MAX_NUM_LINKS) {
++		arvif = wiphy_dereference(hw->wiphy, ahvif->link[link_id]);
++		if (!arvif || !arvif->ar || !arvif->ar->ab->hw_params->supports_sta_ps)
++			continue;
++		ath12k_mac_vif_setup_ps(arvif);
++	}
++}
++
+ void ath12k_mac_op_vif_cfg_changed(struct ieee80211_hw *hw,
+ 				   struct ieee80211_vif *vif,
+ 				   u64 changed)
+@@ -4514,6 +4538,9 @@
+ 			}
+ 		}
+ 	}
++
++	if (changed & BSS_CHANGED_PS)
++		ath12k_mac_vif_cfg_ps(hw, vif);
+ }
+ EXPORT_SYMBOL(ath12k_mac_op_vif_cfg_changed);
+ 
+@@ -15619,3 +15646,5 @@
+ 
+ 	return 0;
+ }
++
++MODULE_VERSION("y700-1041");

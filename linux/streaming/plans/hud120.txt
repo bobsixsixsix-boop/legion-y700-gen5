@@ -1,0 +1,4 @@
+# 10-20: HUD shows Moonlight's FPS (ml-hud-fps.sh on) + a repeat of p120-pace at the owner's
+# current setting (32 Mbps, pacing + vsync as in Moonlight.conf), to compare with 10-19.
+# label codec WxH fps kbps secs ps content [moonlight flags]
+h120-pace-hud    HEVC 1920x1200 120 32000 75 keep dynamic --frame-pacing --vsync

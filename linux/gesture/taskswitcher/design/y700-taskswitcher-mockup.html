@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Y700 多任务卡片</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f4f6; --surface:#ffffff; --ink:#15171a; --ink-2:#5b616b; --ink-3:#6a7079; --line:#e2e4e8;
+  --accent:#2e6bf6; --accent-soft:rgba(46,107,246,.10); --chip:#eceef1;
+  --font:"Noto Sans SC","Noto Sans CJK SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans Mono",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1013; --surface:#16191e; --ink:#eef0f3; --ink-2:#a2a8b2; --ink-3:#7b828d; --line:#262a31;
+    --accent:#5486f8; --accent-soft:rgba(84,134,248,.14); --chip:#1f232a; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1013; --surface:#16191e; --ink:#eef0f3; --ink-2:#a2a8b2; --ink-3:#7b828d; --line:#262a31;
+  --accent:#5486f8; --accent-soft:rgba(84,134,248,.14); --chip:#1f232a; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1280px;margin:0 auto;padding:28px 16px 64px}
+header.top h1{font-size:24px;font-weight:700;margin:0;letter-spacing:.01em}
+header.top p{margin:6px 0 0;color:var(--ink-2);max-width:820px}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:22px 0 14px}
+.group{display:flex;align-items:center;gap:8px}
+.group > .lbl{font-size:13px;color:var(--ink-3)}
+.seg{display:inline-flex;background:var(--chip);border-radius:10px;padding:3px}
+.seg button,.btn{font:inherit;font-size:14px;font-weight:500;border:0;background:transparent;color:var(--ink-2);padding:6px 12px;border-radius:8px;cursor:pointer;min-height:34px;transition:background-color .15s ease,color .15s ease,transform .16s cubic-bezier(.23,1,.32,1)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.btn{background:#2e6bf6;color:#fff;padding:6px 16px}
+.btn.ghost{background:var(--chip);color:var(--ink)}
+.seg button:active,.btn:active{transform:scale(.97)}
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-2);cursor:pointer;user-select:none}
+.toggle input{width:16px;height:16px;accent-color:var(--accent);margin:0}
+
+/* the tablet */
+.stage{display:flex;flex-direction:column;align-items:center}
+.device{background:#0b0c0e;border-radius:30px;padding:14px;box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 20px 50px -30px rgba(0,0,0,.45)}
+.viewport{position:relative;overflow:hidden;border-radius:18px;background:#000}
+.screen{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:default;font-family:var(--font);color:#fff;contain:strict}
+.hint{color:var(--ink-3);font-size:13px;margin:12px 0 0;text-align:center;max-width:860px}
+.note{color:var(--ink-2);font-size:13px;margin:8px 0 0;text-align:center}
+.note:empty{display:none}
+
+/* screen layers */
+.layer{position:absolute;left:0;top:0;width:100%;height:100%}
+.desk{will-change:opacity}
+.desk-blur{opacity:0;will-change:opacity}
+.desk-blur .blurred{position:absolute;inset:0;filter:blur(36px) saturate(150%)}
+.desk-blur .bw{position:absolute;inset:0;transform:scale(1.12)}   /* only the wallpaper is overscanned, so the blur has no soft edge; the icons stay put */
+.desk-blur .shade{position:absolute;inset:0;background:rgba(22,24,30,.30)}
+.wall{position:absolute;inset:0}
+.wall svg{width:100%;height:100%;display:block}
+.dicons{position:absolute;left:28px;top:26px;display:grid;grid-auto-flow:row;gap:18px}
+.dicon{width:92px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:14px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
+.dicon i{width:56px;height:56px;border-radius:14px;display:grid;place-items:center}
+.panel{position:absolute;left:0;right:0;bottom:0;height:52px;background:rgba(18,20,26,.72);display:flex;align-items:center;justify-content:center;gap:14px;border-top:1px solid rgba(255,255,255,.06)}
+.panel i{width:36px;height:36px;border-radius:9px;display:grid;place-items:center}
+.panel .clock{position:absolute;right:18px;font-size:15px;font-weight:500;color:rgba(255,255,255,.88)}
+.panel .launcher{position:absolute;left:14px;opacity:.9}
+
+.stack{transform-origin:0 0;will-change:transform,opacity}
+.card{position:absolute;left:0;top:0;transform-origin:0 50%;will-change:transform,opacity}
+.card .shadow{position:absolute;inset:0;border-radius:18px;box-shadow:-14px 0 40px rgba(0,0,0,.42),0 10px 34px rgba(0,0,0,.20);opacity:0}
+.card .shot{position:absolute;inset:0;border-radius:18px;overflow:hidden;background:#222;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+.card .shot > .a{position:absolute;left:0;top:0;transform-origin:0 0}
+.card .dim{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+.card .head{position:absolute;left:9px;bottom:100%;margin-bottom:10px;display:flex;align-items:center;gap:10px;height:30px;white-space:nowrap}
+.card .head .ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.10) inset}
+.card .head .nm{font-size:16px;font-weight:600;letter-spacing:.01em;text-shadow:0 1px 3px rgba(0,0,0,.35)}
+.card .head .tag{font-size:13px;font-weight:500;color:rgba(255,255,255,.86);background:rgba(255,255,255,.16);border-radius:7px;padding:1px 8px}
+.card .armed{position:absolute;left:50%;bottom:28px;transform:translateX(-50%) scale(.96);opacity:0;background:rgba(255,59,48,.94);color:#fff;font-size:18px;font-weight:600;padding:10px 20px 12px;border-radius:14px;white-space:nowrap;overflow:hidden;transition:opacity .16s cubic-bezier(.33,1,.68,1),transform .16s cubic-bezier(.33,1,.68,1);pointer-events:none}
+.card .armed.on{opacity:1;transform:translateX(-50%) scale(1)}
+.card .armed .bar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:rgba(255,255,255,.55);transform-origin:0 50%}
+.card .armed.on .bar{animation:countdown 3s linear forwards}
+@keyframes countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+
+.chrome{pointer-events:none}
+.clear{position:absolute;left:50%;top:0;transform:translate(-50%,-50%);padding:6px;border:0;background:transparent;font:inherit;color:#fff;cursor:pointer;pointer-events:auto;-webkit-tap-highlight-color:transparent}
+.clear .face{position:relative;height:52px;min-width:52px;border-radius:26px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.16);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;overflow:hidden;transition:background-color .15s ease,border-radius .22s cubic-bezier(.23,1,.32,1),min-width .22s cubic-bezier(.23,1,.32,1),padding .22s cubic-bezier(.23,1,.32,1),transform .16s cubic-bezier(.23,1,.32,1)}
+.clear .face svg{flex:none}
+.clear .lbl{max-width:0;margin-left:0;opacity:0;white-space:nowrap;transition:max-width .22s cubic-bezier(.23,1,.32,1),margin-left .22s cubic-bezier(.23,1,.32,1),opacity .15s ease}
+.clear.armed .face{background:rgba(255,59,48,.94);border-color:rgba(255,255,255,.10);border-radius:14px;min-width:240px;padding:0 22px}
+.clear.armed .lbl{max-width:200px;margin-left:10px;opacity:1}
+.clear:active .face{transform:scale(.94)}
+.glow{position:absolute;width:160px;height:160px;margin:-80px 0 0 -80px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.26),rgba(255,255,255,0));pointer-events:none;opacity:0;transition:opacity .22s ease}
+.glow.on{opacity:1;transition:none}
+.empty{position:absolute;left:0;right:0;text-align:center;font-size:20px;font-weight:600;color:rgba(255,255,255,.78);opacity:0;transition:opacity .2s ease}
+.toast{position:absolute;left:50%;top:34px;transform:translate(-50%,-8px) scale(.96);opacity:0;background:rgba(28,31,38,.96);color:#fff;border-radius:14px;padding:12px 22px;font-size:17px;font-weight:500;white-space:nowrap;transition:opacity .18s cubic-bezier(.33,1,.68,1),transform .18s cubic-bezier(.33,1,.68,1);box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}
+.toast.on{opacity:1;transform:translate(-50%,0) scale(1)}
+.edgebar{position:absolute;left:50%;bottom:9px;width:150px;height:5px;margin-left:-75px;border-radius:3px;background:rgba(255,255,255,.55);box-shadow:0 0 0 1px rgba(0,0,0,.12);transition:opacity .18s ease,background-color .15s ease}
+.edgebar.ink{background:rgba(0,0,0,.5);box-shadow:0 0 0 1px rgba(255,255,255,.2)}   /* on a light app: 3.9 : 1 against #fbfbfc */
+.finger{position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.75);pointer-events:none;opacity:0;transition:opacity .12s ease}
+.finger.on{opacity:1}
+/* 「减弱动效」: the springs jump (Spring.step); these go too, like the keyboard mock-up. The countdown bar stays, it is information */
+.rm .card .armed,.rm .toast,.rm .clear .face,.rm .clear .lbl,.rm .glow,.rm .empty,.rm .edgebar{transition:none!important}
+.rm .card .armed{transform:translateX(-50%)!important}
+.rm .toast{transform:translate(-50%,0)!important}
+.rm .clear:active .face{transform:none}
+
+/* app mock-ups (drawn at full screen size, shrunk into the cards) */
+.a{width:var(--W);height:var(--H);overflow:hidden;font-family:var(--font);line-height:1.5}
+.a .bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;font-size:16px}
+.a-kate{background:#fbfbfc;color:#23262b}
+.a-kate .bar{background:#eef0f3;border-bottom:1px solid #dfe2e6}
+.a-kate .tab{padding:7px 14px;border-radius:8px;color:#5d636c}
+.a-kate .tab.on{background:#fff;color:#1d2025;box-shadow:0 1px 0 #d6d9de}
+.a-kate .code{display:flex;font-family:var(--mono);font-size:21px;line-height:34px;padding-top:12px}
+.a-kate .ln{width:64px;text-align:right;padding-right:18px;color:#a6acb5;flex:none}
+.a-kate .tx{white-space:pre;color:#2a2e35}
+.k-kw{color:#a626a4}.k-ty{color:#1d6fc4}.k-nu{color:#b5631d}.k-st{color:#2f8a3e}.k-cm{color:#9aa0a8}
+.a-konsole{background:#17181b;color:#d8dbe0;font-family:var(--mono);font-size:22px;line-height:36px}
+.a-konsole .bar{background:#202227;border-bottom:1px solid #2b2e34;font-family:var(--font);color:#aeb3bb}
+.a-konsole .term{padding:16px 22px;white-space:pre}
+.a-konsole .p{color:#5ac06f}.a-konsole .ok{color:#62a8ff}
+.a-web{background:#ffffff;color:#1c1f24}
+.a-web .bar{background:#f1f3f5;border-bottom:1px solid #e1e4e8}
+.a-web .url{flex:1;max-width:760px;margin:0 auto;height:34px;border-radius:17px;background:#fff;border:1px solid #dde1e6;display:flex;align-items:center;padding:0 16px;color:#5f6670;font-size:16px}
+.a-web .hero{margin:56px 8% 0;display:flex;flex-direction:column;gap:18px}
+.a-web .hero h2{margin:0;font-size:56px;font-weight:700;letter-spacing:-.01em}
+.a-web .hero p{margin:0;font-size:22px;color:#5b616b;max-width:820px}
+.a-web .grid{margin:40px 8% 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+.a-web .grid div{height:220px;border-radius:14px;background:#eef1f5}
+.a-web .grid div:nth-child(2){background:#e6efff}.a-web .grid div:nth-child(3){background:#eaf6ef}
+.a-wili{background:#141518;color:#e9eaee}
+.a-wili .bar{background:#1b1c20;gap:28px;font-size:18px;color:#9ea3ab}
+.a-wili .bar b{color:#fff;font-weight:600;position:relative}
+.a-wili .bar b::after{content:"";position:absolute;left:0;right:0;bottom:-10px;height:3px;border-radius:2px;background:#f25d8e}
+.a-wili .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px;padding:24px}
+.a-wili .t i{display:block;aspect-ratio:16/10;border-radius:12px}
+.a-wili .t b{display:block;height:16px;border-radius:4px;background:#2b2d33;margin-top:12px;width:92%}
+.a-wili .t s{display:block;height:14px;border-radius:4px;background:#24262b;margin-top:8px;width:56%;text-decoration:none}
+.a-game{background:#0d1024;color:#fff;position:relative}
+.a-game svg{position:absolute;inset:0;width:100%;height:100%}
+.a-game .hud{position:absolute;left:28px;top:22px;display:flex;gap:10px}
+.a-game .hud i{width:26px;height:26px;border-radius:50%;background:#e9eef7;opacity:.92}
+.a-game .hud i.e{background:transparent;box-shadow:0 0 0 2px rgba(233,238,247,.6) inset}
+.a-chat{background:#f6f6f4;color:#22252a;display:flex}
+.a-chat .side{width:300px;flex:none;background:#efefec;border-right:1px solid #e2e2de;padding:22px 16px;display:flex;flex-direction:column;gap:12px}
+.a-chat .side b{display:block;height:18px;border-radius:5px;background:#dcdcd7}
+.a-chat .side b.on{background:#d2d2cc}
+.a-chat .main{flex:1;display:flex;flex-direction:column;padding:36px 8% 28px;gap:22px;min-width:0}
+.a-chat .u{align-self:flex-end;background:#e7e6e1;border-radius:18px;padding:14px 20px;font-size:20px;max-width:70%}
+.a-chat .m{display:flex;flex-direction:column;gap:12px;font-size:20px}
+.a-chat .m b{display:block;height:16px;border-radius:5px;background:#dedcd6}
+.a-chat .in{margin-top:auto;height:76px;border-radius:20px;background:#fff;border:1px solid #e0dfda}
+.a-set{background:#f5f6f8;color:#1e2126;display:flex}
+.a-set .side{width:320px;flex:none;background:#eceef2;padding:20px 14px;display:flex;flex-direction:column;gap:6px;font-size:19px}
+.a-set .side span{padding:10px 14px;border-radius:10px;color:#3e434b}
+.a-set .side span.on{background:#dfe6f7;color:#1f4fc1;font-weight:600}
+.a-set .main{flex:1;padding:30px 5%;display:flex;flex-direction:column;gap:18px;min-width:0}
+.a-set h3{margin:0 0 4px;font-size:28px}
+.a-set .row{background:#fff;border-radius:14px;height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:19px;border:1px solid #e6e8ec}
+.a-set .sw{width:52px;height:30px;border-radius:15px;background:#2e6bf6;position:relative}
+.a-set .sw::after{content:"";position:absolute;right:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff}
+.a-set .sw.off{background:#c9cdd4}.a-set .sw.off::after{right:auto;left:3px}
+.a-files{background:#fafafb;color:#1f2227;display:flex}
+.a-files .side{width:280px;flex:none;background:#f0f1f4;padding:20px 14px;display:flex;flex-direction:column;gap:6px;font-size:18px}
+.a-files .side span{padding:9px 14px;border-radius:10px;color:#40454d}
+.a-files .side span.on{background:#e2e7f3;font-weight:600}
+.a-files .grid{flex:1;padding:30px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:26px 18px;align-content:start;min-width:0}
+.a-files .f{display:flex;flex-direction:column;align-items:center;gap:10px;font-size:17px}
+.a-files .f i{width:96px;height:76px;border-radius:12px;background:#f2b443;position:relative}
+.a-files .f i::before{content:"";position:absolute;left:0;top:-8px;width:40px;height:16px;border-radius:6px 6px 0 0;background:#e9a52f}
+
+/* spec */
+.spec{margin-top:44px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:18px}
+.spec section{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;min-width:0}
+.spec h2{font-size:18px;margin:0 0 10px}
+.spec h3{font-size:15px;margin:16px 0 6px}
+.spec p,.spec li{color:var(--ink-2)}
+.spec ul{margin:6px 0 0;padding-left:20px}
+.spec li{margin:3px 0}
+.spec b{color:var(--ink);font-weight:600}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-weight:600;color:var(--ink-3);font-size:13px}
+td{color:var(--ink)}
+td.wrap{white-space:normal;min-width:180px;color:var(--ink-2)}
+.sw-c{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:6px;box-shadow:0 0 0 1px rgba(0,0,0,.12) inset}
+@media (prefers-reduced-motion:reduce){ .seg button,.btn{transition:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Y700 多任务卡片 · 设计稿</h1>
+    <p>照 vivo OriginOS 手机「堆叠」后台的参数和观感改到平板上（vivo 平板没有堆叠，只有平铺），配色和控件跟控制中心、键盘同一套。下面的平板可以直接用鼠标或手指操作。</p>
+  </header>
+
+  <div class="controls" role="toolbar" aria-label="设计稿控制">
+    <div class="group"><span class="lbl">开始于</span>
+      <div class="seg" id="segStart">
+        <button type="button" data-v="app" aria-pressed="true">应用（Kate）里</button>
+        <button type="button" data-v="desk" aria-pressed="false">桌面</button>
+      </div>
+    </div>
+    <div class="group"><span class="lbl">方向</span>
+      <div class="seg" id="segOrient">
+        <button type="button" data-v="land" aria-pressed="true">横屏</button>
+        <button type="button" data-v="port" aria-pressed="false">竖屏</button>
+      </div>
+    </div>
+    <div class="group"><span class="lbl">速度</span>
+      <div class="seg" id="segSpeed">
+        <button type="button" data-v="1" aria-pressed="true">1×</button>
+        <button type="button" data-v="0.5" aria-pressed="false">½×</button>
+        <button type="button" data-v="0.2" aria-pressed="false">⅕×</button>
+      </div>
+    </div>
+    <button type="button" class="btn" id="demoBtn">演示：上滑停住</button>
+    <button type="button" class="btn ghost" id="resetBtn">重置</button>
+    <label class="toggle"><input type="checkbox" id="fingerChk" checked> 显示触点</label>
+    <label class="toggle"><input type="checkbox" id="reduceChk"> 减弱动效</label>
+  </div>
+
+  <div class="stage">
+    <div class="device"><div class="viewport" id="viewport"><div class="screen" id="screen" tabindex="0" aria-label="平板屏幕，可拖动"></div></div></div>
+    <p class="hint">从屏幕底边那条白线往上拖：<b>停住</b>出卡片，<b>快划</b>回桌面，<b>沿底边横拖</b>直接切到上一个应用。出卡片后：横拖翻卡片，卡片上划关掉，点卡片打开，点空白处回到原来的应用（从桌面进来的就回桌面），键盘 Esc 也一样。</p>
+    <p class="note" id="rmNote"></p>
+  </div>
+
+  <div class="spec" id="spec"></div>
+</div>
+
+<script>
+"use strict";
+/* ---------------- geometry: vivo OriginOS's phone-stack parameters, mapped to 1600x1002 / 1002x1600 ---------------- */
+const SCREENS = { land: { W: 1600, H: 1002, ratio: 0.6, lift: 26 }, port: { W: 1002, H: 1600, ratio: 0.683, lift: 40 } };
+const EXPOSED = 0.7845, EDGE0 = -10, RADIUS = 18, HEAD = 44;
+function geometry(o) {
+  const s = SCREENS[o], cw = s.W * s.ratio, ch = s.H * s.ratio, E = EXPOSED * cw;
+  const X = d => EDGE0 + (E / 27) * (Math.pow(3, 3 - d) - 1) / 2;
+  const xs = [[-2, X(-1) + 1.5 * E], [-1, X(-1)], [0, X(0)], [1, X(1)], [2, X(2)], [3, X(3)], [4, EDGE0]];
+  const top = Math.round((s.H - ch) / 2 - s.lift);
+  // vivo rests the two END cards centred: 3 * int(x0 - centred x) px of scroll, i.e. delta of a card behind slot 0
+  const delta = 3 * Math.trunc(X(0) - (s.W - cw) / 2) / E;
+  return { ...s, o, cw, ch, E, X0: X(0), xs, top, delta, k: 1 / s.ratio, clearY: Math.round(s.H * .904) };
+}
+const T = {   // per depth slot d (0 = front, 1.. behind on the left, -1 newer card on top at the right)
+  scale:  [[-2, 1.032], [-1, 1.016], [0, 1], [1, .984], [2, .968], [3, .953], [4, .953]],
+  dim:    [[-1, 0], [0, 0], [1, .1], [2, .2], [3, .1], [4, 0]],
+  alpha:  [[2, 1], [3, .4], [4, 0]],
+  head:   [[1, 1], [2, .6], [3, 0]],
+  shadow: [[-1, 1], [0, .6], [1, .45], [2, .3], [3, 0]],
+};
+function lin(t, d) {
+  if (d <= t[0][0]) return t[0][1];
+  for (let i = 1; i < t.length; i++) if (d <= t[i][0]) {
+    const [a, va] = t[i - 1], [b, vb] = t[i];
+    return va + (vb - va) * (d - a) / (b - a);
+  }
+  return t[t.length - 1][1];
+}
+function xAt(G, d) {     // piecewise linear like vivo; beyond the last newer slot keep its slope (off screen)
+  const t = G.xs;
+  if (d < t[0][0]) return t[0][1] + (t[0][0] - d) * (t[0][1] - t[1][1]);
+  return lin(t, d);
+}
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+
+/* ---------------- springs (mass 1; k stiffness, zeta damping ratio) ---------------- */
+let REDUCED = false, SPEED = 1;
+class Spring {
+  constructor(v, k = 200, z = 1, eps = 5e-4) { this.v = v; this.t = v; this.vel = 0; this.eps = eps; this.set(k, z); }
+  set(k, z) { this.k = k; this.c = 2 * z * Math.sqrt(k); return this; }
+  to(t, k, z, vel) { this.t = t; if (k) this.set(k, z); if (vel !== undefined) this.vel = vel; kick(); return this; }
+  jump(v) { this.v = this.t = v; this.vel = 0; }
+  step(dt) {
+    if (REDUCED) { this.v = this.t; this.vel = 0; return; }
+    const n = Math.max(1, Math.ceil(dt / 0.002)), h = dt / n;
+    for (let i = 0; i < n; i++) { const a = -this.k * (this.v - this.t) - this.c * this.vel; this.vel += a * h; this.v += this.vel * h; }
+    if (this.rest) { this.v = this.t; this.vel = 0; }
+  }
+  get rest() { return Math.abs(this.v - this.t) < this.eps && Math.abs(this.vel) < this.eps * 20; }
+}
+// the tuned set (the reference's card snap and scroller; settle curve measured from a screen recording of it)
+const K = {
+  scroll: [200, 34 / (2 * Math.sqrt(200))],   // tension 200 friction 34: zeta 1.2, no overshoot, 90 % in ~0.35 s
+  zoom:   [214, 1],                           // enter / leave the card stack, d = 0.62 s duration spring
+  enter:  [214, 1],
+  leave:  [500, 1],                           // back to the desktop: faster than coming in
+  blur:   [1200, 1],                          // background blurs within ~0.1 s
+  back:   [500, .89],                         // a card swiped up but not far enough springs back
+  fly:    [200, .9],                          // a closed card flies off
+  slot:   [260, .83],                         // the stack closes the gap with a small rebound
+  press:  [1600, 1],
+  home:   [420, 1],
+};
+
+/* ---------------- apps ---------------- */
+const ICON = {
+  kate: '<path d="M5 7h14M5 12h10M5 17h12"/>',
+  konsole: '<path d="M5 8l4 4-4 4M12 16h7"/>',
+  web: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.6 2.4 2.6 13.6 0 16M12 4c-2.6 2.4-2.6 13.6 0 16"/>',
+  wili: '<rect x="4" y="6" width="16" height="12" rx="3"/><path d="M10.5 9.5l4 2.5-4 2.5z"/>',
+  game: '<rect x="3" y="8" width="18" height="9" rx="4.5"/><path d="M7.5 10.8v3.4M5.8 12.5h3.4"/><path d="M15.5 11.6h.01M17.6 13.6h.01"/>',
+  chat: '<path d="M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v7a1.5 1.5 0 0 1-1.5 1.5H11l-4 3.2V15h-.5A1.5 1.5 0 0 1 5 13.5z"/>',
+  set: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  files: '<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
+};
+const svgIcon = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+
+const KATE = [
+  ['<span class="k-kw">import</span> QtQuick'],
+  ['<span class="k-kw">import</span> org.kde.kwin <span class="k-kw">as</span> KWinComponents'],
+  [''],
+  ['<span class="k-ty">Item</span> {'],
+  ['    id: root'],
+  ['    <span class="k-kw">property real</span> scroll: <span class="k-nu">0</span>'],
+  ['    <span class="k-kw">property real</span> pitch: <span class="k-nu">0.7845</span> * cardWidth'],
+  [''],
+  ['    <span class="k-cm">// left edge of the card in depth slot d</span>'],
+  ['    <span class="k-kw">function</span> slotX(d) {'],
+  ['        <span class="k-kw">return</span> edge0 + pitch / <span class="k-nu">27</span> * (Math.pow(<span class="k-nu">3</span>, <span class="k-nu">3</span> - d) - <span class="k-nu">1</span>) / <span class="k-nu">2</span>'],
+  ['    }'],
+  [''],
+  ['    <span class="k-ty">Repeater</span> {'],
+  ['        model: tasks'],
+  ['        delegate: <span class="k-ty">Task</span> {'],
+  ['            x: slotX(index - root.scroll)'],
+  ['            scale: slotScale(index - root.scroll)'],
+  ['            z: tasks.count - index'],
+  ['        }'],
+  ['    }'],
+  ['}'],
+];
+const APPS = [
+  { id: 'kate', name: 'Kate', color: '#3d7bf7', light: true, html: () => `<div class="a a-kate"><div class="bar"><span class="tab on">TaskList.qml</span><span class="tab">Task.qml</span><span class="tab">README.md</span></div><div class="code"><div class="ln">${KATE.map((_, i) => i + 1).join('<br>')}</div><div class="tx">${KATE.map(l => l[0]).join('\n')}</div></div></div>` },
+  { id: 'konsole', name: 'Konsole', color: '#2b2f36', html: () => `<div class="a a-konsole"><div class="bar">~ : bash — Konsole</div><div class="term"><span class="p">user@y700-ubuntu:~$</span> y700-checklist\n<span class="ok">OK</span>       内核是我们编的 7.3.0-rc4-tb323fu-t49-y13\n<span class="ok">OK</span>       键盘门卫特效已加载，版本对得上\n<span class="ok">OK</span>       KWin 用的都是当前装着的库和插件\n<span class="ok">OK</span>       没有上一次登录留下的程序\n<span class="ok">OK</span>       多任务卡片就绪\n<span class="p">user@y700-ubuntu:~$</span> ▌</div></div>` },
+  { id: 'web', name: '浏览器', color: '#1fa27a', light: true, html: () => `<div class="a a-web"><div class="bar"><div class="url">kde.org/plasma-desktop</div></div><div class="hero"><h2>Plasma 6.6</h2><p>A modern desktop that stays out of your way, from the laptop to the tablet.</p></div><div class="grid"><div></div><div></div><div></div></div></div>` },
+  { id: 'wili', name: 'wiliwili', color: '#f25d8e', html: () => `<div class="a a-wili"><div class="bar"><b>推荐</b><span>热门</span><span>番剧</span><span>直播</span><span>动态</span></div><div class="tiles">${['#3b4a6b', '#5b3d52', '#2f5a52', '#5a4a2f', '#3a3f5c', '#4f2f3f', '#2f4a5a', '#45503a'].map(c => `<div class="t"><i style="background:${c}"></i><b></b><s></s></div>`).join('')}</div></div>` },
+  { id: 'game', name: 'Steam 游戏', color: '#6b5ce7', game: true, html: () => `<div class="a a-game"><svg viewBox="0 0 1600 1002" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="gs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#11143a"/><stop offset="1" stop-color="#3b2d6b"/></linearGradient></defs><rect width="1600" height="1002" fill="url(#gs)"/><circle cx="1180" cy="230" r="86" fill="#f3e6c4" opacity=".9"/><path d="M0 700 L260 520 L470 640 L720 470 L980 650 L1220 520 L1600 690 L1600 1002 L0 1002Z" fill="#241d4d"/><path d="M0 820 L300 700 L620 790 L900 690 L1250 800 L1600 720 L1600 1002 L0 1002Z" fill="#171437"/><rect x="760" y="752" width="34" height="52" rx="10" fill="#f4f4f8"/><circle cx="777" cy="738" r="16" fill="#f4f4f8"/></svg><div class="hud"><i></i><i></i><i></i><i class="e"></i></div></div>` },
+  { id: 'chat', name: 'Claude', color: '#e0803f', light: true, html: () => `<div class="a a-chat"><div class="side"><b class="on" style="width:82%"></b><b style="width:64%"></b><b style="width:74%"></b><b style="width:58%"></b><b style="width:70%"></b></div><div class="main"><div class="u">多任务卡片做成叠放的，照 vivo 那套</div><div class="m"><b style="width:92%"></b><b style="width:86%"></b><b style="width:64%"></b></div><div class="u">好，叠放就照手机那套参数来</div><div class="m"><b style="width:88%"></b><b style="width:54%"></b></div><div class="in"></div></div></div>` },
+  { id: 'set', name: '系统设置', color: '#6c7686', light: true, html: () => `<div class="a a-set"><div class="side"><span>Wi‑Fi</span><span>蓝牙</span><span class="on">显示与屏幕</span><span>声音</span><span>电源管理</span><span>输入法</span><span>触摸屏</span></div><div class="main"><h3>显示与屏幕</h3><div class="row">刷新率<span>120 Hz</span></div><div class="row">自动旋转<span class="sw"></span></div><div class="row">夜间色温<span class="sw off"></span></div><div class="row">缩放<span>190%</span></div></div></div>` },
+  { id: 'files', name: '文件管理', color: '#f2a93b', light: true, html: () => `<div class="a a-files"><div class="side"><span class="on">主目录</span><span>桌面</span><span>文档</span><span>下载</span><span>回收站</span></div><div class="grid">${['桌面', '文档', '下载', '图片', '音乐', '视频', 'y700', 'Steam'].map(n => `<div class="f"><i></i>${n}</div>`).join('')}</div></div>` },
+];
+
+/* ---------------- desktop ---------------- */
+function wallpaper() {
+  return `<div class="wall"><svg viewBox="0 0 1600 1002" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs>
+  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2a4d"/><stop offset=".55" stop-color="#3e5f86"/><stop offset="1" stop-color="#d79a72"/></linearGradient></defs>
+  <rect width="1600" height="1002" fill="url(#sky)"/>
+  <circle cx="1060" cy="610" r="120" fill="#f1c89a" opacity=".85"/>
+  <path d="M0 640 C180 560 320 600 470 540 C650 470 760 560 930 520 C1110 480 1260 560 1600 500 L1600 1002 L0 1002Z" fill="#2f4766"/>
+  <path d="M0 760 C220 690 420 760 640 700 C860 640 1040 740 1260 690 C1400 660 1500 690 1600 670 L1600 1002 L0 1002Z" fill="#22344f"/>
+  <path d="M0 880 C260 830 520 880 800 840 C1080 800 1320 870 1600 830 L1600 1002 L0 1002Z" fill="#172539"/></svg></div>`;
+}
+function deskHTML() {          // icons + panel; the wallpaper sits under it and never scales
+  const di = [['主目录', '#4a6fb5', 'files'], ['Konsole', '#2b2f36', 'konsole'], ['wiliwili', '#f25d8e', 'wili'], ['Steam', '#3b4c6b', 'game']];
+  return `<div class="dicons">${di.map(([n, c, k]) => `<div class="dicon"><i style="background:${c}">${svgIcon(k, 28)}</i>${n}</div>`).join('')}</div>
+  <div class="panel"><i class="launcher" style="background:rgba(255,255,255,.12)">${svgIcon('set', 20)}</i>${APPS.slice(0, 6).map(a => `<i style="background:${a.color}">${svgIcon(a.id === 'chat' ? 'chat' : a.id, 20)}</i>`).join('')}<span class="clock">17:42</span></div>`;
+}
+
+/* ---------------- state ---------------- */
+const screen = document.getElementById('screen'), viewport = document.getElementById('viewport');
+let G = geometry('land'), START = 'app', VIEW = 1;
+let mode = 'app';          // app | desk | recents | opening | leaving | homing   (+ gesture overlays)
+let gesture = null;        // current pointer interaction
+let cards = [];            // alive cards, newest first (rank = index)
+let flying = [];           // cards on their way off screen
+let focusCard = null;      // the app on screen in mode 'app'
+let originCard = null;     // the app the cards were opened from (null = from the desktop)
+let openTarget = null;     // card being opened
+const s = new Spring(0, ...K.scroll, 5e-4);   // scroll position, in cards
+const z = new Spring(1, ...K.zoom, 5e-4);     // 1 = the focused card fills the screen, 0 = a card in the stack
+const e = new Spring(1, ...K.enter, 5e-4);    // 1 = stack in place, 0 = stack sunk into the depth on the left (desktop)
+const b = new Spring(0, ...K.blur, 5e-4);     // background: 0 sharp desktop, 1 blurred + 30 % #16181E
+const h = new Spring(0, ...K.home, 5e-4);     // going home from an app: the card shrinks and fades
+const lift = new Spring(0, 500, 1, .3);       // the stack follows an edge drag a little while open
+const anc = new Spring(0, ...K.zoom, .05);    // x of the card the zoom is anchored on (the app on screen, or the one opening)
+const pj = new Spring(0, ...K.scroll, 5e-4);  // eases the looks over when the card count changes (propS depends on it)
+let zTop = 0;                                 // stacking = recency: newest on top, a closed card keeps its place while it flies
+let timers = [];                              // delayed steps, cleared by reset
+const later = (fn, ms) => { const id = setTimeout(() => { timers = timers.filter(x => x !== id); fn(); }, ms); timers.push(id); };
+
+function restS(i) {            // scroll value at rest with card i in front: the two end cards rest centred, like vivo
+  const n = cards.length, d = G.delta;
+  if (n <= 1 || i <= 0) return -d;
+  if (i >= n - 1) return n - 1 - d;
+  return i;
+}
+function idxAt(v) {            // the card whose resting scroll is nearest (the two end rests sit off the integers)
+  let k = 0;
+  for (let i = 1; i <= maxS(); i++) if (Math.abs(restS(i) - v) < Math.abs(restS(k) - v)) k = i;
+  return k;
+}
+function propS(v) {            // like vivo: the looks hold still over the end segment, so a centred end card keeps the front look
+  const n = cards.length, d = G.delta;
+  if (n <= 1) return v + d;
+  if (v < -d) return -1 + (v + 1) / (1 - d);
+  if (v <= 0) return 0;
+  if (v >= n - 2 && v <= n - 1 - d) return n - 2 + (v - (n - 2)) / (1 - d);
+  if (v > n - 1 - d && v <= n - 1) return n - 1;
+  return v;
+}
+function anchorX() {           // where the anchor card rests in the stack
+  const c = openTarget || focusCard, i = c ? cards.indexOf(c) : -1;
+  return i < 0 ? xAt(G, G.delta) : xAt(G, i - restS(i));
+}
+function labelAlpha(dp) {      // vivo names the front card only: it keeps the name until 70 % of the way out; the next one fades in
+  if (dp > -1 && dp <= 0) return -dp < .7 ? 1 : 1 - (-dp - .7) / .3;
+  if (dp > 0 && dp < 1) return 1 - dp;
+  return 0;
+}
+function nameAlpha(c, dp) {    // vivo also keeps the newest card's name at its end, and the newer card's lying on the oldest one
+  const i = cards.indexOf(c), n = cards.length;
+  if (i === 0 && s.v < 0) return 1;
+  if (n >= 2 && i === n - 2 && s.v >= n - 2) return 1;
+  return labelAlpha(dp);
+}
+let els = {}, clearArmed = 0, clearTimer = 0, toastTimer = 0;
+
+function buildScreen() {
+  const { W, H } = G;
+  screen.style.width = W + 'px'; screen.style.height = H + 'px';
+  screen.style.setProperty('--W', W + 'px'); screen.style.setProperty('--H', H + 'px');
+  screen.innerHTML = `
+    <div class="layer">${wallpaper()}</div>
+    <div class="layer desk">${deskHTML()}</div>
+    <div class="layer desk-blur"><div class="blurred"><div class="bw">${wallpaper()}</div>${deskHTML()}</div><div class="shade"></div></div>
+    <div class="layer stack"></div>
+    <div class="layer chrome">
+      <div class="empty">无近期应用</div>
+      <button type="button" class="clear" aria-label="全部关闭"><span class="face"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lbl">再点一次全部关闭</span><span class="glow"></span></span></button>
+      <div class="toast" role="status"></div>
+    </div>
+    <div class="edgebar"></div>
+    <div class="finger"></div>`;
+  els = {
+    desk: screen.querySelector('.desk'), blur: screen.querySelector('.desk-blur'), stack: screen.querySelector('.stack'),
+    empty: screen.querySelector('.empty'), clear: screen.querySelector('.clear'), glow: screen.querySelector('.glow'),
+    toast: screen.querySelector('.toast'), edge: screen.querySelector('.edgebar'), finger: screen.querySelector('.finger'),
+  };
+  els.empty.style.top = (G.top + G.ch / 2 - 16) + 'px';
+  els.clear.style.top = G.clearY + 'px';
+  els.clear.addEventListener('pointerdown', ev => { ev.stopPropagation(); glowAt(ev); });
+  els.clear.addEventListener('click', ev => { ev.stopPropagation(); onClear(); });
+  fit();
+}
+function makeCard(app) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.style.width = G.cw + 'px'; el.style.height = G.ch + 'px';
+  el.innerHTML = `<div class="shadow"></div><div class="head"><span class="ico" style="background:${app.color}">${svgIcon(app.id === 'chat' ? 'chat' : app.id)}</span><span class="nm">${app.name}</span>${app.game ? '<span class="tag">防误关</span>' : ''}</div><div class="shot">${app.html()}<div class="dim"></div></div><div class="armed">再上划一次才会关掉<span class="bar"></span></div>`;
+  const shot = el.querySelector('.shot'), a = shot.firstElementChild;
+  a.style.transform = `scale(${G.ratio})`;
+  els.stack.appendChild(el);
+  return {
+    app, el, shot, head: el.querySelector('.head'), nm: el.querySelector('.nm'), tag: el.querySelector('.tag'), dimEl: el.querySelector('.dim'),
+    shadow: el.querySelector('.shadow'), armedEl: el.querySelector('.armed'),
+    slot: new Spring(0, ...K.slot, 5e-4), ty: new Spring(0, ...K.back, .3), press: new Spring(1, ...K.press, 5e-4),
+    fade: 1, armed: 0, armTimer: 0, rect: null,
+  };
+}
+function reset(start = START) {
+  START = start; timers.forEach(clearTimeout); timers = []; clearTimeout(clearTimer); clearArmed = 0; els.clear && els.clear.classList.remove('armed');
+  buildScreen();
+  cards = APPS.map(makeCard); flying = [];
+  cards.forEach((c, i) => { c.slot.jump(i); c.zk = cards.length - i; }); zTop = cards.length;
+  gesture = null; openTarget = null; holdAll(false);
+  if (start === 'app') { mode = 'app'; focusCard = cards[0]; originCard = null; s.jump(restS(0)); z.jump(1); e.jump(1); b.jump(0); }
+  else { mode = 'desk'; focusCard = null; originCard = null; s.jump(restS(0)); z.jump(0); e.jump(0); b.jump(0); }
+  h.jump(0); lift.jump(0); pj.jump(0); anc.jump(anchorX());
+  render(); kick();
+}
+
+/* ---------------- transitions ---------------- */
+function rerank() { cards.forEach((c, i) => c.slot.to(i)); }
+function maxS() { return Math.max(0, cards.length - 1); }
+function enterRecentsFromApp(vz = 0, vs = 0) {     // the app shrank into its card; settle into the stack
+  mode = 'recents';
+  z.to(0, ...K.zoom, vz);
+  s.to(restS(idxAt(s.v)), ...K.scroll, vs);
+  b.to(1, ...K.blur); e.to(1, ...K.enter);
+}
+function openRecentsFromDesk(ve = 0) {
+  mode = 'recents'; originCard = null;
+  e.to(1, ...K.enter, ve); s.to(restS(idxAt(s.v)), ...K.scroll); b.to(1, ...K.blur); z.to(0, ...K.zoom);   // caught on its way out: keep the card it was on
+}
+function disarmAll() {                 // a confirmation never outlives the card screen it was given on
+  clearTimeout(clearTimer); clearArmed = 0; els.clear.classList.remove('armed');
+  for (const c of cards.concat(flying)) { clearTimeout(c.armTimer); c.armed = 0; c.armedEl.classList.remove('on'); }
+}
+function openCard(c, vs) {             // tap, quick switch, or "close the cards = back to where I was"
+  disarmAll();
+  if (!c) return leaveToDesk();
+  mode = 'opening'; openTarget = c;
+  s.to(restS(cards.indexOf(c)), ...K.scroll, vs); z.to(1, ...K.zoom); e.to(1, ...K.enter);
+}
+function dismiss() {                   // leave without choosing
+  if (mode !== 'recents') return;
+  if (originCard && cards.includes(originCard)) openCard(originCard);
+  else leaveToDesk();
+}
+function leaveToDesk() {
+  disarmAll(); mode = 'leaving'; openTarget = null;
+  e.to(0, ...K.leave); b.to(0, ...K.leave); z.to(Math.min(z.v, 0), ...K.leave);
+}
+function goHomeFromApp() {             // fast flick up from an app
+  disarmAll(); mode = 'homing';
+  h.to(1, ...K.home); b.to(0, ...K.home);
+}
+function settle() {                    // called each frame after the springs: finish transitions
+  if (mode === 'opening' && openTarget && z.rest && Math.abs(s.v - s.t) < .004) {
+    const c = openTarget, ci = cards.indexOf(c);
+    if (ci < 0) { openTarget = null; leaveToDesk(); return; }      // closed on the way (defensive)
+    cards.splice(ci, 1); cards.unshift(c); c.zk = ++zTop;         // KWin re-sorts by last activation
+    cards.forEach((x, i) => x.slot.jump(i));
+    focusCard = c; originCard = null; openTarget = null; mode = 'app'; b.jump(0);
+    s.jump(restS(0)); pj.jump(0); anc.jump(anchorX());            // same picture: the app fills the screen either way
+  } else if (mode === 'leaving' && e.rest && b.rest) {
+    mode = 'desk'; focusCard = null; originCard = null; z.jump(0); s.jump(restS(0)); pj.jump(0);
+  } else if (mode === 'homing' && h.rest) {
+    mode = 'desk'; focusCard = null; originCard = null; h.jump(0); z.jump(0); e.jump(0); s.jump(restS(0)); pj.jump(0);
+  }
+}
+
+/* ---------------- closing cards ---------------- */
+function closeCard(c, v = -2600) {
+  const i = cards.indexOf(c);
+  if (i < 0) return;
+  const p0 = propS(s.v) + pj.v, sh = i < idxAt(s.t) ? 1 : 0;
+  if (sh) {                      // a newer card went: renumber everything by one without moving anything on screen
+    cards.concat(flying).forEach(x => { x.slot.v -= 1; x.slot.t -= 1; }); s.v -= 1; s.t -= 1;
+  }
+  cards.splice(i, 1); flying.push(c);
+  c.ty.to(-(G.top + G.ch + 80), ...K.fly, Math.min(v, -1800));
+  rerank();                      // the cards behind (or the newer ones, see above) slide over to close the gap
+  pj.jump(p0 - sh - propS(s.v)); pj.to(0, ...K.scroll);          // the looks carry on from where they were
+  if (cards.length) s.to(restS(idxAt(s.t)), ...K.scroll);
+  if (c === originCard) originCard = null;
+  if (c === openTarget) { openTarget = null; leaveToDesk(); }
+  if (!cards.length) later(() => { if (mode === 'recents' && !cards.length) leaveToDesk(); }, REDUCED ? 0 : 600);   // vivo: 「无近期应用」, then out
+}
+function arm(c) {
+  c.armed = 1; c.armedEl.classList.remove('on'); void c.armedEl.offsetWidth; c.armedEl.classList.add('on');
+  clearTimeout(c.armTimer);
+  c.armTimer = setTimeout(() => { c.armed = 0; c.armedEl.classList.remove('on'); }, 3000);
+}
+function onClear() {
+  if (mode !== 'recents' || gesture) return;
+  if (!clearArmed) {
+    clearArmed = 1; els.clear.classList.add('armed');
+    clearTimer = setTimeout(() => { clearArmed = 0; els.clear.classList.remove('armed'); }, 3000);
+    return;
+  }
+  clearTimeout(clearTimer); clearArmed = 0; els.clear.classList.remove('armed');
+  const keep = cards.filter(c => c.app.game), victims = cards.filter(c => !c.app.game);
+  const p0 = propS(s.v) + pj.v;
+  // renumber so the card that stays in front keeps its place on screen: it only slides to the centre, no fling across the stack
+  const f = keep.reduce((a, c) => !a || Math.abs(c.slot.t - s.t) < Math.abs(a.slot.t - s.t) ? c : a, null);
+  const off = f ? f.slot.t - keep.indexOf(f) : 0;
+  cards.concat(flying).forEach(x => { x.slot.v -= off; x.slot.t -= off; }); s.v -= off; s.t -= off;
+  for (const c of victims) {     // all in the same frame, translate only (vivo)
+    flying.push(c); c.ty.to(-(G.top + G.ch + 80), 900, 1, -5200);
+    if (c === originCard) originCard = null;
+  }
+  cards = keep;
+  rerank(); pj.jump(p0 - off - propS(s.v)); pj.to(0, ...K.scroll);
+  if (cards.length) { s.to(restS(cards.indexOf(f)), ...K.scroll); toast('游戏卡片留着：要关就在卡片上划两次'); }
+  else later(() => { if (mode === 'recents' && !cards.length) leaveToDesk(); }, REDUCED ? 0 : 600);
+  kick();
+}
+function toast(msg) {
+  els.toast.textContent = msg; els.toast.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => els.toast.classList.remove('on'), 2600);
+}
+function glowAt(ev) {
+  const r = els.clear.querySelector('.face').getBoundingClientRect();
+  els.glow.style.left = (ev.clientX - r.left) / VIEW + 'px'; els.glow.style.top = (ev.clientY - r.top) / VIEW + 'px';
+  els.glow.classList.add('on');
+  const off = () => { els.glow.classList.remove('on'); window.removeEventListener('pointerup', off); window.removeEventListener('pointercancel', off); };
+  window.addEventListener('pointerup', off); window.addEventListener('pointercancel', off);
+}
+
+/* ---------------- render ---------------- */
+function layerXf() {                    // the zoom that maps the anchor card onto the whole screen
+  const zz = z.v, L = 1 + (G.k - 1) * zz;
+  return { L, tx: -anc.v * G.k * zz, ty: -G.top * G.k * zz };
+}
+function cardGeom(c, sEff, pEff, zc) {   // d places the card, dp picks its looks (they differ only at the two ends)
+  const d = c.slot.v - sEff, dp = c.slot.v - pEff;
+  let x = xAt(G, d);
+  if (d < 0) x = anc.v + (x - anc.v) * (1 + .35 * zc);   // newer cards pushed off to the right while zoomed in
+  const sc = lin(T.scale, dp) * c.press.v;
+  return { d, dp, x, sc };
+}
+function render() {
+  const { L, tx, ty } = layerXf();
+  const zc = clamp(z.v), ev = clamp(e.v), hv = h.v;
+  const sEff = s.v - 3 * (1 - e.v), pEff = propS(s.v) + pj.v - 3 * (1 - e.v);
+  const inApp = mode === 'app' && !gesture;
+  // background
+  const bv = clamp(b.v);
+  els.blur.style.opacity = bv.toFixed(3);
+  els.desk.style.opacity = (1 - bv).toFixed(3);
+  // stack layer
+  const hs = 1 - .22 * hv;
+  els.stack.style.transform = `translate(${(tx * hs + G.W * (1 - hs) / 2).toFixed(2)}px,${(ty * hs + G.H * (1 - hs) * .62 + lift.v).toFixed(2)}px) scale(${(L * hs).toFixed(5)})`;
+  els.stack.style.opacity = (1 - hv).toFixed(3);
+  const all = cards.concat(flying);
+  for (const c of all) {
+    const { d, dp, x, sc } = cardGeom(c, sEff, pEff, zc);
+    const isFocus = c === (openTarget || focusCard) || (mode !== 'recents' && zc > .02 && Math.abs(d) < .5);
+    const hide = inApp && c !== focusCard;
+    let alpha = lin(T.alpha, dp) * c.fade;
+    if (e.v < 1) alpha *= clamp(e.v * 1.4);
+    const y = G.top + c.ty.v;
+    c.el.style.transform = `translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0) scale(${sc.toFixed(5)})`;
+    c.el.style.opacity = hide ? '0' : alpha.toFixed(3);          // a card swiped or flying off only moves, it doesn't fade (vivo)
+    c.hidden = hide || alpha <= 0.001;
+    c.el.style.visibility = c.hidden ? 'hidden' : 'visible';
+    c.el.style.zIndex = String(c.zk);
+    c.dimEl.style.opacity = (lin(T.dim, dp) * (1 - zc)).toFixed(3);
+    const headA = lin(T.head, dp) * clamp(1 - zc * 1.8);
+    c.head.style.opacity = headA.toFixed(3);
+    c.nm.style.opacity = nameAlpha(c, dp).toFixed(3);
+    if (c.tag) c.tag.style.opacity = c.nm.style.opacity;        // 「防误关」 goes with the name
+    c.shadow.style.opacity = (lin(T.shadow, dp) * (1 - zc)).toFixed(3);
+    const r = isFocus ? RADIUS * (1 - zc) / Math.max(1, L) : RADIUS;
+    c.shot.style.borderRadius = c.shadow.style.borderRadius = r.toFixed(2) + 'px';
+    // screen-space rect for hit testing (shot + header)
+    const top = y + G.ch * (1 - sc) / 2, w = G.cw * sc, hh = G.ch * sc;
+    c.rect = { l: x * L + tx, t: (top - HEAD * sc) * L + ty, r: (x + w) * L + tx, b: (top + hh) * L + ty, z: c.zk };
+  }
+  // chrome
+  const rv = mode === 'recents' || mode === 'opening' || mode === 'leaving' || (gesture && (gesture.kind === 'edgeApp' || gesture.kind === 'edgeDesk'));
+  const ca = rv ? clamp((1 - zc) * 1.4 - .2) * clamp(ev * 1.6 - .4) : 0;
+  els.clear.style.opacity = (cards.length ? ca : 0).toFixed(3);
+  els.clear.style.pointerEvents = mode === 'recents' && cards.length ? 'auto' : 'none';
+  els.clear.style.visibility = ca > 0.01 && cards.length ? 'visible' : 'hidden';
+  els.empty.style.opacity = mode === 'recents' && !cards.length ? '1' : '0';
+  els.edge.style.opacity = (mode === 'app' || mode === 'desk') && !gesture ? '1' : '0';
+  els.edge.classList.toggle('ink', mode === 'app' && !!focusCard && !!focusCard.app.light);
+}
+
+/* ---------------- frame loop ---------------- */
+let raf = 0, last = 0;
+function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000) * SPEED; last = now;
+  anc.t = anchorX();                                          // the zoom anchor follows the card it is anchored on
+  const springs = [s, z, e, b, h, lift, anc, pj];
+  for (const c of cards.concat(flying)) springs.push(c.slot, c.ty, c.press);
+  springs.forEach(sp => { if (!sp.held) sp.step(dt); });     // a value the finger holds doesn't move on its own
+  flying = flying.filter(c => { if (c.ty.v <= c.ty.t + 2 || c.ty.rest) { c.el.remove(); return false; } return true; });
+  settle();
+  render();
+  const busy = gesture || springs.some(sp => !sp.rest) || flying.length || demo;
+  raf = busy ? requestAnimationFrame(frame) : 0;
+}
+
+/* ---------------- input ---------------- */
+function pt(ev) { const r = screen.getBoundingClientRect(); return { x: (ev.clientX - r.left) / VIEW, y: (ev.clientY - r.top) / VIEW, t: performance.now() }; }
+function velocity(g) {        // px/ms over the last 70 ms; 0 when the finger has rested 60 ms (no stale flick)
+  const p = g.samples, n = p.length - 1, now = performance.now();
+  if (n < 1 || now - p[n].t > 60) return { x: 0, y: 0 };
+  let i = n; while (i > 0 && p[n].t - p[i - 1].t < 70) i--;
+  const dt = Math.max(1, p[n].t - p[i].t);
+  return { x: (p[n].x - p[i].x) / dt, y: (p[n].y - p[i].y) / dt };
+}
+function hitCard(p) {
+  let best = null;
+  for (const c of cards) { const r = c.rect; if (r && !c.hidden && p.x >= r.l && p.x <= r.r && p.y >= r.t && p.y <= r.b && (!best || r.z > best.rect.z)) best = c; }
+  return best;
+}
+const holdAll = on => [s, z, e, b, anc].forEach(sp => { sp.held = on; if (on) sp.vel = 0; });
+function down(p) {
+  const edge = p.y > G.H - Math.max(40, 24 / VIEW);           // at least 24 css px to aim at when the mock-up is shown small
+  const g = { start: p, last: p, samples: [p], kind: null, card: null, moved: false };
+  if (edge && mode === 'homing') {       // caught on its way home: it is the desktop now, and the edge drag starts from there
+    h.jump(0); z.jump(0); e.jump(0); b.jump(0); s.jump(restS(0)); pj.jump(0); focusCard = null; originCard = null; mode = 'desk';
+  }
+  if (edge && (mode === 'app' || mode === 'desk' || mode === 'opening' || mode === 'leaving')) {
+    if (mode === 'opening' || mode === 'app') {            // catch it mid-flight too (first-frame interruptible)
+      g.kind = 'edgeApp';
+      if (mode === 'opening' && openTarget) { focusCard = openTarget; openTarget = null; }
+      originCard = focusCard; mode = 'gesture';
+      g.z0 = z.v; g.s0 = s.v; holdAll(true); h.jump(0);
+    } else {
+      g.kind = 'edgeDesk'; mode = 'gesture'; originCard = null; g.e0 = clamp(e.v); g.s0 = s.v; z.jump(0); h.jump(0); holdAll(true);   // caught leaving: keep its card
+    }
+  } else if (edge && mode === 'recents') {
+    g.kind = 'edgeRecents';
+  } else if (mode === 'recents' || mode === 'leaving') {
+    g.caught = mode === 'leaving' || Math.abs(s.vel) > .5;      // a tap that stops the motion is not a click
+    if (mode === 'leaving') { mode = 'recents'; e.to(1, ...K.enter); b.to(1, ...K.blur); }
+    g.card = hitCard(p); g.kind = 'pending'; g.s0 = s.v;
+    if (g.card && !REDUCED) g.card.press.to(.97, ...K.press);
+    s.held = true; s.vel = 0; g.sNow = s.v;
+  }
+  gesture = g; kick();
+}
+function move(p) {
+  const g = gesture; if (!g) return;
+  g.samples.push(p); if (g.samples.length > 30) g.samples.shift();
+  const dx = p.x - g.start.x, dy = p.y - g.start.y, ddx = p.x - g.last.x; g.last = p;
+  if (g.kind === 'pending' && Math.hypot(dx, dy) > 8) {
+    g.kind = Math.abs(dx) > Math.abs(dy) || !g.card ? 'scroll' : 'swipe';
+    if (g.card) g.card.press.to(1, ...K.press);
+    if (g.kind === 'swipe') { g.card.ty.held = true; g.card.ty.vel = 0; g.ty0 = g.card.ty.v; }
+  }
+  if (g.kind === 'scroll') {
+    const raw = g.s0 + dx / G.E, lo = restS(0), hi = restS(maxS());
+    const rub = x => .42 * x / (1 + x);
+    s.v = raw < lo ? lo - rub(lo - raw) : raw > hi ? hi + rub(raw - hi) : raw; s.t = s.v;
+  } else if (g.kind === 'swipe') {
+    const t = g.ty0 + dy;
+    g.card.ty.v = g.card.ty.t = t > 0 ? t * .22 : t;
+  } else if (g.kind === 'edgeApp') {
+    const up = Math.max(0, -dy), travel = G.H * .42;
+    const p01 = up / travel;
+    const zz = g.z0 - p01;                       // starts from wherever an opening card was caught
+    z.v = z.t = zz >= 0 ? zz : -(1 - Math.exp(zz * 1.2)) * .16;   // past the stack: rubber, shrinks a little more
+    const L = 1 + (G.k - 1) * clamp(z.v, -1, 1);
+    s.v = s.t = s.v + ddx / (G.E * L);
+    b.v = b.t = clamp(p01 * 2.6);
+    e.v = e.t = 1;
+    lift.v = lift.t = -Math.min(up, travel) * .32 * (1 - clamp(z.v));   // the shrinking card rises with the finger
+  } else if (g.kind === 'edgeDesk') {
+    const up = Math.max(0, -dy), p01 = up / 300;
+    e.v = e.t = p01 <= 1 ? Math.max(g.e0, p01) : 1 + (1 - Math.exp(-(p01 - 1))) * .12;
+    s.v = s.t = g.s0 + dx * .35 / G.E;
+    b.v = b.t = clamp(p01 * 3);
+  } else if (g.kind === 'edgeRecents') {
+    lift.v = lift.t = Math.min(0, dy) * .28;
+  }
+  if (Math.hypot(dx, dy) > 8) g.moved = true;
+  drawFinger(p, true);
+  kick();
+}
+function up(p) {
+  const g = gesture; if (!g) return;
+  if (p) { g.samples.push(p); }
+  const v = velocity(g), sp = Math.hypot(v.x, v.y);
+  gesture = null; holdAll(false); drawFinger(p, false);
+  const dy = (p || g.last).y - g.start.y, upAmt = -dy;
+  if (g.kind === 'pending') {
+    s.held = false;
+    if (g.card) g.card.press.to(1, ...K.press);
+    if (g.caught) s.to(restS(idxAt(s.v)), ...K.scroll);
+    else if (g.card) openCard(g.card);
+    else dismiss();
+  } else if (g.kind === 'scroll') {
+    s.held = false;
+    const vs = v.x / G.E * 1000;                               // cards per second
+    const base = idxAt(g.s0);
+    let target = idxAt(s.v + vs * .16);                        // project the flick, like vivo's scroller; snap to the nearest rest
+    if (target === base && Math.abs(v.x) * 1000 > 60) target = base + Math.sign(v.x);   // vivo stack: a release over 60 px/s turns one card
+    target = clamp(target, base - 4, base + 4);
+    s.to(restS(clamp(target, 0, maxS())), ...K.scroll, vs);
+  } else if (g.kind === 'swipe') {
+    const c = g.card; c.ty.held = false;
+    const dist = G.top + G.ch * (1 + lin(T.scale, -1)) / 2 + 3, prog = -c.ty.v / dist;   // vivo's dismiss distance: to the card's bottom
+    const commit = (v.y < -.4 && c.ty.v < -24) || prog > .5;    // vivo: half the way out, or a flick
+    if (commit && c.app.game && !c.armed) { arm(c); c.ty.to(0, ...K.back, v.y * 1000); }
+    else if (commit) { clearTimeout(c.armTimer); c.armedEl.classList.remove('on'); closeCard(c, v.y * 1000); }
+    else c.ty.to(0, ...K.back, v.y * 1000);
+  } else if (g.kind === 'edgeApp') {
+    lift.to(0, 260, .9, v.y * 1000 * .32);
+    const travel = G.H * .42, vz = v.y * 1000 / travel, vs = v.x * 1000 / G.E;
+    const flickUp = sp > .5 && -v.y > 1.7 * Math.abs(v.x);
+    const flickSide = sp > .5 && Math.abs(v.x) > 1.7 * Math.abs(v.y);
+    if ((flickUp && upAmt > 40) || upAmt > G.H * .55) { mode = 'gesture'; goHomeFromApp(); }
+    else if (flickSide && upAmt < travel * .5) {
+      const base = idxAt(g.s0);
+      let tgt = Math.round(s.v + Math.sign(v.x) * .5);
+      if (tgt === base) tgt = base + Math.sign(v.x);              // a sideways flick always moves at least one app
+      openCard(cards[clamp(tgt, 0, maxS())] || focusCard, vs);
+    } else if (upAmt > 70) enterRecentsFromApp(vz, vs);
+    else {
+      openCard((Math.abs(s.v - g.s0) < .5 ? focusCard : cards[idxAt(s.v)]) || focusCard, vs);   // barely moved: back to the app (or the one it slid to)
+    }
+  } else if (g.kind === 'edgeDesk') {
+    const flickUp = sp > .5 && -v.y > 1.7 * Math.abs(v.x), flickDown = sp > .5 && v.y > 1.7 * Math.abs(v.x);
+    if (!flickDown && (flickUp || e.v > .38)) openRecentsFromDesk(-v.y * 1000 / 300);
+    else leaveToDesk();
+  } else if (g.kind === 'edgeRecents') {
+    lift.to(0, 500, 1);
+    if (upAmt > 50 || (sp > .5 && v.y < 0)) leaveToDesk();
+  }
+  kick();
+}
+function cancelGesture() {            // the system took the touch away (pointercancel): undo, commit nothing
+  const g = gesture; if (!g) return;
+  gesture = null; holdAll(false); drawFinger(null, false); s.held = false;
+  if (g.card) { g.card.press.to(1, ...K.press); g.card.ty.held = false; }
+  if (g.kind === 'pending' || g.kind === 'scroll') s.to(restS(idxAt(s.v)), ...K.scroll);
+  else if (g.kind === 'swipe') g.card.ty.to(0, ...K.back);
+  else if (g.kind === 'edgeApp') { lift.to(0, 260, .9); openCard(focusCard); }
+  else if (g.kind === 'edgeDesk') leaveToDesk();
+  else if (g.kind === 'edgeRecents') lift.to(0, 500, 1);
+  kick();
+}
+function drawFinger(p, on) {
+  if (!document.getElementById('fingerChk').checked && !demo) { els.finger.classList.remove('on'); return; }
+  if (p) { els.finger.style.left = p.x + 'px'; els.finger.style.top = p.y + 'px'; }
+  els.finger.classList.toggle('on', !!on);
+}
+const mine = ev => gesture && !demo && ev.pointerId === gesture.id;
+screen.addEventListener('pointerdown', ev => {
+  if (ev.button > 0 || demo || gesture) return;     // one finger drives it; a second one is ignored
+  if (ev.target.closest && ev.target.closest('.clear')) return;
+  try { screen.setPointerCapture(ev.pointerId); } catch (err) {}
+  screen.focus({ preventScroll: true });
+  const p = pt(ev); down(p); gesture.id = ev.pointerId; drawFinger(p, true);
+});
+screen.addEventListener('pointermove', ev => { if (mine(ev)) move(pt(ev)); });
+screen.addEventListener('pointerup', ev => { if (mine(ev)) up(pt(ev)); });
+screen.addEventListener('pointercancel', ev => { if (mine(ev)) cancelGesture(); });
+screen.addEventListener('keydown', ev => {      // keyboard: no extra animation beyond the same springs
+  if (gesture) return;                          // not while a finger is on the screen
+  if (ev.key === 'Escape') { dismiss(); ev.preventDefault(); }
+  else if (mode === 'recents' && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+    s.to(restS(clamp(idxAt(s.t) + (ev.key === 'ArrowLeft' ? 1 : -1), 0, maxS())), ...K.scroll); ev.preventDefault();
+  } else if (mode === 'recents' && ev.key === 'Enter') { openCard(cards[idxAt(s.t)]); ev.preventDefault(); }
+});
+
+/* ---------------- demo: a finger that swipes up and rests ---------------- */
+let demo = null;
+function runDemo() {
+  if (demo) return;
+  screen.focus({ preventScroll: true });        // so Esc / arrows / Enter work right after the demo
+  if (mode !== 'app' && mode !== 'desk') { reset(START); }
+  const x0 = G.W * .5, y0 = G.H - 14, rise = G.H * .3, t0 = performance.now();
+  demo = { t0 };
+  down({ x: x0, y: y0, t: t0 }); drawFinger({ x: x0, y: y0 }, true);
+  const tick = now => {
+    const t = now - t0;
+    if (t < 300) {
+      const k = 1 - Math.pow(1 - t / 300, 3);
+      const p = { x: x0 + 6 * Math.sin(t / 90), y: y0 - rise * k, t: now };
+      move(p); requestAnimationFrame(tick);
+    } else if (t < 520) {
+      requestAnimationFrame(tick);
+    } else {
+      const p = { x: gesture ? gesture.last.x : x0, y: gesture ? gesture.last.y : y0 - rise, t: now };
+      demo = null; up(p); drawFinger(p, false);
+    }
+  };
+  requestAnimationFrame(tick);
+}
+
+/* ---------------- page wiring ---------------- */
+function fit() {
+  const wrapEl = document.querySelector('.wrap'), cs = getComputedStyle(wrapEl);
+  const inner = wrapEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);   // keep the 16 px gutter
+  const avail = Math.min(inner, 1248) - 28;
+  const maxH = Math.max(320, window.innerHeight * .8);
+  VIEW = Math.min(avail / G.W, (maxH - 28) / G.H, 1);
+  viewport.style.width = G.W * VIEW + 'px'; viewport.style.height = G.H * VIEW + 'px';
+  screen.style.transform = `scale(${VIEW})`;
+}
+window.addEventListener('resize', fit);
+function seg(id, fn) {
+  const box = document.getElementById(id);
+  box.addEventListener('click', ev => {
+    const btn = ev.target.closest('button'); if (!btn) return;
+    box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === btn)));
+    fn(btn.dataset.v);
+  });
+}
+seg('segStart', v => reset(v));
+seg('segOrient', v => { G = geometry(v); reset(START); renderSpec(); });
+seg('segSpeed', v => { SPEED = +v; });
+document.getElementById('demoBtn').addEventListener('click', runDemo);
+document.getElementById('resetBtn').addEventListener('click', () => reset(START));
+document.getElementById('reduceChk').addEventListener('change', ev => { REDUCED = ev.target.checked; screen.classList.toggle('rm', REDUCED); kick(); });
+try {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches)
+    document.getElementById('rmNote').textContent = '这台电脑开着「减少动画」。设计稿照样播放动画，好让你看手感；勾上「减弱动效」可以看减弱后的样子。';
+} catch (err) {}
+
+/* ---------------- spec (numbers come from the same geometry as the prototype) ---------------- */
+function renderSpec() {
+  const rows = o => {
+    const g = geometry(o), X = d => EDGE0 + (g.E / 27) * (Math.pow(3, 3 - d) - 1) / 2;
+    return [-1, 0, 1, 2, 3].map(d => {
+      // what shows of card d is the strip up to the left edge of the newer card lying on it
+      const peek = d === -1 ? `整张，右边 ${Math.round(X(-1) + g.cw - g.W)} px 出屏` : d === 0 ? `${Math.round(g.E)} px（右边有更新的卡片时）` : `${Math.round(X(d - 1) - Math.max(0, X(d)))} px`;
+      return `<tr><td>${d === -1 ? '−1（更新的）' : d === 0 ? '0（前排）' : d}</td><td>${Math.round(X(d))}</td><td>${peek}</td><td>${lin(T.scale, d)}</td><td>${lin(T.dim, d)}</td><td>${lin(T.alpha, d)}</td><td>${lin(T.head, d)}</td></tr>`;
+    }).join('');
+  };
+  const gl = geometry('land'), gp = geometry('port');
+  document.getElementById('spec').innerHTML = `
+  <section><h2>叠放几何</h2>
+    <p>卡片 = 屏幕 × ${gl.ratio}（横屏）/ ${gp.ratio}（竖屏），比例和屏幕一样，所以能无缝放大成全屏。前排卡片露出 0.7845 × 卡宽，往后每张只露前一张的三分之一。旧卡片叠在左边、压在下面，新卡片在右边、压在上面。</p>
+    <p><b>两端的卡片停在正中</b>（vivo 原样）：停在最新那张时它居中（横屏左边 x = ${Math.round(xAt(gl, gl.delta))}），后面几张露出 ${[1, 2, 3].map(i => Math.round(xAt(gl, i - 1 + gl.delta) - Math.max(0, xAt(gl, i + gl.delta)))).join(' / ')} px；停在最旧那张时它也居中，左边没有卡片，那张更新的卡片压在它右边（横屏 x ≈ ${Math.round(xAt(gl, -1 + gl.delta))}）。停在中间的卡片才用下表的位置。所以从应用上滑时，应用是朝屏幕正中缩成卡片的。</p>
+    <h3>横屏 1600 × 1002：卡片 ${Math.round(gl.cw)} × ${Math.round(gl.ch)}，顶边 y = ${gl.top}，前排露出 ${Math.round(gl.E)} px</h3>
+    <div class="tbl"><table><thead><tr><th>槽位</th><th>左边 x</th><th>露出</th><th>缩放</th><th>压暗</th><th>透明度</th><th>标题</th></tr></thead><tbody>${rows('land')}</tbody></table></div>
+    <h3>竖屏 1002 × 1600：卡片 ${Math.round(gp.cw)} × ${Math.round(gp.ch)}，顶边 y = ${gp.top}，前排露出 ${Math.round(gp.E)} px</h3>
+    <div class="tbl"><table><thead><tr><th>槽位</th><th>左边 x</th><th>露出</th><th>缩放</th><th>压暗</th><th>透明度</th><th>标题</th></tr></thead><tbody>${rows('port')}</tbody></table></div>
+    <p>所有属性都由一个滚动值驱动，在相邻槽位之间线性插值（vivo 就是这么做的）。手指拖动时，压在最上面的那张卡片和手指 1:1 同步，后面的卡片按 1/3、1/9 的比例慢慢跟上。「标题」一列是图标的透明度；应用名只有前排那张显示，换卡片时前一张的名字走到七成才淡出，下一张的名字跟着位置淡入；停在最旧那张时，压在它右边的那张也显示名字（vivo 原样）。从两端离开时，头一小段（横屏 ${gl.delta.toFixed(2)} 张、竖屏 ${gp.delta.toFixed(2)} 张）只移动位置、外观不变，所以居中的端卡始终是前排的样子。松手吸附到最近的停靠位。</p>
+  </section>
+  <section><h2>动效</h2>
+    <p>全部改成弹簧，松手时接上手指的速度；任何动画进行到一半都能用手指接住（OriginOS 7 的「首帧可打断」）。</p>
+    <div class="tbl"><table><thead><tr><th>场景</th><th>参数</th><th>说明</th></tr></thead><tbody>
+      <tr><td>横滑翻卡片、松手吸附</td><td>刚度 200，阻尼比 1.2</td><td class="wrap">不回弹，约 0.35 s 到 90%。张力 200、摩擦 34，是参照系统里卡片吸附用的那组参数；松手时按速度往前投射，松手速度超过 60 px/s 就至少翻一张（vivo 叠放的门槛），一次最多翻 4 张</td></tr>
+      <tr><td>上滑：应用缩成卡片</td><td>跟手；松手后 214 / 1.0</td><td class="wrap">停住就进卡片；快划回桌面；沿底边横划直接切应用</td></tr>
+      <tr><td>从桌面呼出</td><td>214 / 1.0；背景 1200 / 1.0</td><td class="wrap">卡片从左侧深处滑到前排，背景约 0.1 s 内模糊</td></tr>
+      <tr><td>卡片上划关掉</td><td>飞出 200 / 0.9；弹回 500 / 0.89</td><td class="wrap">划过一半（到卡片底边的一半，横屏约 ${Math.round(.5 * (gl.top + gl.ch * (1 + lin(T.scale, -1)) / 2 + 3))} px）或快划就关，和 vivo 一样；只位移、不淡出；否则弹回</td></tr>
+      <tr><td>关掉后补位</td><td>260 / 0.83</td><td class="wrap">后面的卡片往前补，带一点回弹</td></tr>
+      <tr><td>点卡片打开、关卡片回原应用</td><td>放大 214 / 1.0；同时滚到那张</td><td class="wrap">卡片放大成全屏，圆角同步收成 0</td></tr>
+      <tr><td>回桌面</td><td>500 / 1.0</td><td class="wrap">卡片沉回左侧深处并淡出，比进来快</td></tr>
+      <tr><td>全部关闭</td><td>同时发射，900 / 1.0，初速 5200 px/s</td><td class="wrap">所有卡片一起往上飞，约 0.15 s；留下的游戏卡片原地滑到正中，没有留下的就回桌面</td></tr>
+      <tr><td>按下卡片</td><td>缩到 97%</td><td class="wrap">约 0.1 s，跟控制中心磁贴一致</td></tr>
+    </tbody></table></div>
+    <p><b>减弱动效</b>：弹簧直接到位；按钮变形、提示条位移、按下缩放也都去掉，只留「再上划一次」的倒计时条（它是信息，不是装饰）。和键盘稿同一条规矩。</p>
+  </section>
+  <section><h2>交互规则</h2>
+    <ul>
+      <li><b>点空白处 / Esc / 再按一次快捷键（G9 双击主页键）</b>：回到打开卡片之前的那个应用；从桌面打开的就回桌面；原来的应用在卡片里被关掉了也回桌面。（vivo 这里是一律回桌面，这条按作者的要求改了。）</li>
+      <li><b>点卡片</b>：打开它。<b>卡片上划</b>：关掉它。<b>卡片下拉</b>：有阻尼，松手弹回（vivo 是锁定，我们不做）。</li>
+      <li><b>游戏防误关</b>：第一次上划只弹回并亮红条「再上划一次才会关掉」，3 秒内再划才关。「全部关闭」也不关游戏。</li>
+      <li><b>全部关闭</b>：底部圆钮，点一下变成红色「再点一次全部关闭」，3 秒内再点才执行。</li>
+      <li><b>卡片打开时从底边上滑</b>：回桌面。</li>
+      <li><b>接住不算点</b>：卡片还在滑、或者正在沉回桌面时点一下，只是接住停下，不会打开卡片也不会返回。系统收走触摸时（比如别的边缘手势抢了），当前手势撤回，什么都不提交。</li>
+      <li><b>只认一根手指</b>：第二根手指按下不起作用，拖着卡片时也点不了「全部关闭」。离开卡片界面，「再点一次」和「再上划一次」的确认状态一起作废。</li>
+      <li>键盘或控制中心开着时，底边手势照旧暂停（现有规矩不变）。</li>
+    </ul>
+  </section>
+  <section><h2>视觉</h2>
+    <ul>
+      <li><b>背景</b>：壁纸和桌面图标一起模糊（图标不缩放），再压一层 30% 的 <span class="sw-c" style="background:#16181e"></span>#16181E。vivo 是 20% 黑；加到 30% 是为了亮壁纸上白字标题也看得清（中间调壁纸上对比度约 4.8 : 1）。平板上由 KWin 做一张模糊快照，不实时重算。</li>
+      <li><b>卡片</b>：圆角 ${RADIUS}（家族规范最大 20，vivo 默认 20）；1 px 白色 8% 描边；左侧投影把叠在一起的卡片分开。</li>
+      <li><b>标题</b>：卡片上方，离左边 9 px；图标 30、圆角 8；应用名 16 号 600 字重，只给前排那张。往后第二张的图标淡到 60%，第三张起只剩卡片。</li>
+      <li><b>全部关闭</b>：52 px 毛玻璃圆钮（白 16%，描边白 16%），触控区 64 px，放在屏幕高度 90% 处（vivo 手机约 91%）；按下 94% 缩放和点触光斑。点一下原地变成红色确认块：家族的红 <span class="sw-c" style="background:#ff3b30"></span>#FF3B30、圆角 14。</li>
+      <li><b>底边白线</b>：桌面和深色应用上是白 55%；浅色应用上换成 50% 黑（对 #FBFBFC 约 3.9 : 1），不然看不见。</li>
+      <li><b>提示条</b>：深色 <span class="sw-c" style="background:#1c1f26"></span>rgba(28,31,38,.96)，圆角 14，17 号字。</li>
+      <li><b>字</b>：Noto Sans CJK SC，最小 16 号（标签 13 号除外）。</li>
+    </ul>
+  </section>
+  <section><h2>有意不做</h2>
+    <ul>
+      <li><b>锁定卡片</b>（vivo 下拉锁定、清理时保留）：KDE 没有对应概念，游戏防误关已经覆盖了最常见的误关。</li>
+      <li><b>名字后面的 ▾ 菜单</b>（小窗、分屏）：KWin 这边没有现成的对应操作。</li>
+      <li><b>平铺 / 宫格切换、隐私模糊、清理后提示释放了多少内存</b>：这次只做叠放。</li>
+      <li><b>卡片上的 × 按钮</b>（现在的平铺版有）：vivo 叠放没有；叠起来以后右边那张新卡片会压住前排标题的右半边。关卡片就上划，或者用「全部关闭」。</li>
+      <li><b>按下卡片放大到 1.03</b>（vivo 叠放的按压反馈）：家族规矩是按下缩小（97%），和控制中心、键盘一致。</li>
+      <li><b>vivo 的桌面缩到 0.9</b>：KWin 的 DesktopBackground 里壁纸和图标是一体的，单独缩图标做不到，整张缩又会露出边缘。</li>
+    </ul>
+  </section>`;
+}
+
+/* ---------------- go ---------------- */
+renderSpec();
+reset('app');
+</script>
+</body>
+</html>

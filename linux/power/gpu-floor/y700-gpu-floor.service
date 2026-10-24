@@ -1,0 +1,14 @@
+[Unit]
+Description=GPU devfreq floor while Chrome plays a full-screen video (y700-gpu-floor)
+After=tb323fu-helperd.service y700-gpu-dvfs.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/y700-gpu-floor
+# if the daemon dies holding the floor, give it back (reads /run/y700-gpu-floor.state)
+ExecStopPost=/usr/local/sbin/y700-gpu-floor --release
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

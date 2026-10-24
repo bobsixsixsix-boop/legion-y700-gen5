@@ -1,0 +1,1 @@
+user ALL=(root) NOPASSWD: /usr/sbin/back-to-android *

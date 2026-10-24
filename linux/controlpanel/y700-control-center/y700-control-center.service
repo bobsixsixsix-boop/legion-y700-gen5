@@ -1,0 +1,16 @@
+[Unit]
+Description=y700: control centre sheet (pulled down from the top edge, back key for the side edges)
+PartOf=graphical-session.target
+# after the shellbar when that is enabled (ignored otherwise): the shellbar is org.freedesktop.Notifications since
+# 10-22, and the notification centre watches it. It follows an owner change by itself (NotesPane.qml rebuilds its
+# watcher 1.5 s after one), so this only spares that one rebuild at login; a shellbar restart needs no restart here
+After=graphical-session.target plasma-kwin_wayland.service y700-shellbar.service
+
+[Service]
+ExecStart=/usr/local/bin/y700-control-center
+Restart=on-failure
+RestartSec=2
+Environment=QT_QPA_PLATFORM=wayland
+
+[Install]
+WantedBy=graphical-session.target

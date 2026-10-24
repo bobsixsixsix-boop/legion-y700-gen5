@@ -1,0 +1,14 @@
+/root/y4-patches:
+0540-arm64-signal-reapply-the-ssbs-policy-on-sigreturn-sm8850.patch
+0620-drm-msm-a6xx-hfi-irq-clears-only-the-cm3-fault.patch
+0621-drm-msm-a6xx-bound-the-gmu-wait-for-a-fault-devcoredump.patch
+0622-drm-msm-a6xx-mask-the-hfi-interrupt-before-booting-the-gmu.patch
+
+/root/y6-patches:
+1030-media-iris-send-the-stream-POC-type.patch
+1031-media-iris-stop-AV1-tier-overwriting-HEVC-tier.patch
+1032-media-iris-send-the-decoder-the-colour-info-the-firmware-reported.patch
+
+/root/y7-patches:
+1033-media-iris-send-the-decoder-the-bitstream-resolution-the-firmware-reported.patch
+make-1033.py

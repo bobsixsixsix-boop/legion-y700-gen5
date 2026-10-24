@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Y700 状态栏与 dock
+Comment=Status bar, dock and app grid of the vivo-style shell (not a launcher)
+Exec=/usr/local/bin/y700-shellbar
+Icon=preferences-desktop
+NoDisplay=true
+X-KDE-Wayland-Interfaces=org_kde_plasma_window_management

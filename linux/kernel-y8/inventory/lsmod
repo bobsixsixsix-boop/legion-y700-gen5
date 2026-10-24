@@ -1,0 +1,105 @@
+Module                  Size  Used by
+xt_connmark            12288  3
+xt_conntrack           12288  2
+xt_MASQUERADE          12288  1
+xt_tcpudp              12288  0
+xt_mark                12288  1
+nft_compat             20480  7
+x_tables               40960  6 xt_conntrack,nft_compat,xt_tcpudp,xt_connmark,xt_MASQUERADE,xt_mark
+nft_chain_nat          12288  1
+nf_nat                 53248  2 nft_chain_nat,xt_MASQUERADE
+nf_conntrack          155648  4 xt_conntrack,nf_nat,xt_connmark,xt_MASQUERADE
+nf_defrag_ipv6         24576  1 nf_conntrack
+nf_defrag_ipv4         12288  1 nf_conntrack
+q6apm_lpass_dais       16384  1
+q6apm_dai              32768  1
+q6prm_clocks           16384  32
+snd_q6dsp_common       49152  2 q6apm_lpass_dais,q6prm_clocks
+q6prm                  12288  1 q6prm_clocks
+rfcomm                106496  12
+algif_hash             12288  1
+algif_skcipher         12288  1
+af_alg                 28672  6 algif_hash,algif_skcipher
+snd_seq               102400  6
+snd_seq_device         16384  1 snd_seq
+snd_q6apm              57344  4 q6apm_dai,q6prm,q6apm_lpass_dais
+fastrpc                40960  0
+uinput                 24576  1
+nf_tables             303104  66 nft_compat,nft_chain_nat
+bnep                   32768  2
+qcom_camss            720896  30
+qcom_iris             192512  0
+gc08a8                 24576  5
+ath12k_wifi7           98304  0
+videobuf2_dma_contig    24576  1 qcom_iris
+s5kjns                 28672  5
+dw9719                 12288  3
+v4l2_fwnode            36864  3 qcom_camss,gc08a8,s5kjns
+v4l2_mem2mem           49152  1 qcom_iris
+v4l2_async             28672  5 v4l2_fwnode,qcom_camss,gc08a8,dw9719,s5kjns
+v4l2_cci               12288  3 gc08a8,dw9719,s5kjns
+videobuf2_v4l2         32768  3 qcom_iris,qcom_camss,v4l2_mem2mem
+videodev              352256  29 qcom_iris,v4l2_async,v4l2_fwnode,qcom_camss,gc08a8,videobuf2_v4l2,dw9719,s5kjns,v4l2_mem2mem
+ath12k                528384  1 ath12k_wifi7
+snd_soc_wcd939x        98304  1
+snd_soc_lpass_tx_macro   102400  2
+snd_soc_lpass_rx_macro   110592  1
+binfmt_misc            32768  1
+videobuf2_dma_sg       20480  1 qcom_camss
+snd_soc_wcd939x_sdw    20480  1 snd_soc_wcd939x
+leds_aw22127           12288  0
+snd_soc_wcd_common     12288  2 snd_soc_wcd939x_sdw,snd_soc_wcd939x
+aw86927                20480  0
+snd_soc_sc8280xp       24576  4
+videobuf2_memops       16384  2 videobuf2_dma_contig,videobuf2_dma_sg
+regmap_sdw             12288  1 snd_soc_wcd939x_sdw
+snd_soc_qcom_sdw       12288  1 snd_soc_sc8280xp
+snd_soc_qcom_common    16384  1 snd_soc_sc8280xp
+qcom_pd_mapper         28672  0
+rpmsg_ctrl             12288  0
+ff_memless             24576  1 aw86927
+rtc_pm8xxx             20480  1
+led_class_multicolor    16384  1 leds_aw22127
+snd_soc_aw882xx       212992  2
+nvmem_qcom_spmi_sdam    16384  0
+qcom_stats             12288  0
+snd_soc_hdmi_codec     24576  0
+phy_qcom_mipi_csi2     24576  2
+i2c_qcom_cci           24576  0
+snd_soc_lpass_wsa_macro    69632  0
+videobuf2_common       77824  7 qcom_iris,qcom_camss,videobuf2_dma_contig,videobuf2_v4l2,videobuf2_dma_sg,v4l2_mem2mem,videobuf2_memops
+snd_soc_lpass_va_macro    57344  9
+pinctrl_sm8650_lpass_lpi    20480  0
+soundwire_qcom         36864  1
+snd_soc_wcd_classh     24576  1 snd_soc_wcd939x
+snd_soc_lpass_macro_common    12288  4 snd_soc_lpass_wsa_macro,snd_soc_lpass_va_macro,snd_soc_lpass_rx_macro,snd_soc_lpass_tx_macro
+mc                     86016  11 v4l2_async,videodev,qcom_camss,gc08a8,videobuf2_v4l2,videobuf2_common,dw9719,s5kjns,v4l2_mem2mem
+pci_pwrctrl_pwrseq     12288  0
+snd_soc_wcd_mbhc       36864  1 snd_soc_wcd939x
+snd_soc_core          344064  16 snd_q6apm,q6apm_dai,snd_soc_sc8280xp,snd_soc_qcom_common,q6apm_lpass_dais,snd_soc_hdmi_codec,snd_soc_lpass_wsa_macro,snd_soc_qcom_sdw,snd_soc_wcd939x,snd_soc_lpass_va_macro,snd_soc_wcd_mbhc,snd_soc_lpass_rx_macro,soundwire_qcom,snd_soc_aw882xx,snd_soc_lpass_tx_macro,snd_soc_wcd_classh
+snd_compress           32768  1 snd_soc_core
+snd_pcm               180224  8 q6apm_dai,snd_soc_sc8280xp,q6apm_lpass_dais,snd_soc_hdmi_codec,snd_compress,snd_soc_core,snd_soc_lpass_rx_macro,snd_soc_aw882xx
+coresight_stm          28672  0
+stm_p_basic            12288  0
+stm_core               36864  2 coresight_stm,stm_p_basic
+snd_timer              49152  2 snd_seq,snd_pcm
+coresight_tmc          73728  0
+coresight_funnel       20480  0
+qcomtee                36864  0
+soundwire_bus        1163264  6 regmap_sdw,snd_soc_wcd_common,snd_soc_wcd939x_sdw,snd_soc_qcom_sdw,snd_soc_wcd939x,soundwire_qcom
+coresight             106496  3 coresight_tmc,coresight_stm,coresight_funnel
+qcom_rng               12288  0
+snd                   110592  18 snd_seq,snd_seq_device,snd_soc_qcom_common,snd_soc_hdmi_codec,snd_timer,snd_compress,snd_soc_core,snd_pcm
+soundcore              12288  1 snd
+joydev                 32768  0
+sch_fq_codel           20480  3
+fuse                  237568  3
+zstd                   12288  0
+zram                   45056  1
+lz4_compress           24576  1 zram
+nt36536_ts             57344  0
+qcom_q6v5_pas          49152  0
+qcom_q6v5              16384  1 qcom_q6v5_pas
+qcom_sysmon            24576  2 qcom_q6v5_pas,qcom_q6v5
+qcom_common            16384  1 qcom_q6v5_pas
+qcom_pil_info          12288  1 qcom_q6v5_pas

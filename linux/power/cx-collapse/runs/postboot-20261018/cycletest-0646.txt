@@ -1,0 +1,7 @@
+ActiveState=inactive Result=success 
+06:47:21 before     dpms=Off armed=Y  cl0 0.1/s  cl1 13.2/s  sys 0.0/s  arch_timer 394/s  | viz  3888 65.0/s  4105 65.0/s
+06:47:36 screen-on  dpms=On armed=N  cl0 0.0/s  cl1 0.0/s  sys 0.0/s  arch_timer 715/s  | viz  3888 82.5/s  4105 12.7/s
+06:47:36 screen off again
+06:48:11 armed=Y
+06:49:32 after      dpms=Off armed=Y  cl0 36.9/s  cl1 11.8/s  sys 29.6/s  arch_timer 248/s  | viz  3888 62.6/s  4105 0.0/s
+06:50:37 after2     dpms=Off armed=Y  cl0 36.5/s  cl1 10.3/s  sys 29.5/s  arch_timer 252/s  | viz  3888 62.6/s  4105 0.1/s

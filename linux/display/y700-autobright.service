@@ -1,0 +1,12 @@
+[Unit]
+Description=y700: automatic screen brightness from the ambient light sensor
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/bin/y700-autobright
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

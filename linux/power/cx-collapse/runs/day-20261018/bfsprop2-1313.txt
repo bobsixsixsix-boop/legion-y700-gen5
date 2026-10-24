@@ -1,0 +1,10 @@
+bfsprop2 2026-10-18 13:13:54  Google Chrome 155.0.8059.79   dpms=Off
+lsonly: gpu=9758 HAS   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WaylandExternalBeginFrameSource,WebRtcPipeWireCamera
+seedonly: gpu=10224 MISSING   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WebRtcPipeWireCamera
+both-flag: gpu=10711 MISSING   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WebRtcPipeWireCamera
+    VizCompositorTh 0.0/s over 30 s  dpms=Off
+both-noflag: gpu=11531 MISSING   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WebRtcPipeWireCamera
+    VizCompositorTh 60.1/s over 30 s  dpms=Off
+fresh-flag: gpu=12152 HAS   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WaylandExternalBeginFrameSource,WebRtcPipeWireCamera
+    VizCompositorTh 0.1/s over 30 s  dpms=Off
+done 13:16:35  dpms=Off  leftover units: 0

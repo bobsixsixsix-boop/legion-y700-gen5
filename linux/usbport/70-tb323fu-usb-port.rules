@@ -1,0 +1,7 @@
+# Overrides tb323fu-platform's /usr/lib/udev/rules.d/70-tb323fu-usb-port.rules
+# (same name): run y700-usb-port instead of the packaged script, and also on
+# usb_role changes, because ucsi re-sets the controller role for the bottom
+# port on its own events and would take the side port's host role back.
+# Two USB-C connectors share one USB controller (see y700-usb-port).
+SUBSYSTEM=="typec", KERNEL=="port[01]-partner", ACTION=="add|remove", RUN+="/usr/local/libexec/y700-usb-port"
+SUBSYSTEM=="usb_role", KERNEL=="a600000.usb-role-switch", ACTION=="change", RUN+="/usr/local/libexec/y700-usb-port"

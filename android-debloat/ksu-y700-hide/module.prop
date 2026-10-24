@@ -1,0 +1,6 @@
+id=y700_hide
+name=Y700 Hide System Apps
+version=1
+versionCode=1
+author=y700
+description=开机时用空 tmpfs 盖住 hide.list 里的系统应用目录，让 PackageManager 看不到它们（用于禁用后仍被强制拉起的常驻组件）

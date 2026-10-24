@@ -1,0 +1,53 @@
+bfstest 2026-10-18 12:24:40  chrome Google Chrome 155.0.8059.79   kwin kwin 6.6.6  dpms=Off  SETTLE=45 WIN=60
+
+== tick / default  dpms=Off  gpu=132945  gpu-args: --ozone-platform=wayland 
+  proc 132889   browser        cpu   0.1 %
+  proc 132907   zygote         cpu   0.0 %
+  proc 132908   zygote         cpu   0.0 %
+  proc 132910   zygote         cpu   0.0 %
+  proc 132945   gpu-process    cpu   0.6 %
+    thread 132945   VizCompositorTh      60.0 wakeups/s
+  proc 132947   utility        cpu   0.0 %
+  proc 132951   utility        cpu   0.0 %
+  proc 132974   renderer       cpu   0.1 %
+  proc 132994   renderer       cpu   0.0 %
+  proc 133194   renderer       cpu   0.0 %
+
+== tick / bfs  dpms=Off  gpu=134923  gpu-args: --ozone-platform=wayland WaylandExternalBeginFrameSource 
+  proc 134868   browser        cpu   0.1 %
+  proc 134886   zygote         cpu   0.0 %
+  proc 134887   zygote         cpu   0.0 %
+  proc 134889   zygote         cpu   0.0 %
+  proc 134923   gpu-process    cpu   0.0 %
+  proc 134925   utility        cpu   0.1 %
+  proc 134933   utility        cpu   0.0 %
+  proc 134952   renderer       cpu   0.0 %
+  proc 134972   renderer       cpu   0.1 %
+  proc 135170   renderer       cpu   0.0 %
+
+== anim / default  dpms=Off  gpu=136749  gpu-args: --ozone-platform=wayland 
+  proc 136694   browser        cpu   0.1 %
+  proc 136712   zygote         cpu   0.0 %
+  proc 136713   zygote         cpu   0.0 %
+  proc 136715   zygote         cpu   0.0 %
+  proc 136749   gpu-process    cpu   0.6 %
+    thread 136749   VizCompositorTh      60.0 wakeups/s
+  proc 136752   utility        cpu   0.0 %
+  proc 136754   utility        cpu   0.0 %
+  proc 136778   renderer       cpu   0.0 %
+  proc 136808   renderer       cpu   0.0 %
+  proc 136996   renderer       cpu   0.0 %
+
+== anim / bfs  dpms=Off  gpu=138575  gpu-args: --ozone-platform=wayland WaylandExternalBeginFrameSource 
+  proc 138518   browser        cpu   0.1 %
+  proc 138539   zygote         cpu   0.0 %
+  proc 138540   zygote         cpu   0.0 %
+  proc 138542   zygote         cpu   0.0 %
+  proc 138575   gpu-process    cpu   0.0 %
+  proc 138577   utility        cpu   0.1 %
+  proc 138583   utility        cpu   0.0 %
+  proc 138606   renderer       cpu   0.1 %
+  proc 138625   renderer       cpu   0.0 %
+  proc 138824   renderer       cpu   0.0 %
+
+done 12:32:13  dpms=Off

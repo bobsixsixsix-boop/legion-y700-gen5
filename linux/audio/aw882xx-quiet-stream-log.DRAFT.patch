@@ -1,0 +1,304 @@
+aw882xx: per-stream progress messages to debug level (y700 DRAFT, NOT APPLIED, 2026-10-16)
+
+Every time the speaker PCM opens and closes, the vendor driver logs about 20 lines per amplifier at
+info level on the way up (startup "playback enter", hw_params, "mute state=0", startup work, start_pa
+"enter", reg_update/pwd/amppd/dither/pll/sysst/uls_hmute/mute/int/intmask/monitor "done"/"enter") and
+about 10 on the way down, i.e. ~60 kernel log lines for the two amplifiers per sound after silence
+(SUSPEND.md 5.4). They say nothing that the outcome lines do not: keep "start success" (the README's
+evidence that both amplifiers started) and every aw_dev_err ("pll&clk check fail", "start failed",
+"check fail"), and turn the 33 progress messages into aw_dev_dbg (pr_debug: compiled away without
+CONFIG_DYNAMIC_DEBUG, switchable at run time with it). Probe-time info messages are not touched.
+No functional change: only the printk level of messages, no register access, no control flow.
+
+Against joonhoekim/tb323fu-linux kernel/out-of-tree/aw882xx at 0c7c0c4 = helper-v0.4.2 (the four files
+have the same blob ids in both). Applies with `git -C <tb323fu-linux> apply` or `patch -p1` from the
+tree root. Re-enable at run time (if CONFIG_DYNAMIC_DEBUG=y):
+  echo 'module snd_soc_aw882xx +p' > /sys/kernel/debug/dynamic_debug/control
+
+diff --git a/kernel/out-of-tree/aw882xx/aw882xx.c b/kernel/out-of-tree/aw882xx/aw882xx.c
+--- a/kernel/out-of-tree/aw882xx/aw882xx.c
++++ b/kernel/out-of-tree/aw882xx/aw882xx.c
+@@ -278,11 +278,11 @@
+ 		aw_componet_codec_ops.codec_get_drvdata(codec);
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+-		aw_dev_info(aw882xx->dev, "playback enter");
++		aw_dev_dbg(aw882xx->dev, "playback enter");
+ 		/*load cali re*/
+ 		aw882xx_dev_init_cali_re(aw882xx->aw_pa);
+ 	} else {
+-		aw_dev_info(aw882xx->dev, "capture enter");
++		aw_dev_dbg(aw882xx->dev, "capture enter");
+ 	}
+ 	return 0;
+ }
+@@ -319,12 +319,12 @@
+ 		aw_componet_codec_ops.codec_get_drvdata(codec);
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+-		aw_dev_info(aw882xx->dev, "stream capture requested rate: %d, sample size: %d",
++		aw_dev_dbg(aw882xx->dev, "stream capture requested rate: %d, sample size: %d",
+ 				params_rate(params), params_width(params));
+ 	}
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+-		aw_dev_info(aw882xx->dev, "stream playback requested rate: %d, sample size: %d",
++		aw_dev_dbg(aw882xx->dev, "stream playback requested rate: %d, sample size: %d",
+ 				params_rate(params), params_width(params));
+ 	}
+ 
+@@ -340,9 +340,9 @@
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		aw882xx->rate = 0;
+-		aw_dev_info(aw882xx->dev, "stream playback");
++		aw_dev_dbg(aw882xx->dev, "stream playback");
+ 	} else {
+-		aw_dev_info(aw882xx->dev, "stream capture");
++		aw_dev_dbg(aw882xx->dev, "stream capture");
+ 	}
+ }
+ 
+@@ -351,7 +351,7 @@
+ 	int ret;
+ 	int i;
+ 
+-	aw_dev_info(aw882xx->dev, "enter");
++	aw_dev_dbg(aw882xx->dev, "enter");
+ 
+ 	if (aw882xx->fw_status == AW_DEV_FW_OK) {
+ 		if (aw882xx->allow_pw == false) {
+@@ -362,7 +362,7 @@
+ 		for (i = 0; i < AW_START_RETRIES; i++) {
+ 			/*if PA already power ,stop PA then start*/
+ 			if (aw882xx->aw_pa->status) {
+-				aw_dev_info(aw882xx->dev, "already start");
++				aw_dev_dbg(aw882xx->dev, "already start");
+ 				return;
+ 			}
+ 
+@@ -398,10 +398,10 @@
+ 	struct aw882xx *aw882xx =
+ 		aw_componet_codec_ops.codec_get_drvdata(codec);
+ 
+-	aw_dev_info(aw882xx->dev, "mute state=%d", mute);
++	aw_dev_dbg(aw882xx->dev, "mute state=%d", mute);
+ 
+ 	if (stream != SNDRV_PCM_STREAM_PLAYBACK) {
+-		aw_dev_info(aw882xx->dev, "capture");
++		aw_dev_dbg(aw882xx->dev, "capture");
+ 		return 0;
+ 	}
+ 
+@@ -1006,7 +1006,7 @@
+ {
+ 	struct aw882xx *aw882xx = container_of(work, struct aw882xx, start_work.work);
+ 
+-	aw_dev_info(aw882xx->dev, "enter");
++	aw_dev_dbg(aw882xx->dev, "enter");
+ 
+ 	mutex_lock(&aw882xx->lock);
+ 	aw882xx_start_pa(aw882xx);
+diff --git a/kernel/out-of-tree/aw882xx/aw882xx_device.c b/kernel/out-of-tree/aw882xx/aw882xx_device.c
+--- a/kernel/out-of-tree/aw882xx/aw882xx_device.c
++++ b/kernel/out-of-tree/aw882xx/aw882xx_device.c
+@@ -484,7 +484,7 @@
+ 
+ 	ret =  aw_dev->ops.aw_i2c_write(aw_dev, desc->vcalb_reg, reg_val);
+ 
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ 
+ 	return ret;
+ }
+@@ -586,7 +586,7 @@
+ 		if (reg_addr == aw_dev->mute_desc.reg) {
+ 			/*get bin value*/
+ 			aw_dev->mute_st = reg_val & (~aw_dev->mute_desc.mask);
+-			aw_dev_info(aw_dev->dev, "mute_st=0x%04x", aw_dev->mute_st);
++			aw_dev_dbg(aw_dev->dev, "mute_st=0x%04x", aw_dev->mute_st);
+ 			aw_dev->ops.aw_i2c_read(aw_dev,
+ 			(unsigned char)reg_addr,
+ 			(unsigned int *)&read_val);
+@@ -764,7 +764,7 @@
+ 				pwd_desc->mask,
+ 				pwd_desc->disable);
+ 	}
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ static void aw_dev_amppd(struct aw_device *aw_dev, bool amppd)
+@@ -782,7 +782,7 @@
+ 				amppd_desc->mask,
+ 				amppd_desc->disable);
+ 	}
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ void aw882xx_dev_mute(struct aw_device *aw_dev, bool mute)
+@@ -804,7 +804,7 @@
+ 				mute_desc->disable);
+ 		aw_dev_fade_in(aw_dev);
+ 	}
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ static void aw_dev_uls_hmute(struct aw_device *aw_dev, bool uls_hmute)
+@@ -825,7 +825,7 @@
+ 				uls_hmute_desc->mask,
+ 				uls_hmute_desc->disable);
+ 	}
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ static void aw_dev_set_dither(struct aw_device *aw_dev, bool dither)
+@@ -847,7 +847,7 @@
+ 				dither_desc->disable);
+ 	}
+ 
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ static void aw_dev_set_psm(struct aw_device *aw_dev, bool psm)
+@@ -934,7 +934,7 @@
+ 	aw882xx_dev_get_int_status(aw_dev, &int_status);
+ 	/*make suer int status is clear*/
+ 	aw882xx_dev_get_int_status(aw_dev, &int_status);
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ }
+ 
+ int aw882xx_dev_set_intmask(struct aw_device *aw_dev, bool flag)
+@@ -948,7 +948,7 @@
+ 	else
+ 		ret = aw_dev->ops.aw_i2c_write(aw_dev, desc->mask_reg,
+ 					desc->mask_default);
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ 	return ret;
+ }
+ 
+@@ -973,7 +973,7 @@
+ 	if (ret < 0)
+ 		aw_dev_err(aw_dev->dev, "pll&clk check fail");
+ 	else
+-		aw_dev_info(aw_dev->dev, "done");
++		aw_dev_dbg(aw_dev->dev, "done");
+ 
+ 	return ret;
+ }
+@@ -1050,7 +1050,7 @@
+ 			ret = 0;
+ 			break;
+ 		}
+-		aw_dev_info(aw_dev->dev, "check fail, cnt=%d, reg_val=0x%04x",
++		aw_dev_dbg(aw_dev->dev, "check fail, cnt=%d, reg_val=0x%04x",
+ 				i, reg_val);
+ 		usleep_range(AW_2000_US, AW_2000_US + 10);
+ 
+@@ -1058,7 +1058,7 @@
+ 	if (ret < 0)
+ 		aw_dev_err(aw_dev->dev, "check fail");
+ 	else
+-		aw_dev_info(aw_dev->dev, "done");
++		aw_dev_dbg(aw_dev->dev, "done");
+ 
+ 	return ret;
+ }
+@@ -1152,7 +1152,7 @@
+ 
+ 		}
+ 	} else {
+-		aw_dev_info(aw_dev->dev, "no cali, needn't init cali re");
++		aw_dev_dbg(aw_dev->dev, "no cali, needn't init cali re");
+ 	}
+ 	return ret;
+ }
+@@ -1234,7 +1234,7 @@
+ 
+ 	aw_dev->cur_prof = aw_dev->set_prof;
+ 
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ 	return 0;
+ }
+ 
+@@ -1305,7 +1305,7 @@
+ 	aw_dev_dbg(aw_dev->dev, "enter, i2s_enable: %d", flag);
+ 
+ 	if (txen_desc->reg == AW_REG_NONE) {
+-		aw_dev_info(aw_dev->dev, "needn't set i2s status");
++		aw_dev_dbg(aw_dev->dev, "needn't set i2s status");
+ 		return;
+ 	}
+ 
+@@ -1331,7 +1331,7 @@
+ 	aw_dev_dbg(aw_dev->dev, "enter");
+ 
+ 	if (aw_dev->status == AW_DEV_PW_ON) {
+-		aw_dev_info(aw_dev->dev, "already power on");
++		aw_dev_dbg(aw_dev->dev, "already power on");
+ 		return 0;
+ 	}
+ 
+@@ -1411,7 +1411,7 @@
+ 	aw882xx_dev_algo_authentication(aw_dev);
+ #endif
+ 	aw_dev->status = AW_DEV_PW_ON;
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ 	return 0;
+ }
+ 
+@@ -1453,7 +1453,7 @@
+ 	aw_dev_pwd(aw_dev, true);
+ 
+ 	ext_dsp_prof_write = AW_EXT_DSP_WRITE_NONE;
+-	aw_dev_info(aw_dev->dev, "done");
++	aw_dev_dbg(aw_dev->dev, "done");
+ 	return 0;
+ }
+ 
+diff --git a/kernel/out-of-tree/aw882xx/aw882xx_monitor.c b/kernel/out-of-tree/aw882xx/aw882xx_monitor.c
+--- a/kernel/out-of-tree/aw882xx/aw882xx_monitor.c
++++ b/kernel/out-of-tree/aw882xx/aw882xx_monitor.c
+@@ -505,7 +505,7 @@
+ 			struct aw_device, monitor_desc);
+ 	struct aw882xx *aw882xx = (struct aw882xx *)aw_dev->private_data;
+ 
+-	aw_dev_info(aw_dev->dev, "enter");
++	aw_dev_dbg(aw_dev->dev, "enter");
+ 
+ 	monitor_desc->first_entry = AW_FIRST_ENTRY;
+ 	monitor_desc->samp_count = 0;
+@@ -531,7 +531,7 @@
+ 	struct aw_device *aw_dev = container_of(monitor_desc,
+ 			struct aw_device, monitor_desc);
+ 
+-	aw_dev_info(aw_dev->dev, "enter");
++	aw_dev_dbg(aw_dev->dev, "enter");
+ 	aw_dev->volume_desc.monitor_volume = 0;
+ 	monitor_desc->mon_start_flag = false;
+ 
+diff --git a/kernel/out-of-tree/aw882xx/aw882xx_spin.c b/kernel/out-of-tree/aw882xx/aw882xx_spin.c
+--- a/kernel/out-of-tree/aw882xx/aw882xx_spin.c
++++ b/kernel/out-of-tree/aw882xx/aw882xx_spin.c
+@@ -112,11 +112,11 @@
+ 			return ret;
+ 		}
+ 	} else {
+-		aw_dev_info(aw_dev->dev, "do nothing");
++		aw_dev_dbg(aw_dev->dev, "do nothing");
+ 	}
+ 	mutex_unlock(&g_spin_lock);
+ 
+-	aw_dev_info(aw_dev->dev, "set record spin val done");
++	aw_dev_dbg(aw_dev->dev, "set record spin val done");
+ 	return 0;
+ }
+ 

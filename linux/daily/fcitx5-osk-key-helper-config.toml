@@ -1,0 +1,6 @@
+# y700 (10-12): the on-screen keyboard sends these keys as real key events through this uinput
+# device, so X11 apps (Steam/CEF) get English letters, Backspace, Enter, arrows. Default was only the
+# modifiers. A keyboard-only uinput device does not end KWin tablet mode (tested; ydotool did because
+# it also adds a pointer). X11 keycodes = evdev + 8. Must match modifier_workaround_keycodes in
+# ~/.config/fcitx5-osk/config.toml.
+keycodes = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 105, 108, 110, 111, 112, 113, 114, 115, 116, 117, 119]

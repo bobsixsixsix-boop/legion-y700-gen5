@@ -1,0 +1,33 @@
+#!/bin/sh
+# Valve native ARM64 Steam client (bootstrapped from steam_client_linuxarm64); it self-updates.
+# Like steam.sh: exit status 42 means "restart me" (language change, account switch, updates),
+# so start it again with the same arguments. More than 5 restarts within 2 minutes stops the loop.
+cd "$HOME/.local/share/Steam" || exit 1
+# y700: Steam UI (steamwebhelper, host GTK3) otherwise picks im-xim, which does not take
+# text from the fcitx5 on-screen keyboard; the fcitx5 GTK module does.
+export GTK_IM_MODULE=fcitx
+# y700: MangoHud overlay for Steam games (Vulkan layer; shown/hidden by the desktop switch, no_display in ~/.config/MangoHud/MangoHud.conf)
+export MANGOHUD=1
+# Wine/Proton OpenGL games (Godot 3 etc.) get GL through dlsym; needed with libMangoHud_opengl.so in LD_PRELOAD
+export MANGOHUD_DLSYM=1
+# y700 (ArmadaOS d2621f4f): Steam Remote Play / Steam Link's V4L2 decoder resets after the LAST buffer of a
+# source change; goes with the iris fixes in kernel y6 (1030-1032), otherwise the stream stays green
+export STEAMLINK_V4L2_RESET_AFTER_LAST_BUF=1
+# ~/.steam links the client expects. sdkarm64 is where it takes steam-launch-wrapper for every
+# game launch; without it each game process exits at once.
+S="$HOME/.local/share/Steam"; mkdir -p "$HOME/.steam"
+for l in root:. steam:. binarm64:steamrtarm64 sdkarm64:linuxarm64 sdk64:linux64 sdk32:linux32; do
+	[ -e "$HOME/.steam/${l%%:*}" ] || ln -sfn "$S/${l#*:}" "$HOME/.steam/${l%%:*}"
+done
+MAGIC_RESTART_EXITCODE=42
+n=0; t0=$(date +%s)
+while :; do
+	./steamrtarm64/steam "$@"
+	status=$?
+	[ "$status" -eq "$MAGIC_RESTART_EXITCODE" ] || exit "$status"
+	now=$(date +%s)
+	if [ $((now - t0)) -gt 120 ]; then n=0; t0=$now; fi
+	n=$((n + 1))
+	[ "$n" -le 5 ] || { echo "steam-arm64: too many restarts, giving up" >&2; exit "$status"; }
+	echo "steam-arm64: restarting Steam by request" >&2
+done

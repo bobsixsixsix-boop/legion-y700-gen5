@@ -1,0 +1,45 @@
+#!/bin/sh
+# Game performance numbers in three steps. y700-hud-overlay.service samples (--sampler, since 10-22) and the
+# status bar shows the numbers (linux/dock/y700-shellbar): a line after the clock over apps (over fullscreen ones
+# too), a widget at the top left of the desktop. Until 10-22 the service drew its own bar above every window.
+#   off  -> full  (FPS, CPU, GPU, temperatures, power)
+#   full -> mini  (FPS and power only)
+#   mini -> off
+#   y700-hud-toggle            next step
+#   y700-hud-toggle off|full|mini   that step (the control centre passes the target explicitly: a queued
+#                              "next" after a running "next" would not end where the last tap meant)
+#   y700-hud-toggle status     prints off|full|mini
+# start/stop only: the service is never enabled, so the numbers do not come back at boot. The mode is a
+# file the status bar watches, so full<->mini switches in place without a restart. Off removes the cache
+# files too (the unit's ExecStopPost does; this also covers a unit from before 10-22 without it): the status
+# bar shows the numbers while y700-hud.txt.kv exists.
+# Exit status is the service operation's: a failed start/stop exits 1 with the reason on stderr (the
+# control centre shows it as a toast); the notification at the end is a courtesy and never masks that.
+R=${XDG_RUNTIME_DIR:-/tmp}; MODE=$R/y700-hud.mode
+cur() {
+	systemctl --user is-active --quiet y700-hud-overlay.service || { echo off; return; }
+	[ "$(cat "$MODE" 2>/dev/null)" = mini ] && echo mini || echo full
+}
+want=${1:-next}
+case $want in
+status) cur; exit 0 ;;
+next) case $(cur) in off) want=full ;; full) want=mini ;; *) want=off ;; esac ;;
+off | full | mini) ;;
+*) echo "usage: $0 [off|full|mini|next|status]" >&2; exit 2 ;;
+esac
+case $want in
+off)
+	if ! err=$(systemctl --user stop y700-hud-overlay.service 2>&1); then echo "关闭浮层失败：${err:-systemctl stop}" >&2; exit 1; fi
+	rm -f "$R/y700-hud.txt" "$R/y700-hud.txt.kv"
+	m="游戏性能浮层：已关闭"; d="" ;;
+full | mini)
+	echo "$want" > "$MODE" || { echo "写不了 $MODE" >&2; exit 1; }
+	if ! err=$(systemctl --user start y700-hud-overlay.service 2>&1); then echo "启动浮层失败：${err:-systemctl start}" >&2; exit 1; fi
+	# "started" is not "running": the unit must still be active once start returned
+	systemctl --user is-active --quiet y700-hud-overlay.service || { echo "浮层服务启动后立刻退出了（journalctl --user -u y700-hud-overlay）" >&2; exit 1; }
+	if [ "$want" = full ]; then m="游戏性能浮层：全部信息"; d="帧数、CPU、GPU、温度、功耗：应用里在状态栏时钟后面，桌面上是左上角的小组件"
+	else m="游戏性能浮层：帧数 + 功耗"; d="只剩帧数（没游戏时是刷新率）和整机瓦数，插电时还有电池的充放电功率"; fi ;;
+esac
+# the notification is a courtesy: without libnotify-bin the switch must still report success
+command -v notify-send >/dev/null && notify-send -a "Y700" -i utilities-system-monitor "$m" "$d"
+exit 0

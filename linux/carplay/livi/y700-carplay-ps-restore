@@ -1,0 +1,85 @@
+#!/bin/bash
+# y700-carplay-ps-restore [IFACE [MAX_S [nm]]] — turn the station's Wi-Fi power save back on after LIVI's access point
+# (2026-10-22). Runs as an ExecStopPost of livi-wifi-ap.service (drop-in livi-wifi-ap-y700.conf), and again, with
+# "nm", from NetworkManager's dispatcher (90-y700-carplay-ps) when the stop could not finish the job (10-24).
+#
+# Why: livi-helperd --wifi-ap runs `iw dev IFACE set power_save off` ("[wifi-ap] wlp1s0 stays awake") and its
+# --wifi-ap-teardown never turns it back on. cfg80211 keeps that choice on the wireless device across the AP ->
+# station switch and applies it at every later association, and NetworkManager's wifi.powersave=3 did not undo it
+# (10-22: off from 16:53 until found by y700-checklist at 20:00, HOME_6G re-associated at 19:20 in between; on boot
+# -4 it did come back on its own, after a wpa_supplicant crash). Cost ~0.06 W with the screen off, every time.
+#
+# Leaves IFACE alone when tb323fu-helperd's performance profile (WifiLowLatency) has turned power save off: that
+# one lists the interface in /etc/tb323fu/helper.toml [wifi] power_save_off and turns it back on itself.
+# nl80211 refuses power save on an AP interface, so it waits up to MAX_S (10 s; 5 from the dispatcher) for IFACE to
+# be a station again. Never fails the unit.
+#
+# Deferred to NetworkManager (10-24): at 23:49 on 10-23 the stop waited its 20 s and gave up, `iw` still said
+# "type AP"; NetworkManager only connected HOME_6G again at 23:54 (its autoconnect retries were blocked: HOME_6G and
+# HOME_2.4G had failed at 22:15, before the access point), and power save stayed off until turned on by hand at 00:2x.
+# Waiting longer would not do: in the car there may be no known network for an hour, and the stop holds whoever
+# stops the unit (LIVI's quit, the launcher's cleanup) for as long as it waits. So the stop leaves a mark,
+# PENDING_DIR/ps-pending-IFACE (/run: gone at reboot, when ath12k starts with power save on anyway), waits briefly
+# and removes the mark only once power save is settled (on, already on, or helperd's); otherwise the dispatcher hook
+# runs this again, with "nm", the next time NetworkManager brings IFACE up. Without a mark that run does nothing,
+# so the hook never competes with helperd or NetworkManager over power save at other times.
+#
+# Bounded in time (10-23): systemd gives ExecStopPost the unit's TimeoutStopSec, 8 s in LIVI's unit, then kills it.
+# At 15:01 that day it was killed so, without a word, power save stayed off: the interface was a station again
+# within a second and what held it is not known. Every iw call is capped (IW_S), the wait ends at a deadline instead
+# of after a count, so the whole run stays under MAX_S + 4 * IW_S + 1 (19 s by default), inside the drop-in's
+# TimeoutStopSec=40; a "start" line goes out first and every end names its time, so the next stall shows where.
+IF=${1:-wlp1s0}; WHO=${3:-stop}
+if [ "$WHO" = nm ]; then MAX=${2:-5}; else MAX=${2:-10}; fi
+IW_S=${Y700_PS_IW_S:-2}
+HELPER_TOML=${Y700_HELPER_TOML:-/etc/tb323fu/helper.toml}
+PD=${Y700_PS_PENDING_DIR:-/run/y700-carplay}; P=$PD/ps-pending-$IF
+say() { logger -t y700-carplay "$*" 2>/dev/null; echo "$*"; }
+iwc() { timeout "$IW_S" iw dev "$IF" "$@" 2>&1; }
+station() { iwc info | grep -q 'type managed'; }
+settled() { rm -f "$P"; }
+if [ "$WHO" = nm ]; then
+    [ -e "$P" ] || exit 0         # nothing pending: power save is NetworkManager's and helperd's
+    since=$(cat "$P" 2>/dev/null)
+    WHEN="when NetworkManager brought $IF up (pending since ${since:-?})"
+    left="still pending for the next time NetworkManager brings $IF up"
+    say "$IF power save: start ($WHEN)"
+else
+    mkdir -p "$PD" 2>/dev/null && date '+%F %T' >"$P" 2>/dev/null
+    WHEN="after the CarPlay access point"
+    if [ -e "$P" ]; then
+        left="deferred to NetworkManager's dispatcher (90-y700-carplay-ps), for when $IF next connects"
+    else
+        left="and could not leave $P for NetworkManager's dispatcher"
+    fi
+    say "$IF power save: start ($WHEN)"
+fi
+
+end=$((SECONDS + MAX))
+until station; do
+    if [ $SECONDS -ge $end ]; then
+        say "$IF power save not restored: not a station after ${SECONDS}s ($(iwc info | grep -o 'type .*' || echo 'iw gave no type')), $left"
+        exit 0
+    fi
+    sleep 0.5
+done
+if grep -qE "^[[:space:]]*power_save_off[[:space:]]*=[[:space:]]*\[[^]]*\"$IF\"" "$HELPER_TOML" 2>/dev/null; then
+    settled
+    say "$IF power save left off: tb323fu-helperd's performance profile holds it ($HELPER_TOML), ${SECONDS}s"
+    exit 0
+fi
+ps=$(iwc get power_save)
+case "$ps" in
+    *": off"*)
+        iwc set power_save on | sed 's/^/iw: /'
+        now=$(iwc get power_save)
+        case "$now" in
+            *": on"*) settled; say "$IF power save restored $WHEN: $now, ${SECONDS}s" ;;
+            *) say "$IF power save not restored $WHEN: iw set power_save on left '${now:-nothing, in ${IW_S}s}', ${SECONDS}s, $left" ;;
+        esac ;;
+    *": on"*)
+        settled; say "$IF power save already on, ${SECONDS}s" ;;
+    *)
+        say "$IF power save not restored: iw get power_save said '${ps:-nothing, in ${IW_S}s}', ${SECONDS}s, $left" ;;
+esac
+exit 0

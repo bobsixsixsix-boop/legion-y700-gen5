@@ -1,0 +1,13 @@
+[Unit]
+Description=FEX x86 guest rootfs at the path Steam's FEX compat tool expects
+ConditionPathExists=/usr/local/share/y700/guestos/ArchLinux.sqsh
+Before=systemd-user-sessions.service graphical.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/y700-guestos-mount start
+ExecStop=/usr/local/sbin/y700-guestos-mount stop
+
+[Install]
+WantedBy=multi-user.target

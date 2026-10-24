@@ -1,0 +1,18 @@
+# /etc/systemd/system/y700-carplay-boot-guard.service -- give wlp1s0 back to NetworkManager after a hard reset
+# (linux/carplay/livi/, 2026-10-17). While CarPlay runs, LIVI's helper writes 99-livi-ap-unmanaged.conf so NM lets go
+# of the Wi-Fi; LIVI quitting (or y700-carplay after a crash) removes it, a reset or a flat battery does not, and then
+# the tablet would boot without Wi-Fi. livi-wifi-ap.service is only enabled in LIVI's "dedicated interface" mode
+# (not used here); unless it is, the file is a leftover and goes before NM reads its config.
+[Unit]
+Description=y700: drop LIVI's leftover NetworkManager unmanaged config before NetworkManager starts
+DefaultDependencies=no
+After=local-fs.target
+Before=NetworkManager.service
+ConditionPathExists=/etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'systemctl -q is-enabled livi-wifi-ap.service || { rm -f /etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf; echo removed leftover 99-livi-ap-unmanaged.conf; }'
+
+[Install]
+WantedBy=NetworkManager.service

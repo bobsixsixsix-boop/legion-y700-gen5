@@ -1,0 +1,8 @@
+bfsprop 2026-10-18 13:11:08  Google Chrome 155.0.8059.79   dpms=Off
+screen off at 13:11:09, starting
+min: gpu=7067 HAS   --enable-features=WaylandExternalBeginFrameSource
+list: gpu=7539 HAS   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WaylandExternalBeginFrameSource,WebRtcPipeWireCamera
+owner: gpu=8030 HAS   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WaylandExternalBeginFrameSource,WebRtcPipeWireCamera
+owner-zink: gpu=8443 HAS   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WaylandExternalBeginFrameSource,WebRtcPipeWireCamera
+localstate: gpu=8890 MISSING   --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,PlatformHEVCDecoderSupport,VaapiIgnoreDriverChecks,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,WebRtcPipeWireCamera
+done 13:12:19  dpms=Off  leftover units: 0

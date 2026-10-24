@@ -1,0 +1,41 @@
+--- a/wiliwili/source/view/mpv_core.cpp
++++ b/wiliwili/source/view/mpv_core.cpp
+@@ -160,6 +160,10 @@
+ #define glBindFramebuffer(a, b) void()
+ #endif
+ 
++#if defined(__linux__)
++#include <fcntl.h>   // y700: open() of the DRM render node for VA-API zero-copy (see the render params below)
++#endif
++
+ #if defined(__linux__) && defined(__GLFW__) && defined(USE_EGL)
+ #define GLFW_EXPOSE_NATIVE_X11
+ #define GLFW_EXPOSE_NATIVE_WAYLAND
+@@ -479,6 +483,17 @@
+ #else
+     int advanced_control{1};
+     mpv_opengl_init_params gl_init_params{get_proc_address, nullptr};
++#if defined(__linux__)
++    // y700 (2026-10-16): hand mpv a DRM render node, so its VA-API interop can open a VA display and map the
++    // decoder's frames straight into GL (hwdec=vaapi). Without it libmpv logs "Trying to open a x11 / wayland /
++    // drm VA display... Could not create a VA display" and falls back to vaapi-copy: every decoded frame is read
++    // back to system memory and uploaded again (about 90 MB/s for 1080p30). fd/crtc/connector stay -1: no KMS.
++    static mpv_opengl_drm_params_v2 drm_params{-1, -1, -1, nullptr, -1};
++    if (drm_params.render_fd < 0) {
++        const char *node = getenv("WILIWILI_DRM_RENDER_NODE");
++        drm_params.render_fd = open(node && *node ? node : "/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    }
++#endif
+     mpv_render_param params[]{{MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL)},
+                               {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
+                               {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced_control},
+@@ -488,6 +503,9 @@
+ #if defined(GLFW_EXPOSE_NATIVE_WAYLAND)
+                               {MPV_RENDER_PARAM_WL_DISPLAY, glfwGetWaylandDisplay()},
+ #endif
++#if defined(__linux__)
++                              {MPV_RENDER_PARAM_DRM_DISPLAY_V2, &drm_params},
++#endif
+                               {MPV_RENDER_PARAM_INVALID, nullptr}};
+ #endif
+ 

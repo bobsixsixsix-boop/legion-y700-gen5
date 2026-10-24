@@ -1,0 +1,148 @@
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 17:30:00 +0000
+Subject: [PATCH DRAFT] soc: qcom: ice: runtime PM for a dedicated ICE node so its power domain can switch off
+
+*** DRAFT. Not compiled, not booted, not tested. Generated against v7.3-rc4 drivers/soc/qcom/ice.c (the tb323fu
+*** series 0001-0130 and the y patches do not touch this file). Only for a trial kernel (y10+) with the owner present.
+*** Rationale, evidence and the verification list: linux/power/ALWAYS-ON.md section 4.
+
+On kaanapali the Inline Crypto Engine has its own DT node with
+power-domains = <&gcc GCC_UFS_PHY_GDSC>, the UFS host's domain (kaanapali.dtsi
+crypto@1d88000). The binding requires power-domains for sm8450, sm8550,
+sm8650, sm8750, kaanapali, sa8775p, sc7180, sc7280 and qcs8300, so every one
+of those SoCs has the same pinned domain. The driver never
+enables runtime PM on that device, so genpd lists it as "unsupported" and
+genpd_power_off() always counts one device that is not runtime suspended:
+the UFS host controller's GDSC can never switch off, however long the host
+itself stays runtime suspended (pm_genpd_summary on a Lenovo TB323FU:
+gcc_ufs_phy_gdsc on / 1d88000.crypto unsupported / 1d84000.ufs active).
+
+Follow the consumer: the engine is active from probe (qcom_ice_create()
+leaves the clocks on until the consumer's first qcom_ice_suspend()), then
+qcom_ice_resume()/qcom_ice_suspend() take and drop one runtime PM reference
+on the ICE device. No callbacks are needed: the device sits in a genpd, whose
+runtime callbacks only book the domain on and off. The legacy binding, where
+the engine is created on the consumer's own device ("ice" reg range), is left
+alone so the UFS host's own reference count is not touched from inside its
+suspend path.
+
+Expected on the tablet (screen off, UFS idle, flight recorder stopped):
+  pm_genpd_summary: 1d88000.crypto suspended, 1d84000.ufs suspended, gcc_ufs_phy_gdsc off-0
+  clk_summary: gcc_ufs_phy_ice_core_clk enable_cnt 0 (as before), gcc_gpll4 enable_cnt 0
+Test plan before trusting it: 50 forced suspend/resume cycles of the UFS host under I/O (screen on), fstrim,
+a 1 h dd read/write loop, three s2idle cycles, then an unattended night; abort on any ufshcd/ufs_qcom/ice error
+in dmesg. Failure mode to expect: UFS not coming back after the first screen-off idle -> root filesystem hangs.
+Reviewer note (2026-10-16): ufshcd reprograms inline-crypto keyslots only in ufshcd_hba_start() (ufshcd_crypto_enable),
+not on a hibern8-only runtime resume, so keyslot contents across a real GDSC off rely on the GDSC's RETAIN_FF_ENABLE,
+exactly as legacy-binding SoCs (ICE inside the UFS node, e.g. sm8250) already do today. Nothing on this install uses
+inline crypto (inventory/mounts has no encrypted mount), so that path is NOT exercised by the test plan above; say so
+if this is ever sent upstream.
+
+Assisted-by: LLM [Claude Code]
+---
+ drivers/soc/qcom/ice.c | 42 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+
+--- a/drivers/soc/qcom/ice.c
++++ b/drivers/soc/qcom/ice.c
+@@ -16,6 +16,7 @@
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
+ #include <linux/xarray.h>
+ 
+ #include <linux/firmware/qcom/qcom_scm.h>
+@@ -113,6 +114,8 @@
+ 	bool use_hwkm;
+ 	bool hwkm_init_complete;
+ 	u8 hwkm_version;
++	/* dedicated DT node: runtime PM follows qcom_ice_resume()/_suspend() */
++	bool rpm;
+ };
+ 
+ static DEFINE_XARRAY(ice_handles);
+@@ -315,19 +318,33 @@
+ 	struct device *dev = ice->dev;
+ 	int err;
+ 
++	if (ice->rpm) {
++		err = pm_runtime_resume_and_get(dev);
++		if (err < 0) {
++			dev_err(dev, "Failed to runtime resume: %d\n", err);
++			return err;
++		}
++	}
++
+ 	err = clk_prepare_enable(ice->core_clk);
+ 	if (err) {
+ 		dev_err(dev, "Failed to enable core clock: %d\n", err);
+-		return err;
++		goto err_put;
+ 	}
+ 
+ 	err = clk_prepare_enable(ice->iface_clk);
+ 	if (err) {
+ 		dev_err(dev, "Failed to enable iface clock: %d\n", err);
+-		return err;
++		clk_disable_unprepare(ice->core_clk);
++		goto err_put;
+ 	}
+ 	qcom_ice_hwkm_init(ice);
+ 	return qcom_ice_wait_bist_status(ice);
++
++err_put:
++	if (ice->rpm)
++		pm_runtime_put(dev);
++	return err;
+ }
+ EXPORT_SYMBOL_GPL(qcom_ice_resume);
+ 
+@@ -337,6 +354,10 @@
+ 	clk_disable_unprepare(ice->core_clk);
+ 	ice->hwkm_init_complete = false;
+ 
++	/* lets the power domain this node sits in switch off with its consumer */
++	if (ice->rpm)
++		pm_runtime_put(ice->dev);
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(qcom_ice_suspend);
+@@ -738,6 +759,7 @@
+ 	unsigned long phandle = pdev->dev.of_node->phandle;
+ 	struct qcom_ice *engine;
+ 	void __iomem *base;
++	int ret;
+ 
+ 	guard(mutex)(&ice_mutex);
+ 
+@@ -756,6 +778,26 @@
+ 		return PTR_ERR(engine);
+ 	}
+ 
++	/*
++	 * A dedicated ICE node may sit in a power domain (kaanapali: the UFS
++	 * host's GCC_UFS_PHY_GDSC). genpd powers a domain off only once every
++	 * device in it is runtime suspended, so without runtime PM here the
++	 * domain stays on for as long as the ICE is probed, whatever its
++	 * consumer does. Follow the clocks: active from probe (qcom_ice_create()
++	 * left them on) until the consumer's first qcom_ice_suspend(), then
++	 * along qcom_ice_resume()/qcom_ice_suspend(). The legacy binding creates
++	 * the engine on the consumer's own device and is left alone.
++	 */
++	pm_runtime_get_noresume(&pdev->dev);
++	pm_runtime_set_active(&pdev->dev);
++	ret = devm_pm_runtime_enable(&pdev->dev);
++	if (ret) {
++		pm_runtime_put_noidle(&pdev->dev);
++		xa_store(&ice_handles, phandle, ERR_PTR(ret), GFP_KERNEL);
++		return ret;
++	}
++	engine->rpm = true;
++
+ 	xa_store(&ice_handles, phandle, engine, GFP_KERNEL);
+ 
+ 	return 0;
+-- 
+2.43.0

@@ -1,0 +1,12 @@
+#!/bin/sh
+# /usr/local/lib/y700-carplay/bin/sudo -- the sudo LIVI sees (y700-carplay puts this directory first on LIVI's PATH
+# only; the system's sudo stays as it is). Ubuntu 26.04's default sudo is sudo-rs, which ignores -E ("preserving the
+# entire environment is not supported"). livi-core starts its root helper with "sudo -n -E" and hands it LIVI's
+# AirPlay accessory identity (LIVI_CP_PK, LIVI_CP_PI) and the CarPlay port (LIVI_CP_AIRPLAY_PORT) only through the
+# environment - the helper reads the rest back from the user's config.json - so under sudo-rs CarPlay is never
+# announced ("LIVI opened no CarPlay port"). Classic sudo (sudo.ws, same /etc/sudoers, still installed alongside)
+# keeps the environment; SETENV comes from /etc/sudoers.d/99-LIVI-helper.
+if [ -x /usr/bin/sudo.ws ]; then
+    exec /usr/bin/sudo.ws "$@"
+fi
+exec /usr/bin/sudo "$@"

@@ -1,0 +1,90 @@
+# This repo tracks scripts, configs, patches and notes. ROM packages, partition images, logs,
+# toolchains and anything device-identifying stay out.
+
+# ROM packages, probes and flashing logs
+/coloros-v*/
+/color-rom-probe/
+/flash-logs/
+/originos-v*/
+
+# third-party checkouts and toolchains
+/edl-win/
+/linux/tb323fu-linux/
+/tools/android-sdk/
+/tools/jdk*/
+/tools/venv/
+/tools/*.zip
+/y700-recovery/edl/
+/y700-recovery/edlvenv/
+
+# runtime state and raw measurement output written by the scripts
+/runs/
+/tools/*-state.json
+
+# device identifiers: unlock data, EDL logs (they print the chip serial and HWID), Sahara traces
+/y700-recovery/notes/unlock*.txt
+/y700-recovery/notes/edl-log*.txt
+/y700-recovery/notes/log.txt
+/y700-recovery/notes/sahara-trace*.txt
+
+# proprietary vendor files copied off a device: keep them local
+*.vendor-*
+/stock-zui/cn088-daxService/
+/stock-zui/ksu-y700-dax/system/system_ext/etc/permissions/com.dolby.daxservice.xml
+/android-debloat/refresh-rate/*.port-orig
+/android-debloat/refresh-rate/refresh_rate_config*.xml
+
+# binaries, archives and media
+*.img
+*.img.*
+*.bin
+*.elf
+*.mbn
+*.ko
+*.so
+*.sqfs
+*.apk
+*.idsig
+*.dex
+*.jar
+*.zip
+*.7z
+*.rar
+*.tar
+*.tgz
+*.gz
+*.xz
+*.zst
+*.bz2
+*.cpio
+*.wav
+*.mp4
+*.mkv
+*.exe
+*.efi
+*.dll
+Image-*
+!Image-*.sha256
+
+# screenshots; diagrams and test shots under linux/ are kept
+*.png
+*.jpg
+!linux/**/*.png
+
+# Python / build leftovers
+__pycache__/
+*.pyc
+target/
+
+# signing material and identity containers: never commit any of these
+*.jks
+switcher/android/keystore.pass
+*.pem
+*.crx
+*.pk8
+*.p7b
+*.p12
+*.pfx
+*.key
+*.keystore
+.env

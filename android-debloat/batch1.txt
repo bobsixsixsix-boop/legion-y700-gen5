@@ -1,0 +1,22 @@
+# 第一批禁用清单（2026-10-11）。格式：包名 <TAB> 类别 <TAB> 说明
+# 用 apply.sh 禁用（pm disable-user --user 0），restore.sh 恢复。
+com.oplus.statistics.rom	统计上报	ROM 级使用数据统计与上报
+com.oplus.olc	日志上报	OPLUS Log Collector，后台收集系统日志
+com.oplus.logtrial	日志上报	日志试用/上传组件
+com.oplus.romupdate	云控	RUS 云端下发配置（云控），禁用后配置停在当前版本
+com.oplus.sau	云端静默更新	静默升级系统应用；移植系统上被推送新版系统应用可能对不上
+com.oplus.sauhelper	云端静默更新	sau 辅助
+com.oplus.upgradeguide	升级引导	系统升级引导页
+com.heytap.openid	广告标识	OAID 广告/跟踪标识服务
+com.oppo.ctautoregist	运营商自注册	中国电信终端自注册，平板无 SIM 用不到
+com.coloros.regservice	注册上报	设备注册信息上报
+com.coloros.activation	激活上报	设备激活统计上报
+com.oplus.games	游戏	游戏助手/游戏空间（安卓侧不用于游戏）
+com.nearme.gamecenter	游戏	游戏中心
+com.oplus.game.empowerment.folder	游戏	游戏推荐文件夹
+com.oplus.aipaint	AI	AI 绘画
+com.oplus.aiwriter	AI	AI 写作
+com.oplus.aimemory	AI	AI 记忆
+com.oplus.aiwidgets	AI	AI 小组件
+com.aiunit.aon	AI	AON 常开感知（隔空手势/注视）
+com.heytap.speechassist	AI	小布助手

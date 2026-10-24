@@ -1,0 +1,18 @@
+5211e37c9 Bluetooth: qca: check the device address on every setup
+dfcf7e0fa scsi: ufs: core: Fix a deadlock between clock scaling and device commands
+2db479bca clk: qcom: gcc-kaanapali: Enable FORCE_MEM_CORE_ON for UFS AXI PHY clock
+ M arch/arm64/kernel/signal.c
+ M drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+ M drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+ M drivers/media/platform/qcom/iris/iris_ctrls.c
+ M drivers/media/platform/qcom/iris/iris_ctrls.h
+ M drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+ M drivers/media/platform/qcom/iris/iris_hfi_gen2.h
+ M drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+ M drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+ M drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+ M drivers/media/platform/qcom/iris/iris_platform_common.h
+ M drivers/media/platform/qcom/iris/iris_vidc.c
+ M drivers/net/wireless/ath/ath12k/core.c
+ M drivers/net/wireless/ath/ath12k/mac.c
+ M drivers/power/supply/qcom_battmgr.c

@@ -1,0 +1,51 @@
+#!/bin/bash
+# /usr/local/sbin/y700-carplay-ap-tune -- runs beside LIVI's access point (linux/carplay/livi/, 2026-10-17).
+# y700-carplay-ap-tune.service, pulled in by livi-wifi-ap.service through the drop-in
+# /etc/systemd/system/livi-wifi-ap.service.d/y700.conf and stopped with it (BindsTo). LIVI itself is not touched.
+# For every hostapd LIVI starts on /tmp/livi-hostapd.conf, once it is ENABLED:
+#   Y700_AP_DEBUG=1 (default): hostapd's debug output with timestamps into LIVI's own /tmp/livi-hostapd.log
+#       (LIVI empties it at each access point start). Keys show as [REMOVED] without hostapd -K, but some lines
+#       still name the passphrase's length: read the file through a filter that cuts passphrase/psk lines.
+#   Y700_AP_SECURITY=livi (default) leaves LIVI's WPA2/WPA3 transition (WPA-PSK SAE, PMF optional) alone.
+#       =wpa2 makes it WPA2-PSK only, the way LIVI's own fallback (livi-wifi ap_config::weaker) does it -
+#       wpa_key_mgmt=WPA-PSK, no ieee80211w, no sae_pwe - and hostapd re-reads it (RELOAD_CONFIG, before any
+#       phone is on). It was the default for a while: the iPhone that associated and never answered the 4-way
+#       handshake in test 2 looked like a WPA3 problem, but the firmware had dropped every EAPOL-Key 1/4 (README,
+#       step 10, "问题二"; 10-17 offline tests).
+# A watchdog that stopped hostapd when a station never answered three 1/4s was here for a day: a new hostapd did
+# not get out of that firmware state (40 restarts in a row, all dropped), so it went (aptest/ keeps the script).
+# The config file holds the passphrase: edited in place only, never printed, left at 0600 (LIVI writes 0644).
+export LC_ALL=C
+CONF=/tmp/livi-hostapd.conf
+CTRL=/var/run/hostapd
+SECURITY=${Y700_AP_SECURITY:-livi}
+DEBUG=${Y700_AP_DEBUG:-1}
+
+echo "[ap-tune] watching for LIVI's hostapd (security=$SECURITY debug=$DEBUG)"
+# Polls only while a hostapd is coming up (LIVI starts one at once and restarts it if it dies); while one runs, a
+# kill -0 every 2 s. The first version ran pgrep every 0.2 s all session long: 11.5 s CPU in 2 min 17 s.
+while :; do
+    pid=$(pgrep -o -f "/hostapd $CONF\$") || { sleep 0.5; continue; }
+    iface=$(sed -n 's/^interface=//p' "$CONF" | head -1)
+    cli() { hostapd_cli -p "$CTRL" -i "$iface" "$@" 2>&1; }
+    for i in $(seq 100); do
+        [ -n "$iface" ] && [ "$(cli status | sed -n 's/^state=//p')" = ENABLED ] && break
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.2
+    done
+    if [ "$(cli status | sed -n 's/^state=//p')" != ENABLED ]; then
+        while kill -0 "$pid" 2>/dev/null; do sleep 2; done
+        continue
+    fi
+    chmod 600 "$CONF"
+    if [ "$DEBUG" = 1 ]; then
+        echo "[ap-tune] hostapd $pid on $iface: debug log $(cli log_level DEBUG 1 | tr -d '\n')"
+    fi
+    if [ "$SECURITY" = wpa2 ] && grep -q '^wpa_key_mgmt=.*SAE' "$CONF"; then
+        sed -i -E -e 's/^wpa_key_mgmt=.*/wpa_key_mgmt=WPA-PSK/' -e '/^(ieee80211w|sae_pwe)=/d' "$CONF"
+        r=$(cli raw RELOAD_CONFIG | tr -d '\n')
+        km=$(cli get_config | sed -n 's/^key_mgmt=//p' | tr -d '\n')
+        echo "[ap-tune] hostapd $pid: WPA2 only, RELOAD_CONFIG $r, key_mgmt now '$km'"
+    fi
+    while kill -0 "$pid" 2>/dev/null; do sleep 2; done
+done

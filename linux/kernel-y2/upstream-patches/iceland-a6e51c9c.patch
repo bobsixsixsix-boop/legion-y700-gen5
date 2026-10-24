@@ -1,0 +1,2237 @@
+From a6e51c9ce17924fb08742f03f0418e0636490363 Mon Sep 17 00:00:00 2001
+From: Yibo Wang <2024312277@stu.hit.edu.cn>
+Date: Thu, 8 Oct 2026 10:12:06 -0500
+Subject: [PATCH] media: qcom: iris: Kaanapali (VPU4) video codec support for
+ iceland
+
+Backport two upstream series plus one vendor-tree patch, all verified
+on the device with hardware H.264/HEVC/VP9 decode (NV12/P010/UBWC
+output) and H.264/HEVC encode:
+
+- upstream v3 'iris: Migrate iommus to iris sub nodes' patches 01-07
+  (bindings, of_iommu iommu-ranges reserved-region derivation, context
+  bank child devices, buffer routing, DMA-mask guard); 08-13 are other
+  SoC dts updates and were not needed.
+- upstream v4 'iris: add support for kaanapali platform' with local
+  deltas: .firmware_desc_gen2 renamed to .firmware_desc (7.2 has no
+  gen1/gen2 split), and the mtp enablement patch replaced by the
+  iceland node using the vendor vpu40_2v.mbn firmware (SoC rev 2.0).
+- sm8750-video-accel VA-API patch (decode-order / loop filter
+  controls), two hunks re-done by hand plus the missing
+  iris_set_deblock_gen2 prototype restored.
+
+Patch provenance and local deltas documented in
+repos/iris-kaanapali-patches/README.md (outside this tree).
+
+Device: 2000000.video-codec probes with pixel/non-pixel context
+banks, runtime suspend resumes clean (vpu4 power-off sequence), no
+SMMU faults or LPI timeouts.
+---
+ .../bindings/media/qcom,kaanapali-iris.yaml   | 227 ++++++++++++++++++
+ .../bindings/media/qcom,sc7180-venus.yaml     |  15 --
+ .../bindings/media/qcom,sm8550-iris.yaml      | 124 ++++++----
+ .../bindings/media/qcom,sm8750-iris.yaml      | 193 ++++++++-------
+ .../bindings/media/qcom,venus-common.yaml     | 106 +++++++-
+ .../dts/qcom/kaanapali-oneplus-iceland.dts    |   6 +
+ arch/arm64/boot/dts/qcom/kaanapali.dtsi       | 142 +++++++++++
+ drivers/iommu/of_iommu.c                      | 107 ++++++++-
+ drivers/media/platform/qcom/iris/Makefile     |   2 +
+ .../media/platform/qcom/iris/iris_buffer.c    |   8 +-
+ drivers/media/platform/qcom/iris/iris_core.h  |   4 +
+ drivers/media/platform/qcom/iris/iris_ctrls.c |  93 +++++++
+ drivers/media/platform/qcom/iris/iris_ctrls.h |   1 +
+ .../media/platform/qcom/iris/iris_hfi_gen2.c  | 136 +++++++++++
+ .../qcom/iris/iris_hfi_gen2_command.c         |  18 ++
+ .../qcom/iris/iris_hfi_gen2_defines.h         |   9 +
+ .../media/platform/qcom/iris/iris_hfi_queue.c |  16 +-
+ .../platform/qcom/iris/iris_platform_common.h |  12 +
+ .../qcom/iris/iris_platform_kaanapali.c       |  58 +++++
+ .../qcom/iris/iris_platform_kaanapali.h       |  15 ++
+ .../platform/qcom/iris/iris_platform_vpu4x.c  |  66 +++++
+ drivers/media/platform/qcom/iris/iris_probe.c |  83 ++++++-
+ .../media/platform/qcom/iris/iris_resources.c |  41 ++++
+ .../media/platform/qcom/iris/iris_resources.h |   1 +
+ drivers/media/platform/qcom/iris/iris_vidc.c  |   7 +-
+ drivers/media/platform/qcom/iris/iris_vpu4x.c |   4 +
+ .../platform/qcom/iris/iris_vpu_buffer.c      |  59 ++++-
+ .../platform/qcom/iris/iris_vpu_buffer.h      |  16 ++
+ 28 files changed, 1388 insertions(+), 181 deletions(-)
+ create mode 100644 Documentation/devicetree/bindings/media/qcom,kaanapali-iris.yaml
+ create mode 100644 drivers/media/platform/qcom/iris/iris_platform_kaanapali.c
+ create mode 100644 drivers/media/platform/qcom/iris/iris_platform_kaanapali.h
+ create mode 100644 drivers/media/platform/qcom/iris/iris_platform_vpu4x.c
+
+diff --git a/Documentation/devicetree/bindings/media/qcom,kaanapali-iris.yaml b/Documentation/devicetree/bindings/media/qcom,kaanapali-iris.yaml
+new file mode 100644
+index 000000000000..023e9bd14870
+--- /dev/null
++++ b/Documentation/devicetree/bindings/media/qcom,kaanapali-iris.yaml
+@@ -0,0 +1,227 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/media/qcom,kaanapali-iris.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm Kaanapali Iris video encoder and decoder
++
++maintainers:
++  - Vikash Garodia <vikash.garodia@xxxxxxxxxxxxxxxx>
++  - Dikshita Agarwal <dikshita.agarwal@xxxxxxxxxxxxxxxx>
++
++description:
++  The iris video processing unit is a video encode and decode accelerator
++  present on Qualcomm Kaanapali SoC.
++
++properties:
++  compatible:
++    const: qcom,kaanapali-iris
++
++  clocks:
++    maxItems: 10
++
++  clock-names:
++    items:
++      - const: iface
++      - const: core
++      - const: vcodec0_core
++      - const: iface1
++      - const: core_freerun
++      - const: vcodec0_core_freerun
++      - const: vcodec_bse
++      - const: vcodec_vpp0
++      - const: vcodec_vpp1
++      - const: vcodec_apv
++
++  dma-coherent: true
++
++  interconnects:
++    maxItems: 2
++
++  interconnect-names:
++    items:
++      - const: cpu-cfg
++      - const: video-mem
++
++  non-pixel:
++    type: object
++    properties:
++      iommus:
++        maxItems: 3
++
++  operating-points-v2: true
++  opp-table:
++    type: object
++
++  power-domains:
++    maxItems: 7
++
++  power-domain-names:
++    items:
++      - const: venus
++      - const: vcodec0
++      - const: mxc
++      - const: mmcx
++      - const: vpp0
++      - const: vpp1
++      - const: apv
++
++  resets:
++    maxItems: 4
++
++  reset-names:
++    items:
++      - const: bus0
++      - const: bus1
++      - const: core
++      - const: vcodec0_core
++
++required:
++  - compatible
++  - dma-coherent
++  - interconnects
++  - interconnect-names
++  - power-domain-names
++  - resets
++  - reset-names
++
++allOf:
++  - $ref: qcom,venus-common.yaml#
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interrupt-controller/arm-gic.h>
++    #include <dt-bindings/power/qcom,rpmhpd.h>
++
++    video-codec@2000000 {
++        compatible = "qcom,kaanapali-iris";
++        reg = <0x02000000 0xf0000>;
++
++        clocks = <&gcc_video_axi0_clk>,
++                 <&video_cc_mvs0c_clk>,
++                 <&video_cc_mvs0_clk>,
++                 <&gcc_video_axi1_clk>,
++                 <&video_cc_mvs0c_freerun_clk>,
++                 <&video_cc_mvs0_freerun_clk>,
++                 <&video_cc_mvs0b_clk>,
++                 <&video_cc_mvs0_vpp0_clk>,
++                 <&video_cc_mvs0_vpp1_clk>,
++                 <&video_cc_mvs0a_clk>;
++        clock-names = "iface",
++                      "core",
++                      "vcodec0_core",
++                      "iface1",
++                      "core_freerun",
++                      "vcodec0_core_freerun",
++                      "vcodec_bse",
++                      "vcodec_vpp0",
++                      "vcodec_vpp1",
++                      "vcodec_apv";
++
++        dma-coherent;
++
++        interconnects = <&gem_noc_master_appss_proc &config_noc_slave_venus_cfg>,
++                        <&mmss_noc_master_video_mvp &mc_virt_slave_ebi1>;
++        interconnect-names = "cpu-cfg",
++                             "video-mem";
++
++        interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++
++        memory-region = <&video_mem>;
++
++        operating-points-v2 = <&iris_opp_table>;
++
++        power-domains = <&video_cc_mvs0c_gdsc>,
++                        <&video_cc_mvs0_gdsc>,
++                        <&rpmhpd RPMHPD_MXC>,
++                        <&rpmhpd RPMHPD_MMCX>,
++                        <&video_cc_mvs0_vpp0_gdsc>,
++                        <&video_cc_mvs0_vpp1_gdsc>,
++                        <&video_cc_mvs0a_gdsc>;
++        power-domain-names = "venus",
++                             "vcodec0",
++                             "mxc",
++                             "mmcx",
++                             "vpp0",
++                             "vpp1",
++                             "apv";
++
++        resets = <&gcc_video_axi0_clk_ares>,
++                 <&gcc_video_axi1_clk_ares>,
++                 <&video_cc_mvs0c_freerun_clk_ares>,
++                 <&video_cc_mvs0_freerun_clk_ares>;
++        reset-names = "bus0",
++                      "bus1",
++                      "core",
++                      "vcodec0_core";
++
++        #address-cells = <1>;
++        #size-cells = <1>;
++        dma-ranges = <0x0 0x0 0xffc00000>;
++
++        non-pixel {
++            iommus = <&apps_smmu 0x1940 0x0>,
++                     <&apps_smmu 0x1944 0x0>,
++                     <&apps_smmu 0x1a20 0x0>;
++            iommu-ranges = <0x25800000 0xda400000>;
++        };
++
++        pixel {
++            iommus = <&apps_smmu 0x1943 0x0>;
++        };
++
++        iris_opp_table: opp-table {
++            compatible = "operating-points-v2";
++
++            opp-240000000 {
++                opp-hz = /bits/ 64 <240000000 240000000 240000000 360000000>;
++                required-opps = <&rpmhpd_opp_low_svs_d1>,
++                                <&rpmhpd_opp_low_svs_d1>;
++            };
++
++            opp-338000000 {
++                opp-hz = /bits/ 64 <338000000 338000000 338000000 507000000>;
++                required-opps = <&rpmhpd_opp_low_svs>,
++                                <&rpmhpd_opp_low_svs>;
++            };
++
++            opp-420000000 {
++                opp-hz = /bits/ 64 <420000000 420000000 420000000 630000000>;
++                required-opps = <&rpmhpd_opp_svs>,
++                                <&rpmhpd_opp_svs>;
++            };
++
++            opp-444000000 {
++                opp-hz = /bits/ 64 <444000000 444000000 444000000 666000000>;
++                required-opps = <&rpmhpd_opp_svs>,
++                                <&rpmhpd_opp_svs_l1>;
++            };
++
++            opp-533000000 {
++                opp-hz = /bits/ 64 <533000000 533000000 533000000 800000000>;
++                required-opps = <&rpmhpd_opp_svs>,
++                                <&rpmhpd_opp_nom>;
++            };
++
++            opp-630000000 {
++                opp-hz = /bits/ 64 <630000000 630000000 630000000 1104000000>;
++                required-opps = <&rpmhpd_opp_svs_l1>,
++                                <&rpmhpd_opp_turbo>;
++            };
++
++            opp-800000000 {
++                opp-hz = /bits/ 64 <800000000 630000000 630000000 1260000000>;
++                required-opps = <&rpmhpd_opp_svs_l1>,
++                                <&rpmhpd_opp_turbo_l0>;
++            };
++
++            opp-1000000000 {
++                opp-hz = /bits/ 64 <1000000000 630000000 850000000 1260000000>;
++                required-opps = <&rpmhpd_opp_nom>,
++                                <&rpmhpd_opp_turbo_l1>;
++            };
++        };
++    };
+diff --git a/Documentation/devicetree/bindings/media/qcom,sc7180-venus.yaml b/Documentation/devicetree/bindings/media/qcom,sc7180-venus.yaml
+index b21bed314848..bfd8b1ad4731 100644
+--- a/Documentation/devicetree/bindings/media/qcom,sc7180-venus.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sc7180-venus.yaml
+@@ -91,21 +91,6 @@ properties:
+     deprecated: true
+     additionalProperties: false
+ 
+-  video-firmware:
+-    type: object
+-    additionalProperties: false
+-
+-    description: |
+-      Firmware subnode is needed when the platform does not
+-      have TrustZone.
+-
+-    properties:
+-      iommus:
+-        maxItems: 1
+-
+-    required:
+-      - iommus
+-
+ required:
+   - compatible
+   - power-domain-names
+diff --git a/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml b/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
+index 0400ca1bff05..727b795231b6 100644
+--- a/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
+@@ -81,6 +81,12 @@ properties:
+   iommus:
+     maxItems: 2
+ 
++  non-pixel:
++    type: object
++    properties:
++      iommus:
++        maxItems: 1
++
+   dma-coherent: true
+ 
+   memory-region:
+@@ -98,10 +104,10 @@ required:
+   - interconnect-names
+   - resets
+   - reset-names
+-  - iommus
+   - dma-coherent
+ 
+ allOf:
++  - $ref: qcom,venus-common.yaml#
+   - if:
+       properties:
+         compatible:
+@@ -150,70 +156,86 @@ examples:
+     #include <dt-bindings/power/qcom-rpmpd.h>
+     #include <dt-bindings/power/qcom,rpmhpd.h>
+ 
+-    video-codec@aa00000 {
+-        compatible = "qcom,sm8550-iris";
+-        reg = <0x0aa00000 0xf0000>;
+-        interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++    soc {
++        #address-cells = <2>;
++        #size-cells = <2>;
+ 
+-        power-domains = <&videocc VIDEO_CC_MVS0C_GDSC>,
+-                        <&videocc VIDEO_CC_MVS0_GDSC>,
+-                        <&rpmhpd RPMHPD_MXC>,
+-                        <&rpmhpd RPMHPD_MMCX>;
+-        power-domain-names = "venus", "vcodec0", "mxc", "mmcx";
++        video-codec@aa00000 {
++            compatible = "qcom,sm8550-iris";
++            reg = <0x0 0x0aa00000 0x0 0xf0000>;
++            interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+ 
+-        clocks = <&gcc GCC_VIDEO_AXI0_CLK>,
+-                 <&videocc VIDEO_CC_MVS0C_CLK>,
+-                 <&videocc VIDEO_CC_MVS0_CLK>;
+-        clock-names = "iface", "core", "vcodec0_core";
++            power-domains = <&videocc VIDEO_CC_MVS0C_GDSC>,
++                            <&videocc VIDEO_CC_MVS0_GDSC>,
++                            <&rpmhpd RPMHPD_MXC>,
++                            <&rpmhpd RPMHPD_MMCX>;
++            power-domain-names = "venus", "vcodec0", "mxc", "mmcx";
+ 
+-        interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ALWAYS
+-                         &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ALWAYS>,
+-                        <&mmss_noc MASTER_VIDEO QCOM_ICC_TAG_ALWAYS
+-                         &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+-        interconnect-names = "cpu-cfg", "video-mem";
++            clocks = <&gcc GCC_VIDEO_AXI0_CLK>,
++                     <&videocc VIDEO_CC_MVS0C_CLK>,
++                     <&videocc VIDEO_CC_MVS0_CLK>;
++            clock-names = "iface", "core", "vcodec0_core";
+ 
+-        memory-region = <&video_mem>;
++            interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ALWAYS
++                             &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ALWAYS>,
++                            <&mmss_noc MASTER_VIDEO QCOM_ICC_TAG_ALWAYS
++                             &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++            interconnect-names = "cpu-cfg", "video-mem";
+ 
+-        resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;
+-        reset-names = "bus";
++            memory-region = <&video_mem>;
+ 
+-        iommus = <&apps_smmu 0x1940 0x0000>,
+-                 <&apps_smmu 0x1947 0x0000>;
+-        dma-coherent;
++            resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;
++            reset-names = "bus";
+ 
+-        operating-points-v2 = <&iris_opp_table>;
++            dma-coherent;
+ 
+-        iris_opp_table: opp-table {
+-            compatible = "operating-points-v2";
++            operating-points-v2 = <&iris_opp_table>;
+ 
+-            opp-240000000 {
+-                opp-hz = /bits/ 64 <240000000>;
+-                required-opps = <&rpmhpd_opp_svs>,
+-                                <&rpmhpd_opp_low_svs>;
+-            };
+-
+-            opp-338000000 {
+-                opp-hz = /bits/ 64 <338000000>;
+-                required-opps = <&rpmhpd_opp_svs>,
+-                                <&rpmhpd_opp_svs>;
+-            };
++            #address-cells = <1>;
++            #size-cells = <1>;
++            dma-ranges = <0x0 0x0 0x0 0xe0000000>;
+ 
+-            opp-366000000 {
+-                opp-hz = /bits/ 64 <366000000>;
+-                required-opps = <&rpmhpd_opp_svs_l1>,
+-                                <&rpmhpd_opp_svs_l1>;
++            non-pixel {
++                iommus = <&apps_smmu 0x1940 0x0>;
++                iommu-ranges = <0x25800000 0xba800000>;
+             };
+ 
+-            opp-444000000 {
+-                opp-hz = /bits/ 64 <444000000>;
+-                required-opps = <&rpmhpd_opp_turbo>,
+-                                <&rpmhpd_opp_turbo>;
++            pixel {
++                iommus = <&apps_smmu 0x1947 0x0>;
+             };
+ 
+-            opp-533333334 {
+-                opp-hz = /bits/ 64 <533333334>;
+-                required-opps = <&rpmhpd_opp_turbo_l1>,
+-                                <&rpmhpd_opp_turbo_l1>;
++            iris_opp_table: opp-table {
++                compatible = "operating-points-v2";
++
++                opp-240000000 {
++                    opp-hz = /bits/ 64 <240000000>;
++                    required-opps = <&rpmhpd_opp_svs>,
++                                    <&rpmhpd_opp_low_svs>;
++                };
++
++                opp-338000000 {
++                    opp-hz = /bits/ 64 <338000000>;
++                    required-opps = <&rpmhpd_opp_svs>,
++                                    <&rpmhpd_opp_svs>;
++                };
++
++                opp-366000000 {
++                    opp-hz = /bits/ 64 <366000000>;
++                    required-opps = <&rpmhpd_opp_svs_l1>,
++                                    <&rpmhpd_opp_svs_l1>;
++                };
++
++                opp-444000000 {
++                    opp-hz = /bits/ 64 <444000000>;
++                    required-opps = <&rpmhpd_opp_turbo>,
++                                    <&rpmhpd_opp_turbo>;
++                };
++
++                opp-533333334 {
++                    opp-hz = /bits/ 64 <533333334>;
++                    required-opps = <&rpmhpd_opp_turbo_l1>,
++                                    <&rpmhpd_opp_turbo_l1>;
++                };
+             };
+         };
+     };
+diff --git a/Documentation/devicetree/bindings/media/qcom,sm8750-iris.yaml b/Documentation/devicetree/bindings/media/qcom,sm8750-iris.yaml
+index c42d3470bdac..6047616d0211 100644
+--- a/Documentation/devicetree/bindings/media/qcom,sm8750-iris.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sm8750-iris.yaml
+@@ -43,6 +43,12 @@ properties:
+   iommus:
+     maxItems: 2
+ 
++  non-pixel:
++    type: object
++    properties:
++      iommus:
++        maxItems: 1
++
+   operating-points-v2: true
+   opp-table:
+     type: object
+@@ -72,7 +78,6 @@ required:
+   - dma-coherent
+   - interconnects
+   - interconnect-names
+-  - iommus
+   - power-domain-names
+   - resets
+   - reset-names
+@@ -92,95 +97,111 @@ examples:
+     #include <dt-bindings/power/qcom-rpmpd.h>
+     #include <dt-bindings/power/qcom,rpmhpd.h>
+ 
+-    video-codec@aa00000 {
+-        compatible = "qcom,sm8750-iris";
+-        reg = <0x0aa00000 0xf0000>;
+-
+-        clocks = <&gcc GCC_VIDEO_AXI0_CLK>,
+-                 <&videocc_mvs0c_clk>,
+-                 <&videocc_mvs0_clk>,
+-                 <&gcc GCC_VIDEO_AXI1_CLK>,
+-                 <&videocc_mvs0c_freerun_clk>,
+-                 <&videocc_mvs0_freerun_clk>;
+-        clock-names = "iface",
+-                      "core",
+-                      "vcodec0_core",
+-                      "iface1",
+-                      "core_freerun",
+-                      "vcodec0_core_freerun";
+-
+-        dma-coherent;
+-        iommus = <&apps_smmu 0x1940 0>,
+-                 <&apps_smmu 0x1947 0>;
+-
+-        interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+-                         &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
+-                        <&mmss_noc MASTER_VIDEO_MVP QCOM_ICC_TAG_ALWAYS
+-                         &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+-        interconnect-names = "cpu-cfg",
+-                             "video-mem";
+-
+-        interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+-
+-        operating-points-v2 = <&iris_opp_table>;
+-
+-        memory-region = <&video_mem>;
+-
+-        power-domains = <&videocc_mvs0c_gdsc>,
+-                        <&videocc_mvs0_gdsc>,
+-                        <&rpmhpd RPMHPD_MXC>,
+-                        <&rpmhpd RPMHPD_MMCX>;
+-        power-domain-names = "venus",
+-                             "vcodec0",
+-                             "mxc",
+-                             "mmcx";
+-
+-        resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
+-                 <&gcc GCC_VIDEO_AXI1_CLK_ARES>,
+-                 <&videocc_mvs0c_freerun_clk_ares>,
+-                 <&videocc_mvs0_freerun_clk_ares>;
+-        reset-names = "bus0",
+-                      "bus1",
+-                      "core",
+-                      "vcodec0_core";
+-
+-        iris_opp_table: opp-table {
+-            compatible = "operating-points-v2";
+-
+-            opp-240000000 {
+-                opp-hz = /bits/ 64 <240000000>;
+-                required-opps = <&rpmhpd_opp_low_svs_d1>,
+-                                <&rpmhpd_opp_low_svs_d1>;
+-            };
+-
+-            opp-338000000 {
+-                opp-hz = /bits/ 64 <338000000>;
+-                required-opps = <&rpmhpd_opp_low_svs>,
+-                                <&rpmhpd_opp_low_svs>;
+-            };
+-
+-            opp-420000000 {
+-                opp-hz = /bits/ 64 <420000000>;
+-                required-opps = <&rpmhpd_opp_svs>,
+-                                <&rpmhpd_opp_svs>;
+-            };
+-
+-            opp-444000000 {
+-                opp-hz = /bits/ 64 <444000000>;
+-                required-opps = <&rpmhpd_opp_svs_l1>,
+-                                <&rpmhpd_opp_svs_l1>;
++    soc {
++        #address-cells = <2>;
++        #size-cells = <2>;
++
++        video-codec@aa00000 {
++            compatible = "qcom,sm8750-iris";
++            reg = <0x0 0x0aa00000 0x0 0xf0000>;
++
++            clocks = <&gcc GCC_VIDEO_AXI0_CLK>,
++                     <&videocc_mvs0c_clk>,
++                     <&videocc_mvs0_clk>,
++                     <&gcc GCC_VIDEO_AXI1_CLK>,
++                     <&videocc_mvs0c_freerun_clk>,
++                     <&videocc_mvs0_freerun_clk>;
++            clock-names = "iface",
++                          "core",
++                          "vcodec0_core",
++                          "iface1",
++                          "core_freerun",
++                          "vcodec0_core_freerun";
++
++            dma-coherent;
++
++            interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
++                             &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
++                            <&mmss_noc MASTER_VIDEO_MVP QCOM_ICC_TAG_ALWAYS
++                             &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++            interconnect-names = "cpu-cfg",
++                                "video-mem";
++
++            interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++
++            operating-points-v2 = <&iris_opp_table>;
++
++            memory-region = <&video_mem>;
++
++            power-domains = <&videocc_mvs0c_gdsc>,
++                            <&videocc_mvs0_gdsc>,
++                            <&rpmhpd RPMHPD_MXC>,
++                            <&rpmhpd RPMHPD_MMCX>;
++            power-domain-names = "venus",
++                                 "vcodec0",
++                                 "mxc",
++                                 "mmcx";
++
++            resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
++                     <&gcc GCC_VIDEO_AXI1_CLK_ARES>,
++                     <&videocc_mvs0c_freerun_clk_ares>,
++                     <&videocc_mvs0_freerun_clk_ares>;
++            reset-names = "bus0",
++                          "bus1",
++                          "core",
++                          "vcodec0_core";
++
++            #address-cells = <1>;
++            #size-cells = <1>;
++            dma-ranges = <0x0 0x0 0x0 0xe0000000>;
++
++            non-pixel {
++                iommus = <&apps_smmu 0x1940 0x0>;
++                iommu-ranges = <0x25800000 0xba800000>;
+             };
+ 
+-            opp-533333334 {
+-                opp-hz = /bits/ 64 <533333334>;
+-                required-opps = <&rpmhpd_opp_nom>,
+-                                <&rpmhpd_opp_nom>;
++            pixel {
++                iommus = <&apps_smmu 0x1947 0x0>;
+             };
+ 
+-            opp-630000000 {
+-                opp-hz = /bits/ 64 <630000000>;
+-                required-opps = <&rpmhpd_opp_turbo>,
+-                                <&rpmhpd_opp_turbo>;
++            iris_opp_table: opp-table {
++                compatible = "operating-points-v2";
++
++                opp-240000000 {
++                    opp-hz = /bits/ 64 <240000000>;
++                    required-opps = <&rpmhpd_opp_low_svs_d1>,
++                                    <&rpmhpd_opp_low_svs_d1>;
++                };
++
++                opp-338000000 {
++                    opp-hz = /bits/ 64 <338000000>;
++                    required-opps = <&rpmhpd_opp_low_svs>,
++                                    <&rpmhpd_opp_low_svs>;
++                };
++
++                opp-420000000 {
++                    opp-hz = /bits/ 64 <420000000>;
++                    required-opps = <&rpmhpd_opp_svs>,
++                                    <&rpmhpd_opp_svs>;
++                };
++
++                opp-444000000 {
++                    opp-hz = /bits/ 64 <444000000>;
++                    required-opps = <&rpmhpd_opp_svs_l1>,
++                                    <&rpmhpd_opp_svs_l1>;
++                };
++
++                opp-533333334 {
++                    opp-hz = /bits/ 64 <533333334>;
++                    required-opps = <&rpmhpd_opp_nom>,
++                                    <&rpmhpd_opp_nom>;
++                };
++
++                opp-630000000 {
++                    opp-hz = /bits/ 64 <630000000>;
++                    required-opps = <&rpmhpd_opp_turbo>,
++                                    <&rpmhpd_opp_turbo>;
++                };
+             };
+         };
+     };
+diff --git a/Documentation/devicetree/bindings/media/qcom,venus-common.yaml b/Documentation/devicetree/bindings/media/qcom,venus-common.yaml
+index 59a3fde846d2..85d015d8b021 100644
+--- a/Documentation/devicetree/bindings/media/qcom,venus-common.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,venus-common.yaml
+@@ -20,11 +20,11 @@ properties:
+ 
+   clocks:
+     minItems: 3
+-    maxItems: 7
++    maxItems: 10
+ 
+   clock-names:
+     minItems: 3
+-    maxItems: 7
++    maxItems: 10
+ 
+   firmware-name:
+     maxItems: 1
+@@ -41,11 +41,99 @@ properties:
+ 
+   power-domains:
+     minItems: 1
+-    maxItems: 4
++    maxItems: 7
+ 
+   power-domain-names:
+     minItems: 1
+-    maxItems: 4
++    maxItems: 7
++
++  '#address-cells':
++    const: 1
++
++  '#size-cells':
++    const: 1
++
++  dma-ranges:
++    maxItems: 1
++
++  non-pixel:
++    type: object
++    description:
++      Context bank for VPU non-pixel buffers, including compressed and internal buffers.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        minItems: 1
++        maxItems: 3
++      iommu-ranges:
++        maxItems: 1
++    required:
++      - iommus
++      - iommu-ranges
++
++  pixel:
++    type: object
++    description:
++      Context bank for VPU pixel buffers containing uncompressed video data.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        maxItems: 1
++    required:
++      - iommus
++
++  video-firmware:
++    type: object
++    description:
++      Context bank for the VPU firmware processing domain.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        maxItems: 1
++    required:
++      - iommus
++
++  secure-non-pixel:
++    type: object
++    description:
++      Context bank for VPU secure non-pixel buffers.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        maxItems: 1
++      iommu-ranges:
++        maxItems: 1
++    required:
++      - iommus
++      - iommu-ranges
++
++  secure-pixel:
++    type: object
++    description:
++      Context bank for VPU secure pixel buffers containing uncompressed video data.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        maxItems: 1
++    required:
++      - iommus
++
++  secure-bitstream:
++    type: object
++    description:
++      Context bank for VPU secure bitstream buffers containing compressed video data.
++    additionalProperties: false
++
++    properties:
++      iommus:
++        maxItems: 1
++    required:
++      - iommus
+ 
+ required:
+   - reg
+@@ -55,4 +143,14 @@ required:
+   - memory-region
+   - power-domains
+ 
++oneOf:
++  - required:
++      - iommus
++  - required:
++      - '#address-cells'
++      - '#size-cells'
++      - dma-ranges
++      - non-pixel
++      - pixel
++
+ additionalProperties: true
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index e81046721d56..367d76849fa1 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -1153,6 +1153,12 @@
+ 	};
+ };
+ 
++&iris {
++	firmware-name = "qcom/kaanapali/iceland/vpu40_2v.mbn";
++
++	status = "okay";
++};
++
+ &mdss {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali.dtsi b/arch/arm64/boot/dts/qcom/kaanapali.dtsi
+index 2b0342d90e28..a2148fcac779 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali.dtsi
++++ b/arch/arm64/boot/dts/qcom/kaanapali.dtsi
+@@ -2732,6 +2732,148 @@
+ 			#reset-cells = <1>;
+ 		};
+ 
++		iris: video-codec@2000000 {
++			compatible = "qcom,kaanapali-iris";
++			reg = <0x0 0x02000000 0x0 0xf0000>;
++
++			clocks = <&gcc GCC_VIDEO_AXI0_CLK>,
++				 <&videocc VIDEO_CC_MVS0C_CLK>,
++				 <&videocc VIDEO_CC_MVS0_CLK>,
++				 <&gcc GCC_VIDEO_AXI1_CLK>,
++				 <&videocc VIDEO_CC_MVS0C_FREERUN_CLK>,
++				 <&videocc VIDEO_CC_MVS0_FREERUN_CLK>,
++				 <&videocc VIDEO_CC_MVS0B_CLK>,
++				 <&videocc VIDEO_CC_MVS0_VPP0_CLK>,
++				 <&videocc VIDEO_CC_MVS0_VPP1_CLK>,
++				 <&videocc VIDEO_CC_MVS0A_CLK>;
++			clock-names = "iface",
++				      "core",
++				      "vcodec0_core",
++				      "iface1",
++				      "core_freerun",
++				      "vcodec0_core_freerun",
++				      "vcodec_bse",
++				      "vcodec_vpp0",
++				      "vcodec_vpp1",
++				      "vcodec_apv";
++
++			dma-coherent;
++
++			interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
++					 &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
++					<&mmss_noc MASTER_VIDEO_MVP QCOM_ICC_TAG_ALWAYS
++					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++			interconnect-names = "cpu-cfg",
++					     "video-mem";
++
++			interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++
++			memory-region = <&video_mem>;
++
++			operating-points-v2 = <&iris_opp_table>;
++
++			power-domains = <&videocc VIDEO_CC_MVS0C_GDSC>,
++					<&videocc VIDEO_CC_MVS0_GDSC>,
++					<&rpmhpd RPMHPD_MXC>,
++					<&rpmhpd RPMHPD_MMCX>,
++					<&videocc VIDEO_CC_MVS0_VPP0_GDSC>,
++					<&videocc VIDEO_CC_MVS0_VPP1_GDSC>,
++					<&videocc VIDEO_CC_MVS0A_GDSC>;
++			power-domain-names = "venus",
++					     "vcodec0",
++					     "mxc",
++					     "mmcx",
++					     "vpp0",
++					     "vpp1",
++					     "apv";
++
++			resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
++				 <&gcc GCC_VIDEO_AXI1_CLK_ARES>,
++				 <&videocc VIDEO_CC_MVS0C_FREERUN_CLK_ARES>,
++				 <&videocc VIDEO_CC_MVS0_FREERUN_CLK_ARES>;
++			reset-names = "bus0",
++				      "bus1",
++				      "core",
++				      "vcodec0_core";
++
++			#address-cells = <1>;
++			#size-cells = <1>;
++			dma-ranges = <0x0 0x0 0x0 0xffc00000>;
++
++			status = "disabled";
++
++			non-pixel {
++				iommus = <&apps_smmu 0x1940 0x0>,
++					 <&apps_smmu 0x1944 0x0>,
++					 <&apps_smmu 0x1a20 0x0>;
++				iommu-ranges = <0x25800000 0xda400000>;
++			};
++
++			pixel {
++				iommus = <&apps_smmu 0x1943 0x0>;
++			};
++
++			iris_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				opp-240000000 {
++					opp-hz = /bits/ 64 <240000000 240000000
++							    240000000 360000000>;
++					required-opps = <&rpmhpd_opp_low_svs_d1>,
++							<&rpmhpd_opp_low_svs_d1>;
++				};
++
++				opp-338000000 {
++					opp-hz = /bits/ 64 <338000000 338000000
++							    338000000 507000000>;
++					required-opps = <&rpmhpd_opp_low_svs>,
++							<&rpmhpd_opp_low_svs>;
++				};
++
++				opp-420000000 {
++					opp-hz = /bits/ 64 <420000000 420000000
++							    420000000 630000000>;
++					required-opps = <&rpmhpd_opp_svs>,
++							<&rpmhpd_opp_svs>;
++				};
++
++				opp-444000000 {
++					opp-hz = /bits/ 64 <444000000 444000000
++							    444000000 666000000>;
++					required-opps = <&rpmhpd_opp_svs>,
++							<&rpmhpd_opp_svs_l1>;
++				};
++
++				opp-533000000 {
++					opp-hz = /bits/ 64 <533000000 533000000
++							    533000000 800000000>;
++					required-opps = <&rpmhpd_opp_svs>,
++							<&rpmhpd_opp_nom>;
++				};
++
++				opp-630000000 {
++					opp-hz = /bits/ 64 <630000000 630000000
++							    630000000 1104000000>;
++					required-opps = <&rpmhpd_opp_svs_l1>,
++							<&rpmhpd_opp_turbo>;
++				};
++
++				opp-800000000 {
++					opp-hz = /bits/ 64 <800000000 630000000
++							    630000000 1260000000>;
++					required-opps = <&rpmhpd_opp_svs_l1>,
++							<&rpmhpd_opp_turbo_l0>;
++				};
++
++				opp-1000000000 {
++					opp-hz = /bits/ 64 <1000000000 630000000
++							    850000000 1260000000>;
++					required-opps = <&rpmhpd_opp_nom>,
++							<&rpmhpd_opp_turbo_l1>;
++				};
++			};
++		};
++
+ 		videocc: clock-controller@20f0000 {
+ 			compatible = "qcom,kaanapali-videocc";
+ 			reg = <0x0 0x020f0000 0x0 0x10000>;
+diff --git a/drivers/iommu/of_iommu.c b/drivers/iommu/of_iommu.c
+index a18bb60f6f3d..1b014666d6b8 100644
+--- a/drivers/iommu/of_iommu.c
++++ b/drivers/iommu/of_iommu.c
+@@ -190,6 +190,90 @@ iommu_resv_region_get_type(struct device *dev,
+ 	return IOMMU_RESV_RESERVED;
+ }
+ 
++/**
++ * of_iommu_derive_resv_regions - derive reserved regions which
++ *                                are outside of iommu-ranges
++ * @dev: device for which to get reserved regions
++ * @list: reserved region list
++ *
++ * A device can describe its own usable IOVA ranges directly on its node
++ * via "iommu-ranges". Everything not under those ranges is derived
++ * as a reserved region so the IOMMU allocator won't use it. Entries may
++ * appear in any order in the property.
++ */
++static void of_iommu_derive_resv_regions(struct device *dev, struct list_head *list)
++{
++	struct of_iommu_range {
++		struct list_head node;
++		phys_addr_t start;
++		phys_addr_t end;
++	} *pos, *new, *next_range;
++	int size, prot = IOMMU_READ | IOMMU_WRITE;
++	struct iommu_resv_region *region;
++	const __be32 *maps, *end;
++	phys_addr_t next = 0;
++	LIST_HEAD(ranges);
++
++	maps = of_get_property(dev->of_node, "iommu-ranges", &size);
++	if (!maps)
++		return;
++
++	end = maps + size / sizeof(__be32);
++
++	while (maps < end) {
++		phys_addr_t iova;
++		size_t length;
++
++		maps = of_translate_dma_region(dev->of_node, maps, &iova, &length);
++		if (!maps) {
++			dev_err(dev, "failed to parse iommu-ranges\n");
++			break;
++		}
++
++		if (!length)
++			continue;
++
++		list_for_each_entry(pos, &ranges, node)
++			if (pos->start > iova)
++				break;
++
++		new = kmalloc_obj(*new);
++		if (!new) {
++			dev_err(dev, "kmalloc_obj() failed\n");
++			continue;
++		}
++
++		new->start = iova;
++		new->end = iova + length - 1;
++		list_add_tail(&new->node, &pos->node);
++	}
++
++	if (list_empty(&ranges))
++		return;
++
++	if (of_dma_is_coherent(dev->of_node))
++		prot |= IOMMU_CACHE;
++
++	list_for_each_entry_safe(pos, next_range, &ranges, node) {
++		if (pos->start > next) {
++			region = iommu_alloc_resv_region(next, pos->start - next, prot,
++							 IOMMU_RESV_RESERVED, GFP_KERNEL);
++			if (region)
++				list_add_tail(&region->list, list);
++		}
++		if (pos->end + 1 > next)
++			next = pos->end + 1;
++
++		list_del(&pos->node);
++		kfree(pos);
++	}
++
++	region = iommu_alloc_resv_region(next, ~(phys_addr_t)0 - next + 1,
++					 prot, IOMMU_RESV_RESERVED, GFP_KERNEL);
++	if (region)
++		list_add_tail(&region->list, list);
++}
++
+ /**
+  * of_iommu_get_resv_regions - reserved region driver helper for device tree
+  * @dev: device for which to get reserved regions
+@@ -214,10 +298,14 @@ void of_iommu_get_resv_regions(struct device *dev, struct list_head *list)
+ 
+ 		memset(&phys, 0, sizeof(phys));
+ 
++		maps = of_get_property(it.node, "iommu-addresses", &size);
++		if (!maps)
++			continue;
++
+ 		/*
+-		 * The "reg" property is optional and can be omitted by reserved-memory regions
+-		 * that represent reservations in the IOVA space, which are regions that should
+-		 * not be mapped.
++		 * "iommu-addresses" must be used in combination with a "reg" that provides
++		 * the physical address and size of this memory region, for an identity 1:1
++		 * IOVA mapping to that physical memory.
+ 		 */
+ 		if (of_property_present(it.node, "reg")) {
+ 			err = of_address_to_resource(it.node, 0, &phys);
+@@ -226,11 +314,11 @@ void of_iommu_get_resv_regions(struct device *dev, struct list_head *list)
+ 					it.node, err);
+ 				continue;
+ 			}
+-		}
+-
+-		maps = of_get_property(it.node, "iommu-addresses", &size);
+-		if (!maps)
++		} else {
++			dev_err(dev, "%pOF: iommu-addresses requires a reg property\n",
++				it.node);
+ 			continue;
++		}
+ 
+ 		end = maps + size / sizeof(__be32);
+ 
+@@ -258,6 +346,9 @@ void of_iommu_get_resv_regions(struct device *dev, struct list_head *list)
+ 				}
+ 				type = iommu_resv_region_get_type(dev, &phys, iova, length);
+ 
++				if (type != IOMMU_RESV_DIRECT)
++					continue;
++
+ 				region = iommu_alloc_resv_region(iova, length, prot, type,
+ 								 GFP_KERNEL);
+ 				if (region)
+@@ -265,6 +356,8 @@ void of_iommu_get_resv_regions(struct device *dev, struct list_head *list)
+ 			}
+ 		}
+ 	}
++
++	of_iommu_derive_resv_regions(dev, list);
+ #endif
+ }
+ EXPORT_SYMBOL(of_iommu_get_resv_regions);
+diff --git a/drivers/media/platform/qcom/iris/Makefile b/drivers/media/platform/qcom/iris/Makefile
+index 48e415cbc439..65ad965515a3 100644
+--- a/drivers/media/platform/qcom/iris/Makefile
++++ b/drivers/media/platform/qcom/iris/Makefile
+@@ -12,8 +12,10 @@ qcom-iris-objs += iris_buffer.o \
+              iris_hfi_gen2_packet.o \
+              iris_hfi_gen2_response.o \
+              iris_hfi_queue.o \
++             iris_platform_kaanapali.o \
+              iris_platform_vpu2.o \
+              iris_platform_vpu3x.o \
++             iris_platform_vpu4x.o \
+              iris_power.o \
+              iris_probe.o \
+              iris_resources.o \
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
+index 246ad0abbac3..249c9f1d0d5d 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -529,7 +529,7 @@ static int iris_create_internal_buffer(struct iris_inst *inst,
+ 				       enum iris_buffer_type buffer_type, u32 index)
+ {
+ 	struct iris_buffers *buffers = &inst->buffers[buffer_type];
+-	struct iris_core *core = inst->core;
++	struct device *dev = iris_get_cb_dev(inst, buffer_type);
+ 	struct iris_buffer *buffer;
+ 
+ 	if (!buffers->size)
+@@ -545,7 +545,7 @@ static int iris_create_internal_buffer(struct iris_inst *inst,
+ 	buffer->buffer_size = buffers->size;
+ 	buffer->dma_attrs = DMA_ATTR_WRITE_COMBINE | DMA_ATTR_NO_KERNEL_MAPPING;
+ 
+-	buffer->kvaddr = dma_alloc_attrs(core->dev, buffer->buffer_size,
++	buffer->kvaddr = dma_alloc_attrs(dev, buffer->buffer_size,
+ 					 &buffer->device_addr, GFP_KERNEL, buffer->dma_attrs);
+ 	if (!buffer->kvaddr) {
+ 		kfree(buffer);
+@@ -682,10 +682,10 @@ int iris_queue_internal_buffers(struct iris_inst *inst, u32 plane)
+ 
+ int iris_destroy_internal_buffer(struct iris_inst *inst, struct iris_buffer *buffer)
+ {
+-	struct iris_core *core = inst->core;
++	struct device *dev = iris_get_cb_dev(inst, buffer->type);
+ 
+ 	list_del(&buffer->list);
+-	dma_free_attrs(core->dev, buffer->buffer_size, buffer->kvaddr,
++	dma_free_attrs(dev, buffer->buffer_size, buffer->kvaddr,
+ 		       buffer->device_addr, buffer->dma_attrs);
+ 	kfree(buffer);
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_core.h b/drivers/media/platform/qcom/iris/iris_core.h
+index 24da60448cf2..3c96f46cf567 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -36,6 +36,8 @@ struct qcom_ubwc_cfg_data;
+  * struct iris_core - holds core parameters valid for all instances
+  *
+  * @dev: reference to device structure
++ * @np_dev: reference to non-pixel device structure
++ * @p_dev: reference to pixel device structure
+  * @reg_base: IO memory base address
+  * @irq: iris irq
+  * @v4l2_dev: a holder for v4l2 device structure
+@@ -81,6 +83,8 @@ struct qcom_ubwc_cfg_data;
+ 
+ struct iris_core {
+ 	struct device				*dev;
++	struct device				*np_dev;
++	struct device				*p_dev;
+ 	void __iomem				*reg_base;
+ 	int					irq;
+ 	struct v4l2_device			v4l2_dev;
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index 10e33b8a73f6..d48b7c05246d 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -54,6 +54,18 @@ static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
+ 		return GOP_SIZE;
+ 	case V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE:
+ 		return ENTROPY_MODE;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_MODE:
++		return DEBLOCK_MODE_H264;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_ALPHA:
++		return DEBLOCK_ALPHA_H264;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_BETA:
++		return DEBLOCK_BETA_H264;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE:
++		return DEBLOCK_MODE_HEVC;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LF_TC_OFFSET_DIV2:
++		return DEBLOCK_TC_HEVC;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LF_BETA_OFFSET_DIV2:
++		return DEBLOCK_BETA_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_H264_MIN_QP:
+ 		return MIN_FRAME_QP_H264;
+ 	case V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP:
+@@ -154,6 +166,10 @@ static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
+ 		return LAYER4_BITRATE_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR:
+ 		return LAYER5_BITRATE_HEVC;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE:
++		return DISPLAY_DELAY_ENABLE;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY:
++		return DISPLAY_DELAY;
+ 	default:
+ 		return INST_FW_CAP_MAX;
+ 	}
+@@ -197,6 +213,18 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
+ 		return V4L2_CID_MPEG_VIDEO_GOP_SIZE;
+ 	case ENTROPY_MODE:
+ 		return V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE;
++	case DEBLOCK_MODE_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_MODE;
++	case DEBLOCK_ALPHA_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_ALPHA;
++	case DEBLOCK_BETA_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_BETA;
++	case DEBLOCK_MODE_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE;
++	case DEBLOCK_TC_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LF_TC_OFFSET_DIV2;
++	case DEBLOCK_BETA_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LF_BETA_OFFSET_DIV2;
+ 	case MIN_FRAME_QP_H264:
+ 		return V4L2_CID_MPEG_VIDEO_H264_MIN_QP;
+ 	case MIN_FRAME_QP_HEVC:
+@@ -297,6 +325,10 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L4_BR;
+ 	case LAYER5_BITRATE_HEVC:
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR;
++	case DISPLAY_DELAY_ENABLE:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE;
++	case DISPLAY_DELAY:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY;
+ 	default:
+ 		return 0;
+ 	}
+@@ -851,6 +883,67 @@ int iris_set_entropy_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap
+ 				     &entropy_mode, sizeof(u32));
+ }
+ 
++int iris_set_deblock_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
++{
++	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
++	u32 hfi_id = inst->fw_caps[cap_id].hfi_id;
++	u32 mode = inst->fw_caps[cap_id].value;
++	u32 alpha_tc, beta, hfi_value;
++
++	if (inst->codec == V4L2_PIX_FMT_H264) {
++		if (cap_id != DEBLOCK_MODE_H264)
++			return 0;
++
++		switch (mode) {
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED:
++			mode = HFI_DEBLOCK_ALL_BOUNDARY;
++			break;
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED:
++			mode = HFI_DEBLOCK_DISABLE;
++			break;
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY:
++			mode = HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY;
++			break;
++		default:
++			return -EINVAL;
++		}
++
++		alpha_tc = inst->fw_caps[DEBLOCK_ALPHA_H264].value + 6;
++		beta = inst->fw_caps[DEBLOCK_BETA_H264].value + 6;
++	} else if (inst->codec == V4L2_PIX_FMT_HEVC) {
++		if (cap_id != DEBLOCK_MODE_HEVC)
++			return 0;
++
++		switch (mode) {
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED:
++			mode = HFI_DEBLOCK_ALL_BOUNDARY;
++			break;
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED:
++			mode = HFI_DEBLOCK_DISABLE;
++			break;
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY:
++			mode = HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY;
++			break;
++		default:
++			return -EINVAL;
++		}
++
++		alpha_tc = inst->fw_caps[DEBLOCK_TC_HEVC].value + 6;
++		beta = inst->fw_caps[DEBLOCK_BETA_HEVC].value + 6;
++	} else {
++		return 0;
++	}
++
++	/* Firmware expects offsets biased by 6, with alpha or HEVC tc in bits 23:16. */
++	hfi_value = alpha_tc << 16 | beta << 8 | mode;
++
++	return hfi_ops->session_set_property(inst, hfi_id,
++					     HFI_HOST_FLAGS_NONE,
++					     iris_get_port_info(inst, cap_id),
++					     HFI_PAYLOAD_32_PACKED,
++					     &hfi_value, sizeof(hfi_value));
++}
++
+ int iris_set_min_qp(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
+ {
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.h b/drivers/media/platform/qcom/iris/iris_ctrls.h
+index 3c462ec9190b..86f2e420591f 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.h
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.h
+@@ -24,6 +24,7 @@ int iris_set_header_mode_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_
+ int iris_set_header_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_bitrate_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_bitrate_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
++int iris_set_deblock_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_peak_bitrate(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_bitrate_mode_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_bitrate_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+index acc0ed8adda1..01a7019af4fb 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+@@ -14,6 +14,22 @@
+ #define BITRATE_MAX				245000000
+ 
+ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_dec[] = {
++	{
++		.cap_id = DISPLAY_DELAY_ENABLE,
++		.min = 0,
++		.max = 1,
++		.step_or_mask = 1,
++		.value = 0,
++		.hfi_id = HFI_PROP_DECODE_ORDER_OUTPUT,
++		.flags = CAP_FLAG_INPUT_PORT,
++	},
++	{
++		.cap_id = DISPLAY_DELAY,
++		.min = 0,
++		.max = 0,
++		.step_or_mask = 1,
++		.value = 0,
++	},
+ 	{
+ 		.cap_id = PROFILE_H264,
+ 		.min = V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE,
+@@ -455,6 +471,64 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ 		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+ 		.set = iris_set_entropy_mode_gen2,
+ 	},
++	{
++		.cap_id = DEBLOCK_MODE_H264,
++		.min = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.max = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_ALPHA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_MODE_HEVC,
++		.min = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED,
++		.max = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_TC_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
+ 	{
+ 		.cap_id = MIN_FRAME_QP_H264,
+ 		.min = MIN_QP_8BIT,
+@@ -927,6 +1001,64 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ 			CAP_FLAG_DYNAMIC_ALLOWED,
+ 		.set = iris_set_layer_bitrate,
+ 	},
++	{
++		.cap_id = DEBLOCK_MODE_H264,
++		.min = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.max = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_ALPHA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_MODE_HEVC,
++		.min = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED,
++		.max = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_TC_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
+ 	{
+ 		.cap_id = LAYER5_BITRATE_HEVC,
+ 		.min = 1,
+@@ -941,6 +1073,7 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_params_default[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -953,6 +1086,7 @@ static const u32 sm8550_vdec_input_config_params_default[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_hevc[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -964,6 +1098,7 @@ static const u32 sm8550_vdec_input_config_param_hevc[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_vp9[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -973,6 +1108,7 @@ static const u32 sm8550_vdec_input_config_param_vp9[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_av1[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index ca2954f8bd3a..4570fd79c32b 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -666,6 +666,23 @@ static int iris_hfi_gen2_set_super_block(struct iris_inst *inst, u32 plane)
+ 						  sizeof(u32));
+ }
+ 
++static int iris_hfi_gen2_set_decode_order_output(struct iris_inst *inst, u32 plane)
++{
++	struct platform_inst_fw_cap *cap = &inst->fw_caps[DISPLAY_DELAY_ENABLE];
++	u32 decode_order = cap->value;
++
++	/* Leave the firmware default unchanged unless userspace sets the control. */
++	if (!(cap->flags & CAP_FLAG_CLIENT_SET))
++		return 0;
++
++	return iris_hfi_gen2_session_set_property(inst,
++						  HFI_PROP_DECODE_ORDER_OUTPUT,
++						  HFI_HOST_FLAGS_NONE,
++						  HFI_PORT_BITSTREAM,
++						  HFI_PAYLOAD_U32,
++						  &decode_order, sizeof(decode_order));
++}
++
+ static int iris_hfi_gen2_session_set_config_params(struct iris_inst *inst, u32 plane)
+ {
+ 	const struct iris_firmware_data *fdata = inst->core->iris_firmware_data;
+@@ -692,6 +709,7 @@ static int iris_hfi_gen2_session_set_config_params(struct iris_inst *inst, u32 p
+ 		{HFI_PROP_FRAME_RATE,                 iris_hfi_gen2_set_frame_rate             },
+ 		{HFI_PROP_AV1_FILM_GRAIN_PRESENT,     iris_hfi_gen2_set_film_grain             },
+ 		{HFI_PROP_AV1_SUPER_BLOCK_ENABLED,    iris_hfi_gen2_set_super_block            },
++		{HFI_PROP_DECODE_ORDER_OUTPUT,        iris_hfi_gen2_set_decode_order_output    },
+ 		{HFI_PROP_OPB_ENABLE,                 iris_hfi_gen2_set_opb_enable             },
+ 	};
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+index 776b21cd11b2..6c6a97db0d40 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+@@ -57,6 +57,14 @@
+ #define HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT	0x03000124
+ #define HFI_PROP_PIC_ORDER_CNT_TYPE		0x03000128
+ 
++enum hfi_deblock_mode {
++	HFI_DEBLOCK_ALL_BOUNDARY			= 0x0,
++	HFI_DEBLOCK_DISABLE			= 0x1,
++	HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY	= 0x2,
++};
++
++#define HFI_PROP_DEBLOCKING_MODE			0x03000129
++
+ enum hfi_rate_control {
+ 	HFI_RC_VBR_CFR		= 0x00000000,
+ 	HFI_RC_CBR_CFR		= 0x00000001,
+@@ -120,6 +128,7 @@ enum hfi_flip {
+ 
+ #define HFI_PROP_FLIP				0x0300014c
+ #define HFI_PROP_SIGNAL_COLOR_INFO		0x03000155
++#define HFI_PROP_DECODE_ORDER_OUTPUT		0x0300015b
+ #define HFI_PROP_PICTURE_TYPE			0x03000162
+ #define HFI_PROP_DEC_DEFAULT_HEADER		0x03000168
+ #define HFI_PROP_DEC_START_FROM_RAP_FRAME	0x03000169
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_queue.c b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+index bf6db23b53e2..ce6a682b0f9a 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_queue.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+@@ -245,25 +245,26 @@ static void iris_hfi_queue_deinit(struct iris_iface_q_info *iface_q)
+ 
+ int iris_hfi_queues_init(struct iris_core *core)
+ {
++	struct device *dev = core->np_dev ? core->np_dev : core->dev;
+ 	struct iris_hfi_queue_table_header *q_tbl_hdr;
+ 	u32 queue_size;
+ 
+ 	/* Iris hardware requires 4K queue alignment */
+ 	queue_size = ALIGN((sizeof(*q_tbl_hdr) + (IFACEQ_QUEUE_SIZE * IFACEQ_NUMQ)), SZ_4K);
+-	core->iface_q_table_vaddr = dma_alloc_attrs(core->dev, queue_size,
++	core->iface_q_table_vaddr = dma_alloc_attrs(dev, queue_size,
+ 						    &core->iface_q_table_daddr,
+ 						    GFP_KERNEL, DMA_ATTR_WRITE_COMBINE);
+ 	if (!core->iface_q_table_vaddr) {
+-		dev_err(core->dev, "queues alloc and map failed\n");
++		dev_err(dev, "queues alloc and map failed\n");
+ 		return -ENOMEM;
+ 	}
+ 
+-	core->sfr_vaddr = dma_alloc_attrs(core->dev, SFR_SIZE,
++	core->sfr_vaddr = dma_alloc_attrs(dev, SFR_SIZE,
+ 					  &core->sfr_daddr,
+ 					  GFP_KERNEL, DMA_ATTR_WRITE_COMBINE);
+ 	if (!core->sfr_vaddr) {
+-		dev_err(core->dev, "sfr alloc and map failed\n");
+-		dma_free_attrs(core->dev, queue_size, core->iface_q_table_vaddr,
++		dev_err(dev, "sfr alloc and map failed\n");
++		dma_free_attrs(dev, queue_size, core->iface_q_table_vaddr,
+ 			       core->iface_q_table_daddr, DMA_ATTR_WRITE_COMBINE);
+ 		return -ENOMEM;
+ 	}
+@@ -291,6 +292,7 @@ int iris_hfi_queues_init(struct iris_core *core)
+ 
+ void iris_hfi_queues_deinit(struct iris_core *core)
+ {
++	struct device *dev = core->np_dev ? core->np_dev : core->dev;
+ 	u32 queue_size;
+ 
+ 	if (!core->iface_q_table_vaddr)
+@@ -300,7 +302,7 @@ void iris_hfi_queues_deinit(struct iris_core *core)
+ 	iris_hfi_queue_deinit(&core->message_queue);
+ 	iris_hfi_queue_deinit(&core->command_queue);
+ 
+-	dma_free_attrs(core->dev, SFR_SIZE, core->sfr_vaddr,
++	dma_free_attrs(dev, SFR_SIZE, core->sfr_vaddr,
+ 		       core->sfr_daddr, DMA_ATTR_WRITE_COMBINE);
+ 
+ 	core->sfr_vaddr = NULL;
+@@ -309,7 +311,7 @@ void iris_hfi_queues_deinit(struct iris_core *core)
+ 	queue_size = ALIGN(sizeof(struct iris_hfi_queue_table_header) +
+ 		(IFACEQ_QUEUE_SIZE * IFACEQ_NUMQ), SZ_4K);
+ 
+-	dma_free_attrs(core->dev, queue_size, core->iface_q_table_vaddr,
++	dma_free_attrs(dev, queue_size, core->iface_q_table_vaddr,
+ 		       core->iface_q_table_daddr, DMA_ATTR_WRITE_COMBINE);
+ 
+ 	core->iface_q_table_vaddr = NULL;
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_common.h b/drivers/media/platform/qcom/iris/iris_platform_common.h
+index c9256f2323dc..0b93898db8f3 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -39,6 +39,9 @@ struct iris_inst;
+ #define MAX_HEVC_VBR_LAYER_HP_SLIDING_WINDOW	5
+ #define MAX_HIER_CODING_LAYER_GEN1		6
+ 
++#define VIDEO_REGION_VM0_SECURE_NP_ID		1
++#define VIDEO_REGION_VM0_NONSECURE_NP_ID	5
++
+ enum stage_type {
+ 	STAGE_1 = 1,
+ 	STAGE_2 = 2,
+@@ -54,6 +57,7 @@ extern const struct iris_firmware_data iris_hfi_gen1_data;
+ extern const struct iris_firmware_data iris_hfi_gen2_data;
+ 
+ extern const struct iris_platform_data qcs8300_data;
++extern const struct iris_platform_data kaanapali_data;
+ extern const struct iris_platform_data sc7280_data;
+ extern const struct iris_platform_data sm8250_data;
+ extern const struct iris_platform_data sm8550_data;
+@@ -134,6 +138,12 @@ enum platform_inst_fw_cap_type {
+ 	FRAME_RC_ENABLE,
+ 	GOP_SIZE,
+ 	ENTROPY_MODE,
++	DEBLOCK_MODE_H264,
++	DEBLOCK_ALPHA_H264,
++	DEBLOCK_BETA_H264,
++	DEBLOCK_MODE_HEVC,
++	DEBLOCK_TC_HEVC,
++	DEBLOCK_BETA_HEVC,
+ 	MIN_FRAME_QP_H264,
+ 	MIN_FRAME_QP_HEVC,
+ 	MAX_FRAME_QP_H264,
+@@ -183,6 +193,8 @@ enum platform_inst_fw_cap_type {
+ 	LAYER3_BITRATE_HEVC,
+ 	LAYER4_BITRATE_HEVC,
+ 	LAYER5_BITRATE_HEVC,
++	DISPLAY_DELAY_ENABLE,
++	DISPLAY_DELAY,
+ 	INST_FW_CAP_MAX,
+ };
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_kaanapali.c b/drivers/media/platform/qcom/iris/iris_platform_kaanapali.c
+new file mode 100644
+index 000000000000..cc7529e22d84
+--- /dev/null
++++ b/drivers/media/platform/qcom/iris/iris_platform_kaanapali.c
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include "iris_core.h"
++#include "iris_platform_common.h"
++
++const char *const iris_kaanapali_clk_reset_table[] = {
++	"bus0",
++	"bus1",
++	"core",
++	"vcodec0_core",
++};
++
++const char *const iris_kaanapali_pmdomain_table[] = {
++	"venus",
++	"vcodec0",
++	"vpp0",
++	"vpp1",
++	"apv",
++};
++
++const struct platform_clk_data iris_kaanapali_clk_table[] = {
++	{IRIS_AXI_CLK,		"iface"			},
++	{IRIS_CTRL_CLK,		"core"			},
++	{IRIS_HW_CLK,		"vcodec0_core"		},
++	{IRIS_AXI1_CLK,		"iface1"		},
++	{IRIS_CTRL_FREERUN_CLK,	"core_freerun"		},
++	{IRIS_HW_FREERUN_CLK,	"vcodec0_core_freerun"	},
++	{IRIS_BSE_HW_CLK,	"vcodec_bse"		},
++	{IRIS_VPP0_HW_CLK,	"vcodec_vpp0"		},
++	{IRIS_VPP1_HW_CLK,	"vcodec_vpp1"		},
++	{IRIS_APV_HW_CLK,	"vcodec_apv"		},
++};
++
++const char *const iris_kaanapali_opp_clk_table[] = {
++	"vcodec0_core",
++	"vcodec_apv",
++	"vcodec_bse",
++	"core",
++	NULL,
++};
++
++struct tz_cp_config iris_kaanapali_tz_cp_config[] = {
++	{
++		.cp_start = VIDEO_REGION_VM0_SECURE_NP_ID,
++		.cp_size = 0,
++		.cp_nonpixel_start = 0x01000000,
++		.cp_nonpixel_size = 0x24800000,
++	},
++	{
++		.cp_start = VIDEO_REGION_VM0_NONSECURE_NP_ID,
++		.cp_size = 0,
++		.cp_nonpixel_start = 0x25800000,
++		.cp_nonpixel_size = 0xda400000,
++	},
++};
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_kaanapali.h b/drivers/media/platform/qcom/iris/iris_platform_kaanapali.h
+new file mode 100644
+index 000000000000..33ac3f5aad91
+--- /dev/null
++++ b/drivers/media/platform/qcom/iris/iris_platform_kaanapali.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef __IRIS_PLATFORM_KAANAPALI_H__
++#define __IRIS_PLATFORM_KAANAPALI_H__
++
++extern const char *const iris_kaanapali_clk_reset_table[4];
++extern const char *const iris_kaanapali_pmdomain_table[5];
++extern const struct platform_clk_data iris_kaanapali_clk_table[10];
++extern const char *const iris_kaanapali_opp_clk_table[5];
++extern struct tz_cp_config iris_kaanapali_tz_cp_config[2];
++
++#endif /* __IRIS_PLATFORM_KAANAPALI_H__ */
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_vpu4x.c b/drivers/media/platform/qcom/iris/iris_platform_vpu4x.c
+new file mode 100644
+index 000000000000..34819159ba66
+--- /dev/null
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu4x.c
+@@ -0,0 +1,66 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include "iris_hfi_gen2.h"
++#include "iris_vpu_buffer.h"
++#include "iris_vpu_common.h"
++
++#include "iris_platform_sm8550.h"
++#include "iris_platform_kaanapali.h"
++
++static const struct iris_firmware_desc iris_vpu40_p2_s7_gen2_desc = {
++	.firmware_data = &iris_hfi_gen2_data,
++	.get_vpu_buffer_size = iris_vpu4x_buf_size,
++	.fwname = "qcom/vpu/vpu40_p2_s7.mbn",
++};
++
++static const u32 iris_fmts_vpu4x_dec[] = {
++	[IRIS_FMT_H264] = V4L2_PIX_FMT_H264,
++	[IRIS_FMT_HEVC] = V4L2_PIX_FMT_HEVC,
++	[IRIS_FMT_VP9] = V4L2_PIX_FMT_VP9,
++};
++
++static const struct icc_info iris_icc_info_vpu4x[] = {
++	{ "cpu-cfg",    1000, 1000     },
++	{ "video-mem",  1000, 15000000 },
++};
++
++static const struct bw_info iris_bw_table_dec_vpu4x[] = {
++	{ ((4096 * 2160) / 256) * 60, 1608000 },
++	{ ((4096 * 2160) / 256) * 30,  826000 },
++	{ ((1920 * 1080) / 256) * 60,  567000 },
++	{ ((1920 * 1080) / 256) * 30,  294000 },
++};
++
++static const char * const iris_opp_pd_table_vpu4x[] = { "mxc", "mmcx" };
++
++const struct iris_platform_data kaanapali_data = {
++	.firmware_desc = &iris_vpu40_p2_s7_gen2_desc,
++	.vpu_ops = &iris_vpu4x_ops,
++	.icc_tbl = iris_icc_info_vpu4x,
++	.icc_tbl_size = ARRAY_SIZE(iris_icc_info_vpu4x),
++	.clk_rst_tbl = iris_kaanapali_clk_reset_table,
++	.clk_rst_tbl_size = ARRAY_SIZE(iris_kaanapali_clk_reset_table),
++	.bw_tbl_dec = iris_bw_table_dec_vpu4x,
++	.bw_tbl_dec_size = ARRAY_SIZE(iris_bw_table_dec_vpu4x),
++	.pmdomain_tbl = iris_kaanapali_pmdomain_table,
++	.pmdomain_tbl_size = ARRAY_SIZE(iris_kaanapali_pmdomain_table),
++	.opp_pd_tbl = iris_opp_pd_table_vpu4x,
++	.opp_pd_tbl_size = ARRAY_SIZE(iris_opp_pd_table_vpu4x),
++	.clk_tbl = iris_kaanapali_clk_table,
++	.clk_tbl_size = ARRAY_SIZE(iris_kaanapali_clk_table),
++	.opp_clk_tbl = iris_kaanapali_opp_clk_table,
++	/* Upper bound of DMA address range */
++	.dma_mask = 0xffc00000 - 1,
++	.inst_iris_fmts = iris_fmts_vpu4x_dec,
++	.inst_iris_fmts_size = ARRAY_SIZE(iris_fmts_vpu4x_dec),
++	.inst_caps = &platform_inst_cap_sm8550,
++	.tz_cp_config_data = iris_kaanapali_tz_cp_config,
++	.tz_cp_config_data_size = ARRAY_SIZE(iris_kaanapali_tz_cp_config),
++	.num_vpp_pipe = 2,
++	.max_session_count = 16,
++	.max_core_mbpf = NUM_MBS_8K * 2,
++	.max_core_mbps = ((8192 * 4320) / 256) * 60,
++};
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index c2dcb50a2782..3506fc1dea42 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -150,6 +150,67 @@ static int iris_init_resources(struct iris_core *core)
+ 	return iris_init_resets(core);
+ }
+ 
++static struct device *iris_create_cb_dev(struct iris_core *core, const char *name)
++{
++	struct platform_device_info plat_dev_info = {};
++	struct device_node *child_of_node;
++	struct platform_device *pdev;
++
++	child_of_node = of_get_child_by_name(core->dev->of_node, name);
++	if (!child_of_node)
++		return NULL;
++
++	plat_dev_info.dma_mask = core->iris_platform_data->dma_mask;
++	plat_dev_info.fwnode = &child_of_node->fwnode;
++	plat_dev_info.name = child_of_node->name;
++	plat_dev_info.id = PLATFORM_DEVID_AUTO;
++	plat_dev_info.parent = core->dev;
++
++	pdev = platform_device_register_full(&plat_dev_info);
++	of_node_put(child_of_node);
++	if (IS_ERR(pdev))
++		return ERR_CAST(pdev);
++
++	dma_set_max_seg_size(&pdev->dev, DMA_BIT_MASK(32));
++	dma_set_seg_boundary(&pdev->dev, DMA_BIT_MASK(32));
++
++	return &pdev->dev;
++}
++
++static int iris_init_cb_devs(struct iris_core *core)
++{
++	struct device *dev;
++
++	dev = iris_create_cb_dev(core, "non-pixel");
++	if (IS_ERR(dev))
++		return PTR_ERR(dev);
++
++	core->np_dev = dev;
++
++	dev = iris_create_cb_dev(core, "pixel");
++	if (IS_ERR(dev))
++		goto unreg_np_dev;
++
++	core->p_dev = dev;
++
++	return 0;
++
++unreg_np_dev:
++	if (core->np_dev)
++		platform_device_unregister(to_platform_device(core->np_dev));
++	core->np_dev = NULL;
++
++	return PTR_ERR(dev);
++}
++
++static void iris_deinit_cb_devs(struct iris_core *core)
++{
++	if (core->p_dev)
++		platform_device_unregister(to_platform_device(core->p_dev));
++	if (core->np_dev)
++		platform_device_unregister(to_platform_device(core->np_dev));
++}
++
+ static int iris_register_video_device(struct iris_core *core, enum domain_type type)
+ {
+ 	struct video_device *vdev;
+@@ -207,6 +268,8 @@ static void iris_remove(struct platform_device *pdev)
+ 
+ 	v4l2_device_unregister(&core->v4l2_dev);
+ 
++	iris_deinit_cb_devs(core);
++
+ 	mutex_destroy(&core->lock);
+ }
+ 
+@@ -273,10 +336,14 @@ static int iris_probe(struct platform_device *pdev)
+ 
+ 	iris_session_init_caps(core);
+ 
+-	ret = v4l2_device_register(dev, &core->v4l2_dev);
++	ret = iris_init_cb_devs(core);
+ 	if (ret)
+ 		return ret;
+ 
++	ret = v4l2_device_register(dev, &core->v4l2_dev);
++	if (ret)
++		goto err_cb_deinit;
++
+ 	ret = iris_register_video_device(core, DECODER);
+ 	if (ret)
+ 		goto err_v4l2_unreg;
+@@ -289,9 +356,11 @@ static int iris_probe(struct platform_device *pdev)
+ 
+ 	dma_mask = core->iris_platform_data->dma_mask;
+ 
+-	ret = dma_set_mask_and_coherent(dev, dma_mask);
+-	if (ret)
+-		goto err_vdev_unreg_enc;
++	if (device_iommu_mapped(dev)) {
++		ret = dma_set_mask_and_coherent(dev, dma_mask);
++		if (ret)
++			goto err_vdev_unreg_enc;
++	}
+ 
+ 	dma_set_max_seg_size(&pdev->dev, DMA_BIT_MASK(32));
+ 	dma_set_seg_boundary(&pdev->dev, DMA_BIT_MASK(32));
+@@ -310,6 +379,8 @@ static int iris_probe(struct platform_device *pdev)
+ 	video_unregister_device(core->vdev_dec);
+ err_v4l2_unreg:
+ 	v4l2_device_unregister(&core->v4l2_dev);
++err_cb_deinit:
++	iris_deinit_cb_devs(core);
+ 
+ 	return ret;
+ }
+@@ -360,6 +431,10 @@ static const struct dev_pm_ops iris_pm_ops = {
+ };
+ 
+ static const struct of_device_id iris_dt_match[] = {
++	{
++		.compatible = "qcom,kaanapali-iris",
++		.data = &kaanapali_data,
++	},
+ 	{
+ 		.compatible = "qcom,qcs8300-iris",
+ 		.data = &qcs8300_data,
+diff --git a/drivers/media/platform/qcom/iris/iris_resources.c b/drivers/media/platform/qcom/iris/iris_resources.c
+index 773f6548370a..305f1b572ab3 100644
+--- a/drivers/media/platform/qcom/iris/iris_resources.c
++++ b/drivers/media/platform/qcom/iris/iris_resources.c
+@@ -12,6 +12,7 @@
+ #include <linux/reset.h>
+ 
+ #include "iris_core.h"
++#include "iris_instance.h"
+ #include "iris_resources.h"
+ 
+ #define BW_THRESHOLD 50000
+@@ -141,3 +142,43 @@ int iris_disable_unprepare_clock(struct iris_core *core, enum platform_clk_type
+ 
+ 	return 0;
+ }
++
++struct device *iris_get_cb_dev(struct iris_inst *inst, enum iris_buffer_type buffer_type)
++{
++	struct iris_core *core = inst->core;
++	struct device *dev = NULL;
++
++	switch (buffer_type) {
++	case BUF_INPUT:
++		if (inst->domain == DECODER)
++			dev = core->np_dev;
++		else
++			dev = core->p_dev;
++		break;
++	case BUF_OUTPUT:
++		if (inst->domain == DECODER)
++			dev = core->p_dev;
++		else
++			dev = core->np_dev;
++		break;
++	case BUF_DPB:
++	case BUF_PARTIAL:
++	case BUF_SCRATCH_1:
++	case BUF_SCRATCH_2:
++	case BUF_VPSS:
++		dev = core->p_dev;
++		break;
++	case BUF_BIN:
++	case BUF_ARP:
++	case BUF_COMV:
++	case BUF_LINE:
++	case BUF_NON_COMV:
++	case BUF_PERSIST:
++		dev = core->np_dev;
++		break;
++	default:
++		dev_err(core->dev, "invalid buffer type: %d\n", buffer_type);
++	}
++
++	return dev ? dev : core->dev;
++}
+diff --git a/drivers/media/platform/qcom/iris/iris_resources.h b/drivers/media/platform/qcom/iris/iris_resources.h
+index 6bfbd2dc6db0..a9a5bddb19c2 100644
+--- a/drivers/media/platform/qcom/iris/iris_resources.h
++++ b/drivers/media/platform/qcom/iris/iris_resources.h
+@@ -15,5 +15,6 @@ int iris_unset_icc_bw(struct iris_core *core);
+ int iris_set_icc_bw(struct iris_core *core, unsigned long icc_bw);
+ int iris_disable_unprepare_clock(struct iris_core *core, enum platform_clk_type clk_type);
+ int iris_prepare_enable_clock(struct iris_core *core, enum platform_clk_type clk_type);
++struct device *iris_get_cb_dev(struct iris_inst *inst, enum iris_buffer_type buffer_type);
+ 
+ #endif
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index 14d63dc76c9b..fa23392bf43c 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -107,7 +107,7 @@ iris_m2m_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_
+ 	src_vq->drv_priv = inst;
+ 	src_vq->buf_struct_size = sizeof(struct iris_buffer);
+ 	src_vq->min_reqbufs_allocation = MIN_BUFFERS;
+-	src_vq->dev = inst->core->dev;
++	src_vq->dev = iris_get_cb_dev(inst, BUF_INPUT);
+ 	src_vq->lock = &inst->ctx_q_lock;
+ 	ret = vb2_queue_init(src_vq);
+ 	if (ret)
+@@ -121,7 +121,10 @@ iris_m2m_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_
+ 	dst_vq->drv_priv = inst;
+ 	dst_vq->buf_struct_size = sizeof(struct iris_buffer);
+ 	dst_vq->min_reqbufs_allocation = MIN_BUFFERS;
+-	dst_vq->dev = inst->core->dev;
++	if (inst->domain == DECODER &&
++	    inst->core->iris_firmware_data == &iris_hfi_gen2_data)
++		dst_vq->max_num_buffers = DEFAULT_MAX_HOST_BUF_COUNT;
++	dst_vq->dev = iris_get_cb_dev(inst, BUF_OUTPUT);
+ 	dst_vq->lock = &inst->ctx_q_lock;
+ 
+ 	return vb2_queue_init(dst_vq);
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu4x.c b/drivers/media/platform/qcom/iris/iris_vpu4x.c
+index 02e100a4045f..32a161c8d534 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu4x.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu4x.c
+@@ -316,6 +316,10 @@ static void iris_vpu4x_power_off_hardware(struct iris_core *core)
+ 	if (!handshake_done && handshake_busy)
+ 		dev_err(core->dev, "LPI handshake timeout\n");
+ 
++	readl_poll_timeout(core->reg_base + AON_WRAPPER_MVP_NOC_LPI_STATUS,
++			   value, value & BIT(0), 200, 2000);
++	writel(0x0, core->reg_base + AON_WRAPPER_MVP_NOC_LPI_CONTROL);
++
+ 	writel(MVP_NOC_RESET_REQ_MASK, core->reg_base + AON_WRAPPER_MVP_NOC_RESET_REQ);
+ 	ret = readl_poll_timeout(core->reg_base + AON_WRAPPER_MVP_NOC_RESET_ACK,
+ 				 value, value & MVP_NOC_RESET_REQ_MASK, 200, 2000);
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+index fb6f1016415e..0f18682aa088 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+@@ -1814,6 +1814,63 @@ static u32 hfi_vpu4x_buffer_line_vp9d(u32 frame_width, u32 frame_height, u32 _yu
+ 	return lb_size + dpb_obp_size;
+ }
+ 
++static u32 hfi_vpu4x_buffer_line_h265d(u32 frame_width, u32 frame_height, bool is_opb,
++				       u32 num_vpp_pipes)
++{
++	u32 num_lcu_per_pipe, se_left_lb, vsp_left_lb, top_lb, qp_size;
++	u32 fe_left_lb = 0, dpb_obp = 0, lcu_size = LCU_SIZE_16;
++	int i;
++
++	for (i = 0; i < num_vpp_pipes; i++) {
++		num_lcu_per_pipe = (DIV_ROUND_UP(frame_height, lcu_size) / num_vpp_pipes);
++		if (i == 0)
++			num_lcu_per_pipe += (DIV_ROUND_UP(frame_height, lcu_size) % num_vpp_pipes);
++
++		fe_left_lb += DMA_ALIGNMENT * FE_LFT_CTRL_BYTES_PER_PACKETS * num_lcu_per_pipe *
++			      FE_LFT_CTRL_LINE_NUMBERS;
++		fe_left_lb += DMA_ALIGNMENT * FE_LFT_DB_LUMA_CHROMA_BYTES_PER_PACKETS *
++			      num_lcu_per_pipe * FE_LFT_DB_DATA_LINE_NUMBERS;
++		fe_left_lb += DMA_ALIGNMENT * FE_LFT_SAO_LUMA_BYTES_PER_PACKETS *
++			      num_lcu_per_pipe;
++		fe_left_lb += DMA_ALIGNMENT * FE_LFT_SAO_CHROMA_BYTES_PER_PACKETS *
++			      num_lcu_per_pipe;
++		fe_left_lb += DMA_ALIGNMENT * FE_LFT_LR_LUMA_CHROMA_BYTES_PER_PACKETS *
++			      num_lcu_per_pipe * FE_LFT_LR_DATA_LINE_NUMBERS;
++	}
++
++	if (is_opb)
++		dpb_obp = size_dpb_opb(frame_height, lcu_size) * num_vpp_pipes;
++
++	se_left_lb = max3(((frame_height + LCU_SIZE_16 - 1) / H265_MIN_SE_CTRL_BLOCK_SIZE) *
++			  MAX_SE_NBR_CTRL_LCU16_LINE_BUFFER_SIZE,
++			  ((frame_height + LCU_SIZE_32 - 1) / H265_MIN_SE_CTRL_BLOCK_SIZE) *
++			  MAX_SE_NBR_CTRL_LCU32_LINE_BUFFER_SIZE,
++			  ((frame_height + LCU_SIZE_64 - 1) / H265_MIN_SE_CTRL_BLOCK_SIZE) *
++			  MAX_SE_NBR_CTRL_LCU64_LINE_BUFFER_SIZE);
++
++	vsp_left_lb = ALIGN(DIV_ROUND_UP(frame_height, LCU_SIZE_64) *
++			    H265_NUM_TILE_ROW, DMA_ALIGNMENT);
++
++	top_lb = DMA_ALIGNMENT * FE_TOP_CTRL_BYTES_PER_PACKETS *
++		 DIV_ROUND_UP(frame_width, lcu_size) * FE_TOP_CTRL_LINE_NUMBERS;
++	top_lb += DMA_ALIGNMENT * FE_TOP_LUMA_BYTES_PER_PACKETS *
++		  DIV_ROUND_UP(frame_width, lcu_size) * FE_TOP_DATA_LUMA_LINE_NUMBERS;
++	top_lb += DMA_ALIGNMENT * FE_TOP_CHROMA_BYTES_PER_PACKETS *
++		  (DIV_ROUND_UP(frame_width, lcu_size) + 1) * FE_TOP_DATA_CHROMA_LINE_NUMBERS;
++	top_lb += ALIGN(((frame_width + LCU_SIZE_64 - 1) / H265_MIN_SE_CTRL_BLOCK_SIZE) *
++			MAX_SE_NBR_CTRL_LCU64_LINE_BUFFER_SIZE, DMA_ALIGNMENT);
++	top_lb += ALIGN(ALIGN(frame_width, LCU_SIZE_64) * PE_TOP_RECON_DATA_BYTES_PER_PACKETS,
++			DMA_ALIGNMENT);
++	top_lb += size_h265d_lb_vsp_top(frame_width, frame_height);
++
++	qp_size = size_h265d_qp(frame_width, frame_height);
++
++	return ((ALIGN(dpb_obp, DMA_ALIGNMENT) + ALIGN(se_left_lb, DMA_ALIGNMENT) +
++		ALIGN(vsp_left_lb, DMA_ALIGNMENT)) * num_vpp_pipes) +
++		ALIGN(fe_left_lb, DMA_ALIGNMENT) + ALIGN(top_lb, DMA_ALIGNMENT) +
++		ALIGN(qp_size, DMA_ALIGNMENT);
++}
++
+ static u32 iris_vpu4x_dec_line_size(struct iris_inst *inst)
+ {
+ 	u32 num_vpp_pipes = inst->core->iris_platform_data->num_vpp_pipe;
+@@ -1829,7 +1886,7 @@ static u32 iris_vpu4x_dec_line_size(struct iris_inst *inst)
+ 	if (inst->codec == V4L2_PIX_FMT_H264)
+ 		return hfi_buffer_line_h264d(width, height, is_opb, num_vpp_pipes);
+ 	else if (inst->codec == V4L2_PIX_FMT_HEVC)
+-		return hfi_buffer_line_h265d(width, height, is_opb, num_vpp_pipes);
++		return hfi_vpu4x_buffer_line_h265d(width, height, is_opb, num_vpp_pipes);
+ 	else if (inst->codec == V4L2_PIX_FMT_VP9)
+ 		return hfi_vpu4x_buffer_line_vp9d(width, height, out_min_count, is_opb,
+ 						  num_vpp_pipes);
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_buffer.h b/drivers/media/platform/qcom/iris/iris_vpu_buffer.h
+index 8c0d6b7b5de8..d48290671224 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.h
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.h
+@@ -150,6 +150,22 @@ struct iris_inst;
+ #define BITS_PER_CTRL_PACK             128
+ #define NUM_CTRL_PACK_LCU              10
+ 
++#define LCU_SIZE_16 16
++#define LCU_SIZE_32 32
++#define LCU_SIZE_64 64
++
++#define H265_MIN_SE_CTRL_BLOCK_SIZE		8
++#define FE_LFT_CTRL_BYTES_PER_PACKETS		1
++#define FE_LFT_DB_LUMA_CHROMA_BYTES_PER_PACKETS	2
++#define FE_LFT_SAO_LUMA_BYTES_PER_PACKETS	1
++#define FE_LFT_SAO_CHROMA_BYTES_PER_PACKETS	2
++#define FE_LFT_LR_LUMA_CHROMA_BYTES_PER_PACKETS	8
++
++#define FE_TOP_CTRL_BYTES_PER_PACKETS	    1
++#define FE_TOP_LUMA_BYTES_PER_PACKETS	    2
++#define FE_TOP_CHROMA_BYTES_PER_PACKETS	    2
++#define PE_TOP_RECON_DATA_BYTES_PER_PACKETS 6
++
+ static inline u32 size_h264d_lb_fe_top_data(u32 frame_width)
+ {
+ 	return MAX_FE_NBR_DATA_LUMA_LINE_BUFFER_SIZE * ALIGN(frame_width, 16) * 3;

@@ -1,0 +1,8 @@
+# /etc/systemd/system/y700-wifi-watchdog.service -- see /usr/local/libexec/y700-wifi-watchdog
+[Unit]
+Description=y700: reload ath12k when the Wi-Fi firmware's TX path is stuck
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/y700-wifi-watchdog

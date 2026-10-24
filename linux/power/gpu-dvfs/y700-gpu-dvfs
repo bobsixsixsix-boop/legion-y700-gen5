@@ -1,0 +1,31 @@
+#!/bin/bash
+# y700-gpu-dvfs: set the Adreno's simple_ondemand thresholds at boot (README "视频播放功耗", 2026-10-16).
+# msm hard-codes upthreshold 50 / downdifferential 10 (msm_gpu_devfreq.c:155-156): any 50 ms window more than 50 %
+# busy jumps straight to the 1200 MHz maximum (TURBO_L3, which also votes 20.8 GB/s of DDR). During video that
+# happened about 3 times a second for no visible gain (kprobe trace: 60 of 60 jumps at governor ticks, 0 boosts).
+# Measured during real wiliwili playback (3 ABAB pairs, same backlight, audio on): 50 -> 2.85 W, 80 -> 2.70 W, KWin
+# composites 60.0/s in every window (no missed-vblank trap). The governor reads these debugfs values live
+# (msm_debugfs.c:378-387, devfreq.c:835), so this only writes them; nothing else changes.
+# Config: /etc/default/y700-gpu-dvfs (UPTHRESHOLD=, DOWNDIFFERENTIAL=). Guard rails: the governor returns -EINVAL on
+# every poll (frequency frozen) if upthreshold > 100 or upthreshold < downdifferential, so both are validated.
+# Undo now: echo 50 > /sys/kernel/debug/dri/1/devfreq/upthreshold; for good: systemctl disable y700-gpu-dvfs.
+set -u
+UPTHRESHOLD=80; DOWNDIFFERENTIAL=10
+[ -r /etc/default/y700-gpu-dvfs ] && . /etc/default/y700-gpu-dvfs
+log() { echo "y700-gpu-dvfs: $*"; }
+case "$UPTHRESHOLD$DOWNDIFFERENTIAL" in *[!0-9]*) log "non-numeric config ($UPTHRESHOLD/$DOWNDIFFERENTIAL), leaving the kernel defaults"; exit 0;; esac
+if [ "$UPTHRESHOLD" -lt 1 ] || [ "$UPTHRESHOLD" -gt 100 ] || [ "$DOWNDIFFERENTIAL" -ge "$UPTHRESHOLD" ]; then
+	log "invalid thresholds up=$UPTHRESHOLD down=$DOWNDIFFERENTIAL (need 1..100 and down < up), leaving the kernel defaults"; exit 0
+fi
+mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug
+# the GPU binds late (component bind of the display controller): wait for its devfreq debugfs directory
+for i in $(seq 120); do
+	D=$(ls -d /sys/kernel/debug/dri/*/devfreq 2>/dev/null | head -1)
+	[ -n "$D" ] && [ -w "$D/upthreshold" ] && break
+	sleep 0.5
+done
+[ -z "$D" ] && { log "no msm devfreq in debugfs after 60 s, nothing done"; exit 0; }
+old="$(cat $D/upthreshold)/$(cat $D/downdifferential)"
+# order matters for the guard rail: raise up first, then down (both stay valid in between for these values)
+echo "$UPTHRESHOLD" > "$D/upthreshold" && echo "$DOWNDIFFERENTIAL" > "$D/downdifferential"
+log "upthreshold/downdifferential $old -> $(cat $D/upthreshold)/$(cat $D/downdifferential) ($D)"

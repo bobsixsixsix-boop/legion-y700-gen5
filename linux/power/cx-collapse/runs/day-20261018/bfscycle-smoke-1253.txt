@@ -1,0 +1,19 @@
+bfscycle 2026-10-18 12:53:37  MIN=1.2 INT=5  chrome ?  claude 44.7.0
+viz = GPU-process VizCompositorTh wakeups/s, cpu = all of the app's processes (% of one core), bfs = GPU process has the switch, sys = system-domain entries/s (flight recorder)
+
+== 12:53:37 screen Off
+12:53:43 Off | chrome - | claude  4p bfs=? viz - cpu - | rec 12:53:43 sys 11.3 bat +954mW
+12:53:49 Off | chrome - | claude 12p bfs=Y viz - cpu 192.8% | rec 12:53:43 sys 11.3 bat +954mW
+12:53:55 Off | chrome - | claude 11p bfs=Y viz   1.2 cpu 13.8% | rec 12:53:53 sys  5.1 bat +3496mW
+12:54:01 Off | chrome - | claude 11p bfs=Y viz   0.0 cpu  1.8% | rec 12:53:53 sys  5.1 bat +3496mW
+12:54:07 Off | chrome - | claude 11p bfs=Y viz   0.0 cpu  0.7% | rec 12:54:03 sys 21.5 bat +170mW
+12:54:13 Off | chrome - | claude 11p bfs=Y viz   0.0 cpu 18.1% | rec 12:54:13 sys 21.7 bat -0mW
+12:54:19 Off | chrome - | claude 11p bfs=Y viz   1.8 cpu 21.3% | rec 12:54:13 sys 21.7 bat -0mW
+12:54:25 Off | chrome - | claude 11p bfs=Y viz   0.0 cpu 22.8% | rec 12:54:23 sys 22.4 bat +396mW
+12:54:31 Off | chrome - | claude 11p bfs=Y viz   0.0 cpu  1.3% | rec 12:54:23 sys 22.4 bat +396mW
+12:54:37 Off | chrome - | claude - | rec 12:54:33 sys 18.7 bat +279mW
+12:54:43 Off | chrome - | claude - | rec 12:54:43 sys 21.3 bat +162mW
+12:54:49 Off | chrome - | claude - | rec 12:54:43 sys 21.3 bat +162mW
+
+done 12:54:49  averages per screen state:
+  Off claude viz   0.4/s  cpu 34.1%  (9 samples)

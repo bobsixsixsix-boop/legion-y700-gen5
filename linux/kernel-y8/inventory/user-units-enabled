@@ -1,0 +1,35 @@
+UNIT FILE                                    STATE   PRESET
+filter-chain.service                         enabled enabled
+gcr-ssh-agent.service                        enabled enabled
+kde-baloo.service                            enabled enabled
+mpris-proxy.service                          enabled enabled
+obex.service                                 enabled enabled
+pipewire-pulse.service                       enabled enabled
+pipewire.service                             enabled enabled
+plasma-kcminit.service                       enabled enabled
+plasma-ksmserver.service                     enabled enabled
+plasma-plasmashell.service                   enabled enabled
+tb323fu-speaker-gain.service                 enabled enabled
+user-session-migration.service               enabled enabled
+wireplumber.service                          enabled enabled
+xdg-desktop-portal-rewrite-launchers.service enabled enabled
+xdg-user-dirs.service                        enabled enabled
+y700-autobright.service                      enabled enabled
+y700-control-center.service                  enabled enabled
+y700-lenovo-tuning.service                   enabled enabled
+y700-speaker-guard.service                   enabled enabled
+y700-wiliwili-proxy.service                  enabled enabled
+dirmngr.socket                               enabled enabled
+gcr-ssh-agent.socket                         enabled enabled
+gpg-agent-browser.socket                     enabled enabled
+gpg-agent-extra.socket                       enabled enabled
+gpg-agent-ssh.socket                         enabled enabled
+gpg-agent.socket                             enabled enabled
+keyboxd.socket                               enabled enabled
+pipewire-pulse.socket                        enabled enabled
+pipewire.socket                              enabled enabled
+pk-debconf-helper.socket                     enabled enabled
+ssh-agent.socket                             enabled enabled
+launchpadlib-cache-clean.timer               enabled enabled
+
+32 unit files listed.

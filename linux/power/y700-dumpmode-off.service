@@ -1,0 +1,17 @@
+# /etc/systemd/system/y700-dumpmode-off.service -- started by y700-dumpmode-off.timer 3 min after boot
+# Leave Qualcomm "download mode" (qcom_scm.download_mode=full on the built-in cmdline) for the first
+# minutes only. With it on, any unclean restart (panic, oops=panic, hung-task panic, watchdog) parks
+# the SoC in the XBL crash-dump mode (USB 900E) waiting for a PC to pull a DDR dump - on 2026-10-15
+# 03:41 the tablet sat there for 7 h at ~1.6 W (73 % -> 37 %). It also turns panic=10 into "never
+# reboots", which defeats the trial kernel's panic -> initramfs count -> rollback design.
+# Early boot keeps it: a kernel that panics before /init could otherwise reboot forever and make the
+# bootloader switch slots. After 3 min (the trial-kernel confirmation at 90 s is long past) a crash
+# means: console-ramoops/dmesg-ramoops to pstore, 10 s, reboot.
+# To take a full dump on purpose: echo full > /sys/module/qcom_scm/parameters/download_mode first.
+[Unit]
+Description=y700: leave Qualcomm download (crash-dump) mode after boot
+ConditionPathExists=/sys/module/qcom_scm/parameters/download_mode
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo off > /sys/module/qcom_scm/parameters/download_mode && logger -t y700-dumpmode "download_mode off: a crash now reboots after 10 s (pstore keeps the log)"'

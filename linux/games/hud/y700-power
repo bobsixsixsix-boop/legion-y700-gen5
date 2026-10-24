@@ -1,0 +1,19 @@
+#!/bin/sh
+# Whole-device power for the MangoHud overlay (exec=), also usable in a terminal.
+# On a charger: input (USB V*I) minus what goes into the battery; on battery: the discharge.
+B=/sys/class/power_supply/qcom-battmgr-bat; U=/sys/class/power_supply/qcom-battmgr-usb
+bp=$(cat $B/power_now 2>/dev/null || echo 0)                     # uW, + charging / - discharging
+on=$(cat $U/online 2>/dev/null || echo 0)
+if [ "$on" = 1 ]; then
+	ip=$(( $(cat $U/current_now) / 1000 * $(cat $U/voltage_now) / 1000 ))   # uW
+	sys=$(( ip - bp ))
+	byp=$(tb323fu-ctl --json battery 2>/dev/null | grep -q '"Bypass": *true' && echo " bypass" || true)
+	if [ $ip -le 0 ] && [ $bp -gt 500000 ]; then
+		# PPS: the charge pumps carry the current, USB current_now reads 0 (see overlay/src/sampler.rs)
+		awk -v b=$bp 'BEGIN{printf "charging %+.1fW (PPS charge pump, input not measured)\n", b/1e6}'
+	else
+		awk -v s=$sys -v i=$ip -v b=$bp -v y="$byp" 'BEGIN{printf "%.1fW (in %.1fW, batt %+.1fW%s)\n", s/1e6, i/1e6, b/1e6, y}'
+	fi
+else
+	awk -v b=$bp 'BEGIN{printf "%.1fW (battery)\n", -b/1e6}'
+fi

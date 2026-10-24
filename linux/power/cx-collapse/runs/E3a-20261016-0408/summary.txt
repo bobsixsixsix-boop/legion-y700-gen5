@@ -1,0 +1,45 @@
+=== 2026-10-16 04:39:41 7.3.0-rc4-tb323fu-t49-y10 up 4902s boot_id d621af4e-fe90-4173-8177-d0d941bb050a
+== boots (the run must be inside the last one)
+ -2 baa113c4fe0f487ebfd5c6c625f3b791 Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:22:18 JST
+ -1 e2b6380a0542403aa6321f6b2ce6e3a5 Tue 2026-07-28 05:44:02 JST Fri 2026-10-16 03:17:50 JST
+  0 d621af4efe9041738177d0d941bb050a Tue 2026-07-28 05:44:02 JST Fri 2026-10-16 04:39:41 JST
+== cx-exp unit
+no cx-exp process
+== knobs now
+aco=N aso=N dl=off dpms=On bat=Discharging/98%
+== pd idle_states
+-- cluster
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1588734        57000      24670      17280      0          0
+-- cluster1
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     3439579        48263      95404      16541      0          0
+-- system
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1504345        47658      2769       10756      0          0
+== cpuidle state1 per cpu (usage/rejected/time us)
+cpu0 cpu-sleep-0 usage=512857 rej=13 time=4177135048
+cpu3 cpu-sleep-0 usage=281492 rej=15 time=4566947306
+cpu5 cpu-sleep-0 usage=239924 rej=9 time=4595418482
+cpu6 cpu-sleep-1 usage=269042 rej=7 time=4720218378
+cpu7 cpu-sleep-1 usage=175682 rej=3 time=4749262745
+== qcom_stats
+-- apss: Count: 42495 Last Entered At: 93020102690 Last Exited At: 93020678576 Accumulated Duration: 25965582210 
+-- cxsd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- aosd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- ddr: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+== 1043 report lines
+[  575.757015] CPUidle PSCI: power-domain-system: allow_system_off=Y, system domain state in runtime idle too (parameter written)
+[ 2379.211595] CPUidle PSCI: power-domain-system: allow_system_off=N, system domain state in system suspend only (parameter written)
+[ 3036.965737] CPUidle PSCI: power-domain-system: allow_system_off=Y, system domain state in runtime idle too (parameter written)
+[ 4836.887296] CPUidle PSCI: power-domain-system: allow_system_off=N, system domain state in system suspend only (parameter written)
+== kernel trouble lines in the last 200 min
+      1 WARNING: net/mac80211/airtime.c:532 at ieee80211_get_rate_duration+0x2c/0x170, CPU#1: NetworkManager/2292
+== flightrec MARKs
+MARK t=575.7 at=03:27:35 E3a start 30min
+MARK t=2381.3 at=03:57:41 E3a end aco=N aso=N
+MARK t=3036.9 at=04:08:36 E3a start 30min
+MARK t=4839.0 at=04:38:38 E3a end aco=N aso=N
+== flightrec sums between MARK E3a start and MARK E3a end (pd= increments; qs= apss/cxsd/aosd/ddr count increments)
+rows=3607  cl0 use=57000 rej=101  cl1 use=48263 rej=155  sys use=47658 rej=2769
+qcom_stats count first->last (+ms summed): apss 0->0 (+1351383 ms)  cxsd 0->0 (+0)  aosd 0->0 (+0)  ddr 0->0 (+0)

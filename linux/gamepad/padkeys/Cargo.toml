@@ -1,0 +1,19 @@
+[package]
+name = "y700-padkeys"
+version = "0.1.0"
+edition = "2021"
+description = "y700: the G9 gamepad's home key opens the control centre (tap) or minimizes the active window (double tap)"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (only libc; .cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/power/cx-auto.
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-padkeys"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

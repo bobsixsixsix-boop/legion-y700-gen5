@@ -1,0 +1,4 @@
+# y700: WCN7860 (ath12k, self-managed regulatory) comes up in the world domain 00, where
+# 6 GHz is passive-scan only, so NetworkManager often misses HOME_6G in the first scan.
+# Set the country the tablet is used in; JP keeps 6 GHz 320 MHz (5945-6425) with active scanning.
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="ath12k_wifi7_pci", RUN+="/usr/sbin/iw reg set JP"

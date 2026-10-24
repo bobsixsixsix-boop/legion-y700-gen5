@@ -1,0 +1,55 @@
+/usr/local/bin/y700-whoawake
+Off
+cx-auto: enabled
+  armed now: yes
+  knobs: aco=Y aso=Y
+== 20 s, screen on: forks 1/s, context switches 692/s, idle entries 9734 total (cpu0:90 cpu1:17 cpu2:60 cpu3:184 cpu4:79 cpu5:30 cpu6:17 cpu7:8 /s)
+== interrupts/s, top 12
+     351  11 GICv3 Level arch_timer
+      95  IPI1 Function call interrupts
+      21  251 ipcc Edge glink-smem
+      21  13 GICv3 Level ipcc_0
+      10  15 GICv3 Level apss_cpucp_mbox
+       8  235 ITS-pMSI-1d84000.ufs Edge qcom-mcq-esi
+       7  16 GICv3 Level apps_rsc
+       4  44 pmic_arb Edge sdam0, sdam0
+       3  IPI0 Rescheduling interrupts
+       2  289 ITS-PCI-MSI-0000:01:00.0 Edge ce2
+       1  236 ITS-pMSI-1d84000.ufs Edge qcom-mcq-esi
+       1  229 GICv3 Level ufshcd
+== softirqs/s
+   TIMER::44  NET_RX::1  TASKLET::2  SCHED::108  RCU::2
+== CPU ms per second by cgroup (units; includes exited children), top 14
+    5.2  ~/app.slice/app-com.anthropic.Claude@9776b088dea94d06bd40d826f166e5bf.service
+    4.3  system.slice/tb323fu-helperd.service
+    3.5  ~/app.slice/app-google\x2dchrome@f8fff08554a14a8f8c7b5335236f2706.service
+    2.4  ~/app.slice/y700-speaker-guard.service
+    2.1  ~/app.slice/app-com.anthropic.Claude-3636.scope
+    2.0  user.slice/user-0.slice/session-c18.scope
+== CPU ms per second by process (alive the whole window), top 12
+    4.5    2180  /usr/libexec/tb323fu/tb323fu-helperd
+    3.5    3949  /usr/lib/claude-desktop/claude-desktop --type=gpu-process --ozone-platfo
+    2.5    3835  /opt/google/chrome/chrome --type=gpu-process --gpu-recent-crash-count=0 
+    2.0    3636  /usr/lib/claude-desktop/claude-desktop
+    1.5    7938  python3 /usr/local/bin/y700-whoawake 20
+    1.0    3637  /opt/google/chrome/chrome --ozone-platform=wayland --enable-wayland-ime 
+    1.0    3506  /usr/bin/python3 /home/user/.local/bin/y700-autobright
+    1.0    3287  /usr/bin/plasmashell --no-respawn
+    1.0    2613  /usr/bin/pipewire-pulse
+== wakeups/s by thread (context switches), top 16
+    120    3949/4105   VizCompositorTh  /usr/lib/claude-desktop/claude-desktop --type=gpu-
+     60    3835/3888   VizCompositorTh  /opt/google/chrome/chrome --type=gpu-process --gpu
+     14    3636/3965   claude-desktop   /usr/lib/claude-desktop/claude-desktop
+     12    6697/6697   kworker/0:0-events kworker/0:0-events
+     10    2180/2180   tb323fu-helperd  /usr/libexec/tb323fu/tb323fu-helperd
+      8    3636/3636   claude-desktop   /usr/lib/claude-desktop/claude-desktop
+      5    2339/2359   tailscaled       /usr/sbin/tailscaled --state=/var/lib/tailscale/ta
+      5     186/186    kworker/u35:1-ufs_clk_gating_0 kworker/u35:1-ufs_clk_gating_0
+      5    2198/2198   keyhold          /usr/libexec/tb323fu/keyhold 10 pmic_resin 114 gpi
+      4    2590/2590   pipewire         /usr/bin/pipewire
+      4     130/130    irq/44-sdam0     irq/44-sdam0
+      4    2613/2613   pipewire-pulse   /usr/bin/pipewire-pulse
+      3    4423/4423   claude-desktop   /usr/lib/claude-desktop/claude-desktop --type=rend
+      3    2180/2240   tb323fu-helperd  /usr/libexec/tb323fu/tb323fu-helperd
+      3    3287/3287   plasmashell      /usr/bin/plasmashell --no-respawn
+      2    3637/3637   chrome           /opt/google/chrome/chrome --ozone-platform=wayland

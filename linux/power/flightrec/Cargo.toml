@@ -1,0 +1,19 @@
+[package]
+name = "y700-flightrec"
+version = "0.1.0"
+edition = "2021"
+description = "y700 flight recorder: cpuidle / genpd / qcom_stats / IRQ deltas to pmsg + tmpfs + UFS, 1 Hz during CX experiments, 10 s otherwise"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (only libc; .cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/games/hud/overlay.
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-flightrec"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

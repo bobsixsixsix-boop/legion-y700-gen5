@@ -1,0 +1,21 @@
+[Unit]
+Description=y700: game performance sampler (FPS, CPU, GPU, temperatures, power) for the status bar
+PartOf=graphical-session.target
+# never give up restarting it (until 10-22 the GTK bar exited on every GPU reset, 3x in 10 s on 2026-10-14; the
+# sampler has no GPU device, a restart now means it crashed)
+StartLimitIntervalSec=0
+
+[Service]
+# the Rust binary (overlay/, built and installed by install.sh); until 2026-10-17 a Python script with
+# LD_PRELOAD=libgtk4-layer-shell (the interpreter loaded GTK before the library could hook libwayland) - the
+# binary links libgtk4-layer-shell first, so no preload
+# Since 2026-10-22 --sampler: no window, the numbers go to $XDG_RUNTIME_DIR/y700-hud.txt(.kv) and the status
+# bar shows them (linux/dock/y700-shellbar: HudLine.qml, HudWidget.qml); no GTK, so no GDK_BACKEND / GTK_A11Y
+ExecStart=%h/.local/bin/y700-hud-overlay --sampler
+# the status bar shows the numbers while the .kv file exists: it goes with the service (stop, crash, restart)
+ExecStopPost=/bin/rm -f %t/y700-hud.txt %t/y700-hud.txt.kv %t/y700-hud.txt.rs.tmp %t/y700-hud.txt.kv.rs.tmp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

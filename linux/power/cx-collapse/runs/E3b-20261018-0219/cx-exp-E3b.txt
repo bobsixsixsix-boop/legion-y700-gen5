@@ -1,0 +1,16 @@
+=== 2026-10-18 02:19:18 cx-exp E3b 30 min (level E3b) on 7.3.0-rc4-tb323fu-t49-y12, battery Discharging 78 %, aco=N aso=N dl=off
+02:19:33 before: cluster[use=539750 rej=1507381] cluster1[use=493653 rej=1610555] system[use=443249 rej=15799] apss=416519/9896651ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+02:19:33 MARK E3b start 30min
+02:19:33 knobs: aco=Y aso=Y aoss_set=1
+E3b t+1m                      0.31 W (min 0.27 max 0.42, 11 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 1.3% idle[WFI=3% cpu-sleep-0=72% cpu-sleep-1=24%] | irq 508/s | gpu=160MHz ddr=600MHz llcc=292MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/532x cxsd=0%/0x aosd=0%/0x
+02:21:49 t+2m: cluster[use=539821 rej=1507381] cluster1[use=494395 rej=1610555] system[use=443249 rej=15799] apss=416519/9896651ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3b t+12m                     0.31 W (min 0.26 max 0.43, 12 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 1.2% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=25%] | irq 506/s | gpu=160MHz ddr=582MHz llcc=289MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/549x cxsd=0%/0x aosd=0%/0x
+02:33:05 t+13m: cluster[use=540252 rej=1507384] cluster1[use=499377 rej=1610560] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3b t+23m                     0.28 W (min 0.24 max 0.32, 11 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 0.4% idle[WFI=1% cpu-sleep-0=74% cpu-sleep-1=25%] | irq 426/s | gpu=160MHz ddr=589MHz llcc=291MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/556x cxsd=0%/0x aosd=0%/0x
+02:44:21 t+25m: cluster[use=540677 rej=1507386] cluster1[use=503966 rej=1610562] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+02:49:37 done E3b 30 min without a reset
+02:49:37 after:  cluster[use=540909 rej=1507388] cluster1[use=506266 rej=1610563] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+02:49:37 MARK E3b end aco=N aso=N
+02:49:37 cx-when-idle: E3b:30 exit 0
+03:04:37 cx-when-idle: idle 15 min on battery, display off: starting E3c:30
+

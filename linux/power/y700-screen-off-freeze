@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""y700-screen-off-freeze [--list | --thaw | --status]: freeze the heavy desktop apps while the panel is off.
+
+What it is for - NOT power. Measured 2026-10-15 on battery (README 续航第三轮, 第二次实测 I/J): screen off 0.59 W,
+screen off + every desktop app frozen 0.58 W: 0.01 W, inside the +/-0.03 W noise. It is for the WAKEUP budget of the
+runtime CX-collapse work (linux/power/cx-collapse/RESEARCH.md 1.4, linux/power/WAKEUPS.md): with the screen off,
+Claude desktop still wakes a CPU ~22 times/s and Chrome keeps its timers; the ss3 residency model needs the whole
+system under ~50 wakeups/s before CX/DDR can spend real time off. Frozen = cgroup.freeze on the app's own
+systemd user unit (systemctl --user freeze): no CPU, no timers, no state lost; thawed the moment the panel is on
+again (polled every 1 s while something is frozen) and whenever this service stops.
+
+Rules:
+  - only user units named app-*.service / app-*.scope whose name contains one of MATCH (default: claude, chrome);
+    'claude' also matches the claude-code.desktop units (Claude Code at work): MATCH=com.anthropic.claude,chrome
+    freezes only the desktop app;
+  - never a unit whose name contains one of NEVER (default: telegram - it must keep receiving messages);
+  - never a unit that owns an MPRIS player whose PlaybackStatus is Playing (music or a video in Chrome goes on);
+  - never before the panel has been off for DELAY s (default 60: the power key toggles the screen a lot).
+WARNING for the owner: a frozen Claude desktop also freezes every agent session running inside it. Keep the
+screen on while it works for you, or take 'claude' out of MATCH.
+
+Config: ~/.config/y700-screen-off-freeze.conf, KEY=VALUE lines: MATCH, NEVER (comma lists, case-insensitive
+substrings of the unit name), DELAY, POLL (seconds). State: $XDG_RUNTIME_DIR/y700-screen-off-freeze.frozen
+(the units we froze - thawed again on start, on stop, and by --thaw, so a crash never leaves an app frozen).
+Runs as the desktop user (systemd user unit y700-screen-off-freeze.service). Panel state comes from
+/sys/class/drm/card*-DSI-*/{status,dpms} (connected connectors only). 2026-10-16.
+"""
+import glob, json, os, signal, subprocess, sys, time
+
+CONF = os.path.expanduser("~/.config/y700-screen-off-freeze.conf")
+RUN = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{getattr(os, 'getuid', lambda: 1000)()}"
+STATE = os.path.join(RUN, "y700-screen-off-freeze.frozen")
+cfg = {"MATCH": "claude,chrome", "NEVER": "telegram", "DELAY": "60", "POLL": "2"}
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def load_conf():
+    try:
+        with open(CONF) as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln and not ln.startswith("#") and "=" in ln:
+                    k, v = ln.split("=", 1)
+                    cfg[k.strip().upper()] = v.strip().strip('"')
+    except OSError:
+        pass
+
+
+def words(key):
+    return [w.strip().lower() for w in cfg[key].split(",") if w.strip()]
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def panel_off():
+    """True when every connected DSI panel reports DPMS Off; False when one is on or none is connected."""
+    seen = False
+    for d in glob.glob("/sys/class/drm/card*-DSI-*"):
+        try:
+            with open(d + "/status") as f:
+                if f.read().strip() != "connected":
+                    continue
+            seen = True
+            with open(d + "/dpms") as f:
+                if f.read().strip() != "Off":
+                    return False
+        except OSError:
+            continue
+    return seen
+
+
+def candidates():
+    """app units that match MATCH and not NEVER, with their freezer state."""
+    out = []
+    match, never = words("MATCH"), words("NEVER")
+    for ln in run("systemctl", "--user", "list-units", "--type=scope,service", "--all", "--no-legend", "--plain").splitlines():
+        f = ln.split()
+        if not f or not f[0].startswith("app-"):
+            continue
+        u = f[0]
+        low = u.lower()
+        if any(n in low for n in never) or not any(m in low for m in match):
+            continue
+        out.append(u)
+    return out
+
+
+def freezer_state(unit):
+    return run("systemctl", "--user", "show", "-p", "FreezerState", "--value", unit).strip()
+
+
+def playing_units():
+    """units owning an MPRIS player that is Playing (busctl lists the unit of every bus name)."""
+    units = set()
+    try:
+        rows = json.loads(run("busctl", "--user", "list", "--json=short") or "[]")
+    except ValueError:
+        rows = []
+    for r in rows:
+        name = r.get("name") or ""
+        if not name.startswith("org.mpris.MediaPlayer2."):
+            continue
+        st = run("busctl", "--user", "get-property", name, "/org/mpris/MediaPlayer2",
+                 "org.mpris.MediaPlayer2.Player", "PlaybackStatus")
+        if "Playing" in st and r.get("unit"):
+            units.add(r["unit"])
+    return units
+
+
+def read_state():
+    try:
+        with open(STATE) as f:
+            return [ln.strip() for ln in f if ln.strip()]
+    except OSError:
+        return []
+
+
+def write_state(units):
+    if units:
+        os.makedirs(RUN, exist_ok=True)
+        with open(STATE, "w") as f:
+            f.write("\n".join(units) + "\n")
+    else:
+        try:
+            os.remove(STATE)
+        except OSError:
+            pass
+
+
+def freeze():
+    playing = playing_units()
+    frozen = read_state()
+    for u in candidates():
+        if u in frozen or u in playing:
+            continue
+        if freezer_state(u) != "running":
+            continue
+        r = subprocess.run(["systemctl", "--user", "freeze", u], capture_output=True, text=True)
+        if r.returncode == 0:
+            frozen.append(u)
+            log(f"frozen {u}")
+        else:
+            log(f"freeze {u} failed: {r.stderr.strip()}")
+    if playing:
+        log("kept running (MPRIS Playing): " + " ".join(sorted(playing)))
+    write_state(frozen)
+    return frozen
+
+
+def thaw():
+    frozen = read_state()
+    for u in frozen:
+        r = subprocess.run(["systemctl", "--user", "thaw", u], capture_output=True, text=True)
+        log(f"thawed {u}" if r.returncode == 0 else f"thaw {u}: {r.stderr.strip() or 'gone'}")
+    write_state([])
+    return bool(frozen)
+
+
+def main():
+    load_conf()
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg in ("-h", "--help"):
+        print(__doc__)
+        return
+    if arg == "--thaw":
+        thaw()
+        return
+    if arg == "--list":
+        playing = playing_units()
+        for u in candidates():
+            print(f"{u:<60} {freezer_state(u):<8}{'  (MPRIS Playing: kept)' if u in playing else ''}")
+        print(f"panel off: {panel_off()}; MATCH={cfg['MATCH']} NEVER={cfg['NEVER']} DELAY={cfg['DELAY']} POLL={cfg['POLL']}")
+        return
+    if arg == "--status":
+        print(f"panel off: {panel_off()}; frozen by us: {' '.join(read_state()) or '-'}")
+        return
+    delay, poll = float(cfg["DELAY"]), float(cfg["POLL"])
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda *_: sys.exit(0))
+    if thaw():
+        log("thawed leftovers from a previous run")
+    log(f"watching the panel: freeze {cfg['MATCH']} after {delay:.0f} s off, never {cfg['NEVER']}, poll {poll:.0f} s")
+    off_since = None
+    try:
+        while True:
+            frozen = read_state()
+            if panel_off():
+                off_since = off_since or time.monotonic()
+                if not frozen and time.monotonic() - off_since >= delay:
+                    freeze()
+            else:
+                off_since = None
+                if frozen:
+                    thaw()
+            time.sleep(1 if read_state() else poll)
+    finally:
+        thaw()
+
+
+if __name__ == "__main__":
+    main()

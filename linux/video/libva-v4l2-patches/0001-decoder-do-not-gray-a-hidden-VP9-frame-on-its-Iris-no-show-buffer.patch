@@ -1,0 +1,197 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:00:00 +0000
+Subject: [PATCH] decoder: do not gray a hidden VP9 frame on its Iris no-show
+ buffer
+
+vp9_bitstream() submits a hidden (show_frame=0) VP9 frame as a superframe
+of the frame plus a show-existing frame of the slot it refreshed, so that
+VA gets a completed surface. Iris returns the hidden half as an empty
+capture buffer: the driver reports HFI's NOSHOW picture type, and any
+empty buffer while streaming, as V4L2_BUF_FLAG_ERROR. The picture follows
+from the show-existing half, with the same timestamp.
+
+Without patches/0004 (media: iris: Preserve timestamps on error buffers)
+that error buffer has timestamp 0 and matches no pending picture. With
+it, it carries the picture's timestamp, so pump() replaced the picture
+with neutral gray ("replaced damaged picture"), then discarded the real
+one ("discarding completed token"). A later show_existing_frame of that
+slot outputs the same VA surface again and shows the gray frame; without
+one the substitution is invisible but logged once per hidden frame.
+
+Remember which pictures are wrapped hidden frames and take their first
+empty CAPTURE error as the expected no-show buffer. Iris flags a damaged
+hidden half the same way, so such a picture is grayed only if a further
+error buffer arrives for it, if a later picture returns first (CAPTURE
+returns in decode order, so the show-existing half will not follow), or
+if a client waits on pictures and the show-existing half has not
+followed within 1 s, instead of the generic 5 s sync timeout.
+
+H.264, HEVC and visible VP9 frames are unchanged, including the
+truncated-HEVC recovery that patches/0004 enables.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/backend.cpp  |  4 +++-
+ src/decoder.cpp  | 48 ++++++++++++++++++++++++++++++++++++++++++++++--
+ src/internal.hpp | 10 +++++++++-
+ src/vp9.cpp      |  4 +++-
+ 4 files changed, 61 insertions(+), 5 deletions(-)
+
+diff --git a/src/backend.cpp b/src/backend.cpp
+index 9239c88..011c117 100644
+--- a/src/backend.cpp
++++ b/src/backend.cpp
+@@ -777,7 +777,9 @@ API(
+         // has not received them. Commit only after successful submission.
+         if (is_vp9(c->profile)) {
+             auto bytes = vp9_bitstream(c->profile, c->vp9_picture);
+-            c->decoder->submit(bytes, target);
++            // A hidden frame was wrapped with a show-existing frame: expect
++            // the no-show buffer Iris returns for its hidden half.
++            c->decoder->submit(bytes, target, !c->vp9_picture.params.pic_fields.bits.show_frame);
+         } else if (is_hevc(c->profile)) {
+             auto next_state = c->hevc;
+             auto bytes = hevc_bitstream(c->internal_profile, c->hevc_picture, next_state);
+diff --git a/src/decoder.cpp b/src/decoder.cpp
+index 8612626..4bff26f 100644
+--- a/src/decoder.cpp
++++ b/src/decoder.cpp
+@@ -262,6 +262,31 @@ void Decoder::recover_picture(uint64_t token) {
+     trace("completed damaged token=%llu status=%#x", (unsigned long long)token,
+           unsigned(surface->status));
+ }
++void Decoder::recover_hidden_before(uint64_t token) {
++    // CAPTURE returns in decode order. Once a later picture returns, the
++    // show-existing half of an earlier hidden VP9 frame whose no-show buffer
++    // already came back will not follow: the hidden frame itself was damaged.
++    for (auto it = pending_.begin(); it != pending_.end() && it->first < token;) {
++        auto current = it++;
++        if (current->second->noshow_seen)
++            recover_picture(current->first);
++    }
++}
++void Decoder::recover_stale_noshow() {
++    // A client is blocked on a picture. If the no-show buffer of a hidden VP9
++    // frame returned but its picture did not follow, Iris dropped the rest of
++    // that superframe; a frame takes milliseconds, so do not wait for the
++    // generic 5 s timeout (Chromium syncs each picture right after submit).
++    auto now = std::chrono::steady_clock::now();
++    for (auto it = pending_.begin(); it != pending_.end();) {
++        auto current = it++;
++        if (current->second->noshow_seen &&
++            now - current->second->noshow_at > std::chrono::seconds(1)) {
++            trace("no picture after no-show token=%llu", (unsigned long long)current->first);
++            recover_picture(current->first);
++        }
++    }
++}
+ void Decoder::pump(int timeout_ms) {
+     requeue();
+     if (timeout_ms) {
+@@ -312,7 +337,21 @@ void Decoder::pump(int timeout_ms) {
+               q.plane.bytesused, q.plane.data_offset, (long long)q.buffer.timestamp.tv_sec,
+               (long long)q.buffer.timestamp.tv_usec, q.buffer.flags);
+         uint64_t token = uint64_t(q.buffer.timestamp.tv_sec) * 1000000 + q.buffer.timestamp.tv_usec;
+-        if (q.buffer.flags & V4L2_BUF_FLAG_ERROR) {
++        if (token && token < next_token_)
++            recover_hidden_before(token);
++        auto hidden = pending_.find(token);
++        if ((q.buffer.flags & V4L2_BUF_FLAG_ERROR) && q.plane.bytesused == 0 &&
++            hidden != pending_.end() && hidden->second->noshow_expected) {
++            // The hidden half of vp9_bitstream()'s superframe. Iris reports its
++            // suppressed output as an empty ERROR buffer, which kernels that
++            // keep error timestamps tag with this token. The picture follows
++            // from the show-existing half. Iris flags a damaged hidden half the
++            // same way, so only a further ERROR or a missing picture grays it.
++            hidden->second->noshow_expected = false;
++            hidden->second->noshow_seen = true;
++            hidden->second->noshow_at = std::chrono::steady_clock::now();
++            trace("no-show CAPTURE token=%llu", (unsigned long long)token);
++        } else if (q.buffer.flags & V4L2_BUF_FLAG_ERROR) {
+             // An empty error buffer still completes the picture identified by
+             // its timestamp. Older kernels clear it; do not guess that frame.
+             recover_picture(token);
+@@ -356,7 +395,8 @@ void Decoder::pump(int timeout_ms) {
+     check(!source_change_, "in-context dynamic resolution change not yet implemented",
+           VA_STATUS_ERROR_UNIMPLEMENTED);
+ }
+-void Decoder::submit(const std::vector<uint8_t> &bytes, const std::shared_ptr<Surface> &surface) {
++void Decoder::submit(const std::vector<uint8_t> &bytes, const std::shared_ptr<Surface> &surface,
++                     bool hidden_vp9) {
+     std::lock_guard<std::mutex> lock(mutex_);
+     // VLC allocates its renderer pool before creating the FFmpeg context,
+     // which can pass zero render targets to VA. Preserve the allocation hint
+@@ -396,6 +436,8 @@ void Decoder::submit(const std::vector<uint8_t> &bytes, const std::shared_ptr<Su
+     surface->pending = true;
+     surface->token = token;
+     surface->status = VA_STATUS_SUCCESS;
++    surface->noshow_expected = hidden_vp9;
++    surface->noshow_seen = false;
+     pending_[token] = surface;
+     trace("submit token=%llu bytes=%zu", (unsigned long long)token, bytes.size());
+     if (!capture_on_) {
+@@ -416,6 +458,7 @@ void Decoder::finish() {
+     while (!pending_.empty()) {
+         check(!expired(start), "pending pictures at context destruction", VA_STATUS_ERROR_TIMEDOUT);
+         pump(20);
++        recover_stale_noshow();
+     }
+ }
+ void Decoder::sync(const std::shared_ptr<Surface> &surface) {
+@@ -442,6 +485,7 @@ void Decoder::sync(const std::shared_ptr<Surface> &surface) {
+         poll(&p, 1, 10);
+         lock.lock();
+         pump(0);
++        recover_stale_noshow();
+         check(!last_ || !surface->pending, "surface missing at LAST",
+               VA_STATUS_ERROR_DECODING_ERROR);
+     }
+diff --git a/src/internal.hpp b/src/internal.hpp
+index 293b105..f899ab7 100644
+--- a/src/internal.hpp
++++ b/src/internal.hpp
+@@ -87,6 +87,11 @@ struct Surface {
+     bool persistent_export = false;
+     std::weak_ptr<Decoder> decoder;
+     uint64_t token = 0;
++    // A hidden VP9 frame submitted as hidden + show-existing (vp9_bitstream).
++    // Iris returns the hidden half first, as an empty NOSHOW buffer flagged
++    // ERROR, then the picture from the show-existing half: expect that one.
++    bool noshow_expected = false, noshow_seen = false;
++    std::chrono::steady_clock::time_point noshow_at{};
+     std::atomic<VAStatus> status{VA_STATUS_SUCCESS};
+     std::atomic<bool> pending{false};
+     unsigned derived_images = 0, mapped_images = 0, acquired_handles = 0;
+@@ -180,12 +185,15 @@ class Decoder {
+     void pump(int timeout_ms);
+     void requeue();
+     void recover_picture(uint64_t token);
++    void recover_hidden_before(uint64_t token);
++    void recover_stale_noshow();
+ 
+   public:
+     Decoder(const std::string &device, unsigned width, unsigned height, unsigned surfaces,
+             VAProfile profile, unsigned rt_format, int render_fd);
+     ~Decoder();
+-    void submit(const std::vector<uint8_t> &bytes, const std::shared_ptr<Surface> &surface);
++    void submit(const std::vector<uint8_t> &bytes, const std::shared_ptr<Surface> &surface,
++                bool hidden_vp9 = false);
+     void sync(const std::shared_ptr<Surface> &surface);
+     void finish();
+     void refresh();
+diff --git a/src/vp9.cpp b/src/vp9.cpp
+index dd5d93e..89a2093 100644
+--- a/src/vp9.cpp
++++ b/src/vp9.cpp
+@@ -44,7 +44,9 @@ std::vector<uint8_t> vp9_bitstream(VAProfile profile, const Vp9Picture &picture)
+     // Stateful decoders suppress invisible alt-ref output, whereas VA needs
+     // a completed surface even for a reference-only picture. Keep the raw
+     // frame and all entropy/MV state unchanged, then ask VP9 to display the
+-    // freshly refreshed reference slot. One superframe produces one output.
++    // freshly refreshed reference slot. One superframe produces one picture,
++    // but Iris first returns an empty NOSHOW buffer flagged ERROR for the
++    // hidden half; Decoder::pump() expects it (see Surface::noshow_expected).
+     auto bits = [&](unsigned count) {
+         unsigned v = 0;
+         while (count--)

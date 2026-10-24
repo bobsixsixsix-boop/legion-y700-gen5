@@ -1,0 +1,32 @@
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 262a20453..b97185b4e 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -2168,6 +2168,15 @@ static int ath12k_core_hw_group_create(struct ath12k_hw_group *ag)
+ 	return ret;
+ }
+ 
++/* y700 (TB323FU): WCN7860 with the Android GNG firmware completes ML association with an
++ * MLO AP but its EAPOL 2/4 over the MLO link is never acked (4WAY_HANDSHAKE_TIMEOUT), so
++ * 5/6 GHz MLO SSIDs never connect. Unless wcn7860_mlo=1, do not advertise MLO for this chip:
++ * the station then associates single-link (non-ML) and the handshake goes through.
++ */
++static bool ath12k_wcn7860_mlo;
++module_param_named(wcn7860_mlo, ath12k_wcn7860_mlo, bool, 0444);
++MODULE_PARM_DESC(wcn7860_mlo, "Advertise MLO on WCN7860 (default: off)");
++
+ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ {
+ 	struct ath12k_base *ab;
+@@ -2180,6 +2189,11 @@ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ 
+ 	if (ag->num_devices == 1) {
+ 		ab = ag->ab[0];
++		if (ab->hw_rev == ATH12K_HW_WCN7860_HW20 && !ath12k_wcn7860_mlo) {
++			ath12k_info(ab, "MLO disabled on WCN7860 (wcn7860_mlo=0)\n");
++			ag->mlo_capable = false;
++			return;
++		}
+ 		/* QCN9274 firmware uses firmware IE for MLO advertisement */
+ 		if (ab->fw.fw_features_valid) {
+ 			ag->mlo_capable =

@@ -1,0 +1,10 @@
+#!/bin/sh
+# /etc/NetworkManager/dispatcher.d/90-y700-carplay-ps (linux/carplay/livi/, 2026-10-24) - y700: the second half of
+# y700-carplay-ps-restore. When CarPlay's access point stops and the Wi-Fi interface is not a station again within
+# that script's wait (23:49 on 10-23: NetworkManager reconnected five minutes later), it leaves
+# /run/y700-carplay/ps-pending-IFACE; once NetworkManager brings IFACE up, run it again to turn back on the power
+# save LIVI left off. Nothing without that file: power save is otherwise NetworkManager's and tb323fu-helperd's.
+# NetworkManager runs only root-owned, root-only-writable, executable files from here (install-livi.sh: 0755).
+D=${Y700_PS_PENDING_DIR:-/run/y700-carplay}
+[ "$2" = up ] && [ -n "$1" ] && [ -e "$D/ps-pending-$1" ] || exit 0
+exec "${Y700_PS_RESTORE:-/usr/local/sbin/y700-carplay-ps-restore}" "$1" 5 nm >/dev/null 2>&1

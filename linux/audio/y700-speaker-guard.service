@@ -1,0 +1,13 @@
+# /etc/systemd/user/y700-speaker-guard.service -- see y700-speaker-guard for what it guards against
+[Unit]
+Description=y700: keep the speakers behind the protection chain (default sink + amplifier gain)
+After=pipewire.service wireplumber.service tb323fu-speaker-gain.service y700-lenovo-tuning.service
+BindsTo=pipewire.service
+
+[Service]
+ExecStart=/usr/local/libexec/y700-speaker-guard
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=pipewire.service

@@ -1,0 +1,8 @@
+# Frame pacing A/B at the owner's setting (1920x1200@120 HEVC 40 Mbps): Moonlight hands
+# every frame to KWin at once when pacing is off, KWin shows the newest per refresh ->
+# silent drops + repeats (live session 21:4x: 97 flips/s, 17 % repeats).  ml-flips.py
+# counts page flips.  The owner asked for short runs.
+# label codec WxH fps kbps secs ps content [moonlight flags]
+p120-nopace      HEVC 1920x1200 120 40000 75 keep dynamic --no-frame-pacing
+p120-pace        HEVC 1920x1200 120 40000 75 keep dynamic --frame-pacing
+p120-pace-vsync  HEVC 1920x1200 120 40000 75 keep dynamic --frame-pacing --vsync

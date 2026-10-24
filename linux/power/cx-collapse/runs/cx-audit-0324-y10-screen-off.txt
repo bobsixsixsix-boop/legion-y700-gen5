@@ -1,0 +1,491 @@
+=== 2026-10-16 03:25:10 cx-audit on 7.3.0-rc4-tb323fu-t49-y10, uptime 430.67s, battery Full 100%, dpms Off
+
+== cmdline
+fw_devlink.sync_state=timeout fbcon=font:TER16x32 panic=10 oops=panic console=tty1 qcom_scm.download_mode=full baldur.end=hold consoleblank=120 no_console_suspend mem_sleep_default=s2idle cpuidle_psci_domain.allow_cluster_off=0 msm.idle_refresh_ms60=500 msm.idle_refresh_ms30=2000
+
+== knobs
+/sys/module/cpuidle_psci_domain/parameters/allow_cluster_off = N
+/sys/module/cpuidle_psci_domain/parameters/allow_system_off = N
+/sys/module/qcom_scm/parameters/download_mode = off
+/sys/devices/system/cpu/cpuidle/current_governor = teo
+/sys/module/pcie_aspm/parameters/policy = [default] performance powersave powersupersave 
+
+== cpuidle states (usage / rejected / time ms) per cpu
+cpu0 state0 WFI          ARM_WFI    usage=524955 rej=0 time=293121ms
+cpu0 state1 cpu-sleep-0  retention  usage=81085 rej=0 time=83272ms
+cpu1 state0 WFI          ARM_WFI    usage=163858 rej=0 time=114382ms
+cpu1 state1 cpu-sleep-0  retention  usage=123718 rej=0 time=260742ms
+cpu2 state0 WFI          ARM_WFI    usage=191968 rej=0 time=127375ms
+cpu2 state1 cpu-sleep-0  retention  usage=159699 rej=0 time=227256ms
+cpu3 state0 WFI          ARM_WFI    usage=201431 rej=0 time=138454ms
+cpu3 state1 cpu-sleep-0  retention  usage=126609 rej=0 time=227225ms
+cpu4 state0 WFI          ARM_WFI    usage=135980 rej=0 time=91800ms
+cpu4 state1 cpu-sleep-0  retention  usage=176633 rej=0 time=263023ms
+cpu5 state0 WFI          ARM_WFI    usage=174602 rej=0 time=123835ms
+cpu5 state1 cpu-sleep-0  retention  usage=127035 rej=0 time=247033ms
+cpu6 state0 WFI          ARM_WFI    usage=94107 rej=0 time=57754ms
+cpu6 state1 cpu-sleep-1  retention  usage=146224 rej=0 time=346746ms
+cpu7 state0 WFI          ARM_WFI    usage=93250 rej=0 time=65409ms
+cpu7 state1 cpu-sleep-1  retention  usage=100259 rej=0 time=345484ms
+
+== pm_genpd summary
+domain                          status          children        performance
+    /device                         runtime status                  managed by
+------------------------------------------------------------------------------
+PDP1_1                          on                              0
+PDP0_0                          on                              0
+video_cc_mvs0c_gdsc             off-0                           0
+                                                video_cc_mvs0_gdsc
+    genpd:0:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_vpp0_gdsc         off-0                           0
+    genpd:4:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_vpp1_gdsc         off-0                           0
+    genpd:5:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_gdsc              off-0                           0
+    genpd:1:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0a_gdsc             off-0                           0
+    genpd:6:2000000.video-codec     suspended                   0           SW
+gx_clkctl_gx_gdsc               off-0                           0
+    genpd:1:3d6c000.gmu             suspended                   0           SW
+gpu_cc_cx_gdsc                  off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:2:3d64000.clock-controller  suspended                   0           SW
+    3da0000.iommu                   suspended                   0           SW
+    genpd:0:3d6c000.gmu             suspended                   0           SW
+disp_cc_mdss_core_int2_gdsc     off-0                           0
+    genpd:1:9801000.display-controller  suspended                   0           SW
+disp_cc_mdss_core_gdsc          off-0                           0
+    9800000.display-subsystem       suspended                   0           SW
+cam_cc_titan_top_gdsc           off-0                           0
+                                                cam_cc_ipe_0_gdsc, cam_cc_ofe_gdsc, cam_cc_tfe_0_gdsc, cam_cc_tfe_1_gdsc, cam_cc_tfe_2_gdsc
+    genpd:0:9527000.phy             suspended                   0           SW
+    genpd:0:9529000.phy             suspended                   0           SW
+    941b000.cci                     suspended                   0           SW
+    941d000.cci                     suspended                   0           SW
+    genpd:3:9253000.isp             suspended                   0           SW
+cam_cc_tfe_2_gdsc               off-0                           0
+    genpd:2:9253000.isp             suspended                   0           SW
+cam_cc_tfe_1_gdsc               off-0                           0
+    genpd:1:9253000.isp             suspended                   0           SW
+cam_cc_tfe_0_gdsc               off-0                           0
+    genpd:0:9253000.isp             suspended                   0           SW
+cam_cc_ofe_gdsc                 off-0                           0
+cam_cc_ipe_0_gdsc               off-0                           0
+gcc_usb3_phy_gdsc               on                              0
+    88e8000.phy                     active                      0           SW
+    aux_bridge.aux_bridge.0         unsupported                 0           SW
+gcc_usb30_prim_gdsc             off-0                           0
+    a600000.usb                     suspended                   0           SW
+gcc_ufs_phy_gdsc                on                              56
+    1d88000.crypto                  unsupported                 0           SW
+    1d84000.ufs                     active                      56          SW
+gcc_ufs_mem_phy_gdsc            on                              0
+    1d80000.phy                     unsupported                 0           SW
+gcc_pcie_0_phy_gdsc             on                              0
+    1c06000.phy                     unsupported                 0           SW
+gcc_pcie_0_gdsc                 on                              256
+    1c00000.pcie                    active                      256         SW
+gmxc                            off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:1:3d64000.clock-controller  suspended                   0           SW
+nsp2                            off-0                           0
+nsp                             off-0                           0
+    genpd:2:26300000.remoteproc     suspended                   0           SW
+mss                             off-0                           0
+mxc_ao                          off-0                           0
+mxc                             off-0                           0
+                                                cam_cc_titan_top_gdsc, video_cc_mvs0a_gdsc, video_cc_mvs0_vpp1_gdsc, video_cc_mvs0_vpp0_gdsc, video_cc_mvs0c_gdsc
+    genpd:1:956d000.clock-controller  suspended                   0           SW
+    genpd:1:20f0000.clock-controller  suspended                   0           SW
+    genpd:1:26300000.remoteproc     suspended                   0           SW
+    genpd:2:9527000.phy             suspended                   0           SW
+    genpd:2:9529000.phy             suspended                   0           SW
+    genpd:2:2000000.video-codec     suspended                   0           SW
+mx_ao                           off-0                           0
+mx                              off-0                           0
+    genpd:1:1760000.clock-controller  suspended                   0           SW
+    genpd:1:d00000.remoteproc       suspended                   0           SW
+mmcx_ao                         off-0                           0
+mmcx                            off-0                           0
+                                                cam_cc_titan_top_gdsc, disp_cc_mdss_core_gdsc, disp_cc_mdss_core_int2_gdsc, video_cc_mvs0a_gdsc, video_cc_mvs0_vpp1_gdsc, video_cc_mvs0_vpp0_gdsc, video_cc_mvs0c_gdsc
+    genpd:0:1760000.clock-controller  suspended                   0           SW
+    genpd:0:956d000.clock-controller  suspended                   0           SW
+    9ba2000.clock-controller        suspended                   0           SW
+    genpd:0:20f0000.clock-controller  suspended                   0           SW
+    genpd:0:9801000.display-controller  suspended                   0           SW
+    9ac0000.dsi                     suspended                   0           SW
+    9ac3000.dsi                     suspended                   0           SW
+    9ad2000.displayport-controller  suspended                   0           SW
+    genpd:1:9527000.phy             suspended                   0           SW
+    genpd:1:9529000.phy             suspended                   0           SW
+    genpd:3:2000000.video-codec     suspended                   0           SW
+lmx                             off-0                           0
+    genpd:1:6800000.remoteproc      suspended                   0           SW
+lcx                             off-0                           0
+    genpd:0:6800000.remoteproc      suspended                   0           SW
+gfx                             off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:0:3d64000.clock-controller  suspended                   0           SW
+ebi                             off-0                           0
+cx_ao                           off-0                           0
+cx                              off-0                           0
+    8804000.mmc                     suspended                   0           SW
+    genpd:0:d00000.remoteproc       suspended                   0           SW
+    genpd:0:26300000.remoteproc     suspended                   0           SW
+power-domain-system             on                              0
+                                                power-domain-cluster, power-domain-cluster1
+    18900000.rsc                    suspended                   0           SW
+power-domain-cluster1           on                              0
+                                                power-domain-cpu6, power-domain-cpu7
+power-domain-cluster            on                              0
+                                                power-domain-cpu0, power-domain-cpu1, power-domain-cpu2, power-domain-cpu3, power-domain-cpu4, power-domain-cpu5
+power-domain-cpu7               off-0                           0
+    genpd:0:cpu7                    suspended                   0           SW
+power-domain-cpu6               off-0                           0
+    genpd:0:cpu6                    suspended                   0           SW
+power-domain-cpu5               off-0                           0
+    genpd:0:cpu5                    suspended                   0           SW
+power-domain-cpu4               off-0                           0
+    genpd:0:cpu4                    suspended                   0           SW
+power-domain-cpu3               off-0                           0
+    genpd:0:cpu3                    suspended                   0           SW
+power-domain-cpu2               off-0                           0
+    genpd:0:cpu2                    suspended                   0           SW
+power-domain-cpu1               off-0                           0
+    genpd:0:cpu1                    suspended                   0           SW
+power-domain-cpu0               on                              0
+    genpd:0:cpu0                    active                      0           SW
+
+== PSCI domains idle_states
+-- power-domain-cluster: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          94         0          0          0
+-- power-domain-cluster1: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          50197      0          0          0
+-- power-domain-system: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          0          0          0          0
+-- power-domain-cpu0: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     80824          80784      0          0          0          0
+-- power-domain-cpu1: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     257213         123611     0          0          0          0
+-- power-domain-cpu2: off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     222848         159641     0          0          0          0
+-- power-domain-cpu3: off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     223615         126483     0          0          0          0
+-- power-domain-cpu4: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     257907         176529     0          0          0          0
+-- power-domain-cpu5: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     243274         126939     0          0          0          0
+-- power-domain-cpu6: off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     343019         146062     0          0          0          0
+-- power-domain-cpu7: on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     342814         100048     0          0          0          0
+
+== qcom_stats (AOP message RAM)
+-- adsp: Count: 5544 Last Entered At: 8062439962 Last Exited At: 8062246971 Accumulated Duration: 7836654361 
+-- adsp_island: Count: 14 Last Entered At: 8062439962 Last Exited At: 8062246971 Accumulated Duration: 416608802 
+-- aosd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- apss: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- cdsp: Count: 0 Last Entered At: 402599239 Last Exited At: 0 Accumulated Duration: 8024357250 
+-- cdsp1: 
+-- cxsd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- dcp: Count: 0 Last Entered At: 30517417 Last Exited At: 29802532 Accumulated Duration: 8396565763 
+-- ddr: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- ddr_stats: DDR LPM Stat Name:0xd4	count:0	Duration (ticks):0 DDR LPM Stat Name:0xd3	count:0	Duration (ticks):0 DDR LPM Stat Name:0x11	count:0	Duration (ticks):0 DDR LPM Stat Name:0xd0	count:0	Duration (ticks):0 DDR Freq 547Mhz:	CP IDX:1	count:1	Duration (ticks):0 DDR Freq 1353Mhz:	CP IDX:2	count:1	Duration (ticks):0 DDR Freq 1555Mhz:	CP IDX:3	count:1	Duration (ticks):0 DDR Freq 1708Mhz:	CP IDX:4	count:1	Duration (ticks):0 DDR Freq 2092Mhz:	CP IDX:5	count:1	Duration (ticks):0 DDR Freq 2736Mhz:	CP IDX:6	count:1	Duration (ticks):0 DDR Freq 3187Mhz:	CP IDX:7	count:1	Duration (ticks):0 DDR Freq 3686Mhz:	CP IDX:8	count:1	Duration (ticks):0 DDR Freq 4224Mhz:	CP IDX:9	count:1	Duration (ticks):0 DDR Freq 4780Mhz:	CP IDX:10	count:1	Duration (ticks):0 DDR Freq 5333Mhz:	CP IDX:11	count:1	Duration (ticks):0 
+-- display: 
+-- gpdsp0: 
+-- gpdsp1: 
+-- gpu: 
+-- modem: 
+-- slpi: 
+-- slpi_island: 
+-- soccp: Count: 1068 Last Entered At: 8423924348 Last Exited At: 8422293191 Accumulated Duration: 8045930417 
+-- wpss: 
+
+== remoteproc
+soccp attached
+adsp running
+cdsp running
+
+== runtime PM of the usual suspects
+1d84000.ufs                                      active     control=auto active=341347ms suspended=81167ms
+a600000.usb                                      suspended  control=auto active=9507ms suspended=413103ms
+3d00000.gpu                                      suspended  control=auto active=397115ms suspended=25349ms
+9800000.display-subsystem                        suspended  control=auto active=402688ms suspended=19950ms
+1c00000.pcie                                     active     control=auto active=419433ms suspended=0ms
+26300000.remoteproc                              unsupported control=auto active=0ms suspended=0ms
+6800000.remoteproc                               unsupported control=auto active=0ms suspended=0ms
+d00000.remoteproc                                unsupported control=auto active=0ms suspended=0ms
+9ac0000.dsi                                      suspended  control=auto active=402517ms suspended=20063ms
+9ac3000.dsi                                      suspended  control=auto active=402492ms suspended=20096ms
+9ad2000.displayport-controller                   suspended  control=auto active=27ms suspended=422567ms
+
+== PCI link state (config space; sysfs link/* + lspci) - NOT debugfs pcie@*
+-- 0000:00:00.0 0x17cb:0x0123 runtime=active control=auto d3cold_allowed= power_state=D0
+-- 0000:01:00.0 0x17cb:0x110e runtime=active control=on d3cold_allowed= power_state=D0
+   l0s_aspm=1
+   l1_1_aspm=1
+   l1_1_pcipm=1
+   l1_2_aspm=1
+   l1_2_pcipm=1
+   l1_aspm=1
+00:00.0 PCI bridge: Qualcomm Technologies, Inc Device 0123 (prog-if 00 [Normal decode])
+		LnkCap:	Port #0, Speed 8GT/s, Width x2, ASPM L0s L1, Exit Latency L0s <4us, L1 <8us
+		LnkCtl:	ASPM L0s L1 Enabled; RCB 128 bytes, LnkDisable- CommClk+
+		LnkSta:	Speed 8GT/s, Width x1
+		DevCap2: Completion Timeout: Range ABCD, TimeoutDis+ NROPrPrP+ LTR+
+		DevCtl2: Completion Timeout: 50us to 50ms, TimeoutDis- ARIFwd-
+			 IDOReq- IDOCompl- LTR+ EmergencyPowerReductionReq-
+		L1SubCap: PCI-PM_L1.2+ PCI-PM_L1.1+ ASPM_L1.2+ ASPM_L1.1+ L1_PM_Substates+
+		L1SubCtl1: PCI-PM_L1.2+ PCI-PM_L1.1+ ASPM_L1.2+ ASPM_L1.1+
+			   T_CommonMode=70us LTR1.2_Threshold=76800ns
+		L1SubCtl2: T_PwrOn=0us
+01:00.0 Network controller: Qualcomm Technologies, Inc Device 110e (rev 01)
+		LnkCap:	Port #0, Speed 8GT/s, Width x2, ASPM L0s L1, Exit Latency L0s <1us, L1 <64us
+		LnkCtl:	ASPM L0s L1 Enabled; RCB 128 bytes, LnkDisable- CommClk+
+		LnkSta:	Speed 8GT/s, Width x1 (downgraded)
+		DevCap2: Completion Timeout: Range ABCD, TimeoutDis+ NROPrPrP- LTR+
+		DevCtl2: Completion Timeout: 50us to 50ms, TimeoutDis-
+			 IDOReq- IDOCompl- LTR+ EmergencyPowerReductionReq-
+		L1SubCap: PCI-PM_L1.2+ PCI-PM_L1.1+ ASPM_L1.2+ ASPM_L1.1+ L1_PM_Substates+
+		L1SubCtl1: PCI-PM_L1.2+ PCI-PM_L1.1+ ASPM_L1.2+ ASPM_L1.1+
+			   T_CommonMode=0us LTR1.2_Threshold=76800ns
+		L1SubCtl2: T_PwrOn=0us
+
+== interrupts: chip column (pdc = can wake from apps-pc; GICv3 = GIC only) and a 10 s rate
+join: /tmp/.cxa1:28: is not sorted: 21: 0 GICv3  llcc_ecc
+join: /tmp/.cxa2:82: is not sorted: 26: 6
+join: input is not in sorted order
+  418.9/s GICv3      arch_timer 
+  140.2/s Function    IPI1: 
+   32.1/s ipcc       glink-smem 
+   32.1/s GICv3      ipcc_0 
+   17.1/s ITS-PCI-MSI-0000:01:00.0    ce2 
+   12.3/s GICv3      apps_rsc 
+    8.8/s GICv3      apss_cpucp_mbox 
+    8.4/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    3.8/s pmic_arb    sdam0, sdam0 
+    2.8/s Rescheduling    IPI0: 
+    1.9/s GICv3      ufshcd 
+    1.6/s GICv3      310b3400.pmu, 310b7400.pmu 
+    1.4/s ITS-PCI-MSI-0000:01:00.0    DP_EXT_IRQ 
+    1.3/s ITS-PCI-MSI-0000:01:00.0    DP_EXT_IRQ 
+    1.2/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    0.7/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    0.6/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    0.5/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    0.4/s ITS-pMSI-1d84000.ufs    qcom-mcq-esi 
+    0.4/s ITS-PCI-MSI-0000:01:00.0    DP_EXT_IRQ 
+    0.2/s ITS-PCI-MSI-0000:01:00.0    ce3 
+    0.2/s ITS-PCI-MSI-0000:01:00.0    DP_EXT_IRQ 
+    0.1/s ITS-PCI-MSI-0000:01:00.0    DP_EXT_IRQ 
+-- chip totals (all IRQs with any count):       3 CPU;      1 Err:;      1 Function;     95 GICv3;      7 ipcc;      1 IRQ;      1 ITS-PCI-MSI-0000:00:00.0;     15 ITS-PCI-MSI-0000:01:00.0;      8 ITS-pMSI-1d84000.ufs;      1 KGDB;      6 msmgpio;      4 msm_mdss;      5 PDC;     12 pmic_arb;      1 Rescheduling;      5 smp2p-adsp;      5 smp2p-cdsp;      4 smp2p-soccp;      1 Timer;     10 wcd939x;      1 WCD939x;
+
+== wakeup sources
+name		active_count	event_count	wakeup_count	expire_count	active_since	total_time	max_time	last_change	prevent_suspend_time
+c426000.spmi:pmic@0:rtc@6100	21		21		0		0		0		1		0		416228		0
+ucsi-source-psy-pmic_glink.ucsi.02	1		1		0		0		0		0		0		9076		0
+ucsi-source-psy-pmic_glink.ucsi.01	6		7		0		0		0		3		2		9081		0
+qcom-battmgr-wls	1		1		0		0		0		0		0		8164		0
+qcom-battmgr-usb	1		1		0		0		0		0		0		8180		0
+qcom-battmgr-bat	24		24		0		0		0		216		18		432401		0
+
+== interconnect: nodes and requests with non-zero bandwidth
+ node                                  tag          avg         peak
+--------------------------------------------------------------------
+qup3_core_master@interconnect-0                       2            2
+  1994000.serial                         7            2            2
+qup3_core_slave@interconnect-0                        2            2
+  1994000.serial                         7            2            2
+llcc_mc@interconnect-1                                0     12748000
+  1c00000.pcie                           7            0      1969000
+  1d84000.ufs                            7            0       298189
+  310b7400.pmu                           3            0      2188000
+  310b3400.pmu                           3            0     12748000
+ebi@interconnect-1                                    0     12748000
+  1c00000.pcie                           7            0      1969000
+  1d84000.ufs                            7            0       298189
+  310b7400.pmu                           3            0      2188000
+  310b3400.pmu                           3            0     12748000
+qnm_gemnoc_cnoc@1500000.interconnect               3200         3200
+  1d84000.ufs                            3            0         1000
+  1994000.serial                         3         3200         3200
+qnm_gemnoc_pcie@1500000.interconnect                  0            1
+  1c00000.pcie                           3            0            1
+qss_cfg@1500000.interconnect                       3200         3200
+  1d84000.ufs                            3            0         1000
+  1994000.serial                         3         3200         3200
+xs_pcie@1500000.interconnect                          0            1
+  1c00000.pcie                           3            0            1
+qsm_cfg@1600000.interconnect                       3200         3200
+  1d84000.ufs                            3            0         1000
+  1994000.serial                         3         3200         3200
+qhs_qup3@1600000.interconnect                      3200         3200
+  1994000.serial                         3         3200         3200
+qhs_ufs_mem_cfg@1600000.interconnect                  0         1000
+  1d84000.ufs                            3            0         1000
+qnm_aggre1_noc@1680000.interconnect                   0       298189
+  1d84000.ufs                            7            0       298189
+qns_gemnoc_sf@1680000.interconnect                    0       298189
+  1d84000.ufs                            7            0       298189
+xm_pcie@16c0000.interconnect                          0      1969000
+  1c00000.pcie                           7            0      1969000
+qns_pcie_gemnoc@16c0000.interconnect                  0      1969000
+  1c00000.pcie                           7            0      1969000
+xm_ufs_mem@16e0000.interconnect                       0       298189
+  1d84000.ufs                            7            0       298189
+qns_a1noc_snoc@16e0000.interconnect                   0       298189
+  1d84000.ufs                            7            0       298189
+chm_apps@31100000.interconnect                     3200     12748000
+  1c00000.pcie                           3            0            1
+  1d84000.ufs                            3            0         1000
+  1994000.serial                         3         3200         3200
+  310b7400.pmu                           3            0      2188000
+  310b3400.pmu                           3            0     12748000
+qnm_pcie@31100000.interconnect                        0      1969000
+  1c00000.pcie                           7            0      1969000
+qnm_snoc_sf@31100000.interconnect                     0       298189
+  1d84000.ufs                            7            0       298189
+qns_gem_noc_cnoc@31100000.interconnect             3200         3200
+  1d84000.ufs                            3            0         1000
+  1994000.serial                         3         3200         3200
+qns_llcc@31100000.interconnect                        0     12748000
+  1c00000.pcie                           7            0      1969000
+  1d84000.ufs                            7            0       298189
+  310b7400.pmu                           3            0      2188000
+  310b3400.pmu                           3            0     12748000
+qns_pcie@31100000.interconnect                        0            1
+  1c00000.pcie                           3            0            1
+
+== regulators (full regulator_summary: the 22:47 audit's use_count filter hid everything)
+ regulator                      use open bypass  opmode voltage current     min     max
+---------------------------------------------------------------------------------------
+ regulator-dummy                 22   33      0 unknown     0mV     0mA     0mV     0mV 
+    1c00000.pcie-vddpe-3v3        1                                 0mA     0mV     0mV
+    1c00000.pcie-vdda             1                                 0mA     0mV     0mV
+    3d00000.gpu-vddcx             0                                 0mA     0mV     0mV
+    3d00000.gpu-vdd               0                                 0mA     0mV     0mV
+    vreg_l4f_0p8                  0    2      0    idle   880mV     0mA   880mV   912mV 
+       88e8000.phy-vdda-pll       0                                36mA*    0mV     0mV
+       88e3000.phy-vdd            0                                 0mA     0mV     0mV
+    vreg_l3i_0p8                  1    2      0  normal   880mV     0mA   880mV   920mV 
+       9529000.phy-vdda-0p9       0                                 0mA     0mV     0mV
+       1c06000.phy-vdda-phy       1                                 0mA     0mV     0mV
+    vreg_s1j_0p8                  1    1      0  normal   892mV     0mA   892mV  1000mV 
+       wcn7860-pmu-vdddig         1                                 0mA     0mV     0mV
+    vreg_l4b_1p8                  1    0      0  normal  1800mV     0mA  1800mV  1800mV 
+    vreg_l1g_1p2                  1    1      0  normal  1200mV     0mA  1200mV  1200mV 
+       audio-codec-vdd-px         1                                 0mA     0mV     0mV
+    vreg_s7f_1p2                  1    1      0  normal  1224mV     0mA  1224mV  1372mV 
+       wcn7860-pmu-vddrfa1p2      1                                 0mA     0mV     0mV
+    vreg_l1d_1p2                  2    8      0    idle  1200mV     0mA  1200mV  1256mV 
+       9529000.phy-vdda-1p2       0                                 0mA     0mV     0mV
+       9527000.phy-vdda-1p2       0                                 0mA     0mV     0mV
+       9ac3000.dsi-vdda           0                                16mA*    0mV     0mV
+       9ac0000.dsi-vdda           0                                16mA*    0mV     0mV
+       1d80000.phy-vdda-pll       1                                18mA     0mV     0mV
+       1c06000.phy-vdda-pll       1                                 0mA     0mV     0mV
+       88e8000.phy-vdda-phy       0                                21mA*    0mV     0mV
+       88e3000.phy-vdda12         0                                 0mA     0mV     0mV
+    vreg_s2j_0p8                  2    2      0  normal   892mV     0mA   892mV  1100mV 
+       wcn7860-pmu-vddaon         1                                 0mA     0mV     0mV
+       wcn7860-pmu-vdd            1                                 0mA     0mV     0mV
+    vreg_l8b_1p8                  0    1      0    idle  3000mV     0mA  1800mV  3008mV 
+       8804000.mmc-vqmmc          0                                 0mA  3000mV  3008mV
+    vreg_l3k_1p2                  1    0      0  normal  1200mV     0mA  1200mV  1200mV 
+    vreg_s8f_1p8                  1    1      0  normal  1800mV     0mA  1800mV  2000mV 
+       wcn7860-pmu-vddrfa1p8      1                                 0mA     0mV     0mV
+    vreg_l4g_0p9                  1    1      0    fast   912mV     0mA   912mV   912mV 
+       1d80000.phy-vdda-phy       1                               213mA     0mV     0mV
+    vreg_l3d_0p8                  0    3      0    idle   880mV     0mA   880mV   880mV 
+       9527000.phy-vdda-0p9       0                                 0mA     0mV     0mV
+       9ac4000.phy-vdds           0                                98mA*    0mV     0mV
+       9ac1000.phy-vdds           0                                98mA*    0mV     0mV
+    vreg_l9b_2p9                  0    1      0    idle  3000mV     0mA  2960mV  3008mV 
+       8804000.mmc-vmmc           0                                 0mA  3000mV  3008mV
+    vreg_l4d_1p2                  1    1      0    fast  1200mV     0mA  1200mV  1200mV 
+       1d84000.ufs-vccq           1                              1200mA     0mV     0mV
+    vreg_l2g_1p8                  1    1      0  normal  1800mV     0mA  1800mV  1800mV 
+       wcn7860-pmu-vddio          1                                 0mA     0mV     0mV
+    vreg_l11b_1p0                 0    1      0    fast  1064mV     0mA  1000mV  1288mV 
+       5-0056-vddd                0                                 0mA     0mV     0mV
+    vreg_l3g_1p2                  1    1      0  normal  1200mV     0mA  1200mV  1200mV 
+       wcn7860-pmu-vddio1p2       1                                 0mA     0mV     0mV
+    vreg_l12b_1p8                 1    1      0    fast  1800mV     0mA  1800mV  1800mV 
+       9ac0000.dsi.0-vddio        0                                 0mA     0mV     0mV
+    vreg_l13b_3p0                 0    0      0    fast  3000mV     0mA  3000mV  3000mV 
+    vreg_l17b_2p5                 1    1      0  normal  2504mV     0mA  2504mV  2504mV 
+       1d84000.ufs-vcc            1                              1200mA     0mV     0mV
+    vreg_l5b_3p1                  0    1      0  normal  3104mV     0mA  3104mV  3144mV 
+       c437000.spmi:pmic@7:phy@fd00-vdd3   0                                 0mA     0mV     0mV
+    vreg_l15b_1p8                 3    4      0  normal  1800mV     0mA  1800mV  1800mV 
+       audio-codec-vdd-buck       1                                 0mA     0mV     0mV
+       audio-codec-vdd-io         1                                 0mA     0mV     0mV
+       audio-codec-vdd-rxtx       1                                 0mA     0mV     0mV
+       c437000.spmi:pmic@7:phy@fd00-vdd18   0                                 0mA     0mV     0mV
+    vreg_bob1                     1    1      0    fast  3032mV     0mA  3032mV  3992mV 
+       audio-codec-vdd-mic-bias   1                                 0mA     0mV     0mV
+    vreg_l6b_2p8                  1    2      0    fast  2800mV     0mA  2800mV  2800mV 
+       5-0056-afvdd               0                                 0mA     0mV     0mV
+       5-000c-vdd                 1                                 0mA     0mV     0mV
+    vreg_l7b_2p8                  0    1      0    fast  2848mV     0mA  2848mV  2848mV 
+       5-0056-vdda                0                                 0mA     0mV     0mV
+    vreg_l10b_1p8                 1    3      0    fast  1800mV     0mA  1800mV  1800mV 
+       5-0056-vddio               0                                 0mA     0mV     0mV
+       8-0031-dovdd               0                                 0mA     0mV     0mV
+       5-000c-vio                 1                                 0mA     0mV     0mV
+    vreg_l16b_2p9                 0    1      0    fast  2904mV     0mA  2904mV  2904mV 
+       8-0031-avdd                0                                 0mA     0mV     0mV
+    vreg_l18b_1p3                 0    1      0    fast  1304mV     0mA  1304mV  1304mV 
+       8-0031-dvdd                0                                 0mA     0mV     0mV
+
+== psci
+PSCIv1.1
+SMC Calling Convention v1.3
+OSI is supported
+Extended StateID format is used
+CPU_DEFAULT_SUSPEND is supported
+SYSTEM_SUSPEND is supported
+SET_SUSPEND_MODE is supported
+SYSTEM_RESET2 is supported
+
+== pstore / flight recorder
+/sys/fs/pstore:
+total 0
+drwxr-x--- 2 root root 0 Oct 16 03:17 .
+drwxr-xr-x 8 root root 0 Jan  1  1970 ..
+
+/var/lib/systemd/pstore:
+total 548
+drwxr-xr-x  2 root root   4096 Oct 16 03:17 .
+drwxr-xr-x 13 root root   4096 Jan  2  1970 ..
+-rw-------  1 root root   6995 Jan  1  1970 console-ramoops-0
+-rw-------  1 root root  97031 Oct 13 00:49 dmesg-ramoops-0
+-rw-------  1 root root   7431 Oct 11 04:36 dmesg-ramoops-0.enc.z
+-rw-------  1 root root  97024 Oct 13 00:49 dmesg-ramoops-1
+-rw-------  1 root root   7608 Oct 11 04:36 dmesg-ramoops-1.enc.z
+-rw-------  1 root root  97028 Oct 13 00:49 dmesg-ramoops-2
+-rw-------  1 root root 233032 Jan  1  1970 pmsg-ramoops-0
+
+/var/log/y700-flightrec:
+total 3340
+drwxr-xr-x 3 root root      4096 Oct 16 03:17 .
+drwxrwxr-x 7 root syslog    4096 Oct 16 03:24 ..
+lrwxrwxrwx 1 root root        22 Oct 16 03:17 current.log -> flightrec-d621af4e.log
+-rw------- 1 root root    128555 Oct 16 03:25 flightrec-d621af4e.log
+-rw------- 1 root root   3266715 Oct 16 03:17 flightrec-e2b6380a.log
+drwxr-xr-x 4 root root      4096 Oct 16 03:17 pstore
+t=439.5 at=03:25:19 up=439.46 bat=-0mW dpms=Off wifi=up/+4 gov=teo aco=N aso=N dl=off busy=0.4 ctxt=683 irqt=458 irq=arch_timer:355,Function call interrup:77,ce2:11 c0=wfi:61,ret:367,rej:0 c1=wfi:0,ret:20,rej:0 pd=cl0:0/0,cl1:0/18,sys:0/0 qs=apss:0/+0,cxsd:0/+0,aosd:0/+0,ddr:0/+0
+t=440.5 at=03:25:20 up=440.46 bat=-0mW dpms=Off wifi=up/+7 gov=teo aco=N aso=N dl=off busy=0.6 ctxt=857 irqt=601 irq=arch_timer:385,Function call interrup:146,ce2:25 c0=wfi:86,ret:431,rej:0 c1=wfi:4,ret:42,rej:0 pd=cl0:0/0,cl1:0/34,sys:0/0 qs=apss:0/+0,cxsd:0/+0,aosd:0/+0,ddr:0/+0
+
+=== done 03:25:20

@@ -1,0 +1,48 @@
+#!/bin/sh
+# D-Bus activation of fyi.fortime.Fcitx5Osk, which fcitx5-osk-kwin-launcher requests every time
+# KWin (re)starts its input method (login, lock, unlock, health check).
+#   normal session -> y700-osk (our Qt keyboard, layer shell)
+#   lock screen    -> the original fcitx5-osk (it draws the input-panel keyboard the greeter needs)
+# Installed as ~user/.local/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service -> Exec=this.
+# `y700-osk-ctl off` (file ~/.config/y700-osk/disabled) sends every session back to fcitx5-osk.
+ICED="/usr/local/bin/fcitx5-osk keyboard --force-wayland --wait-for-socket --modifier-workaround"
+RUN=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+FALLBACK="$RUN/y700-osk.fallback"
+CRASHES="$RUN/y700-osk.crashes"
+
+FCFG="$HOME/.config/fcitx5/config"
+# Where rime's pinyin shows: y700-osk draws it in its band (PreeditEnabledByDefault=False);
+# fcitx5-osk ignores the preedit, so with it the pinyin must stay inline in the app (fcitx5 default).
+preedit() {
+    cur=$(kreadconfig6 --file "$FCFG" --group Behavior --key PreeditEnabledByDefault 2>/dev/null)
+    [ "$cur" = "$1" ] && return 0
+    if [ -n "$1" ]; then kwriteconfig6 --file "$FCFG" --group Behavior --key PreeditEnabledByDefault "$1"
+    else kwriteconfig6 --file "$FCFG" --group Behavior --key PreeditEnabledByDefault --delete; fi
+    busctl --user --auto-start=no call org.fcitx.Fcitx5 /controller org.fcitx.Fcitx.Controller1 ReloadConfig >/dev/null 2>&1 || true
+}
+iced() { preedit ""; exec $ICED; }
+
+locked=$(busctl --user call org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver GetActive 2>/dev/null)
+case "$locked" in *true*) exec $ICED ;; esac
+[ -e "$HOME/.config/y700-osk/disabled" ] && iced
+[ -e "$FALLBACK" ] && iced
+[ -x /usr/local/bin/y700-osk ] || iced
+preedit False
+
+unset WAYLAND_SOCKET
+[ -n "$WAYLAND_DISPLAY" ] || export WAYLAND_DISPLAY=wayland-0
+export QT_QPA_PLATFORM=wayland
+/usr/local/bin/y700-osk
+rc=$?
+[ "$rc" -eq 0 ] && exit 0
+
+# crashed: note it, and after 3 crashes in 2 minutes use the original keyboard for this login
+now=$(date +%s)
+echo "$now" >> "$CRASHES"
+recent=$(awk -v n="$now" '$1 > n - 120' "$CRASHES" | wc -l)
+if [ "$recent" -ge 3 ]; then : > "$FALLBACK"; fi
+logger -t y700-osk "y700-osk exited with $rc ($recent recent crash(es))"
+# the launcher quits when our name vanishes; ask its D-Bus twin to restart KWin's input method
+busctl --user call fyi.fortime.Fcitx5Osk.KwinLauncher /fyi/fortime/Fcitx5Osk/KwinLauncher/Controller \
+    fyi.fortime.Fcitx5Osk.KwinLauncher.Controller1 RestartKwinInputMethod >/dev/null 2>&1 &
+exit "$rc"

@@ -1,0 +1,15 @@
+#!/bin/sh
+# y700-autobright-ctl on|off|status|reset   (run as the desktop user)
+#   on      start automatic brightness now and at every login
+#   off     stop it (brightness stays where it is) and do not start it at login
+#   status  prints on/off and the learned factor
+#   reset   forget the learned preference (the next start takes the current brightness as the choice)
+CONF=$HOME/.config/y700/autobright.json
+case "$1" in
+on)     systemctl --user enable --now y700-autobright.service >/dev/null 2>&1 && echo on ;;
+off)    systemctl --user disable --now y700-autobright.service >/dev/null 2>&1; echo off ;;
+status) systemctl --user is-active --quiet y700-autobright.service && echo on || echo off
+        [ -f "$CONF" ] && cat "$CONF" && echo ;;
+reset)  rm -f "$CONF"; systemctl --user try-restart y700-autobright.service; echo "preference forgotten" ;;
+*)      echo "usage: y700-autobright-ctl on|off|status|reset" >&2; exit 2 ;;
+esac

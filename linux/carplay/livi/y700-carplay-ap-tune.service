@@ -1,0 +1,12 @@
+# /etc/systemd/system/y700-carplay-ap-tune.service (linux/carplay/livi/, 2026-10-17)
+# Started by livi-wifi-ap.service (drop-in livi-wifi-ap.service.d/y700.conf), stopped with it. Not enabled itself.
+# What it does and why: /usr/local/sbin/y700-carplay-ap-tune. Change a setting with "systemctl edit".
+[Unit]
+Description=Y700 CarPlay: debug log (and optional WPA2-only) for LIVI's hostapd
+BindsTo=livi-wifi-ap.service
+After=livi-wifi-ap.service
+
+[Service]
+Type=simple
+Environment=Y700_AP_SECURITY=livi Y700_AP_DEBUG=1
+ExecStart=/usr/local/sbin/y700-carplay-ap-tune

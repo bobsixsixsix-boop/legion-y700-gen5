@@ -1,0 +1,9 @@
+# y700: let the USB controller (dwc3-qcom, a600000.usb) runtime-suspend when nothing is attached (2026-10-15).
+# The kernel leaves power/control at "on" for it, so it sat active since boot (never suspended once);
+# with "auto" it suspends 5 s after the last activity (dwc3 autosuspend delay) and resumes on a role
+# switch (charger / OTG device, driven by pmic_glink UCSI). Verified: charger plug/unplug (PD 9 V) with the
+# controller suspended; OTG host device (USB stick / keyboard) enumeration NOT verified yet (USB-1) - if it
+# fails, echo on > .../a600000.usb/power/control and record it. (2026-10-19 correction, audit X11: the earlier
+# "an OTG device still detected" wording had no test behind it.) Saving is below the 0.03 W measurement noise - it is
+# done because the direction is right, not for a number. Undo: echo on > .../a600000.usb/power/control
+SUBSYSTEM=="platform", KERNEL=="a600000.usb", ACTION=="add", ATTR{power/control}="auto"

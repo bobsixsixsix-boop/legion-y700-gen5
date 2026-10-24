@@ -1,0 +1,33 @@
+#!/bin/sh
+# y700-cx-status: one HTTP/1.0 text response with the state of the CX experiments (2026-10-16).
+# Socket-activated per connection (y700-cx-status.socket, Accept=yes) on the Tailscale address only, so the
+# Win11 side can watch an unattended ladder with `curl http://100.64.0.10:8766/` instead of ssh: an ssh login
+# starts and stops root's systemd user manager and perturbs exactly what is being measured (PROTOCOL.md 3).
+# Read-only: no request parsing, no parameters, nothing it can be told to do. Idle cost: none (PID 1 holds the
+# listening socket; this script only runs per connection).
+# 2026-10-19 (PLAN-deep-powersave.md M-6, section 7 item 17): the cx-auto line - cx_disabled (the fail-safe file
+# /var/lib/y700/cx-auto.disabled exists: the daemon will not arm again until `y700-cx-auto --enable`), armed_since
+# (mtime of /run/y700-cx-auto.armed, the flag the recorder reads), u0 (/run/user/0 exists = a root login, i.e. an
+# ssh session, is or was just up: its user manager perturbs screen-off measurements) and ssh_sessions (sshd sessions
+# counted from /run/systemd/sessions/*; `?` when the dynamic user may not read them - verified in P1). Still
+# read-only, still no request parsing. The Win11 daily task notifies only on cx_disabled=yes (and, later,
+# cx_stuck / a night plan with no unit).
+LOG=/var/log/y700-cx-exp.txt
+P=/sys/module/cpuidle_psci_domain/parameters
+# swallow the request line and headers (up to 2 s), ignore their content
+timeout 2 sh -c 'while IFS= read -r l; do [ "$(printf %s "$l" | tr -d "\r")" = "" ] && break; done' 2>/dev/null
+printf 'HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'
+echo "time     $(date '+%F %T') up $(cut -d. -f1 /proc/uptime)s boot $(cut -c1-8 /proc/sys/kernel/random/boot_id)"
+# a running unit has its cgroup directory (no D-Bus needed: systemctl prints nothing under DynamicUser here)
+run() { [ -d "/sys/fs/cgroup/system.slice/$1.service" ] && echo running || echo stopped; }
+echo "units    ladder=$(run y700-cx-ladder) idle=$(run y700-cx-idle) night=$(run y700-cx-night) exp=$(run y700-cx-exp) offmeasure=$(run y700-offmeasure)"
+echo "knobs    aco=$(cat $P/allow_cluster_off 2>/dev/null) aso=$(cat $P/allow_system_off 2>/dev/null) dl=$(cat /sys/module/qcom_scm/parameters/download_mode 2>/dev/null)"
+if [ -x /var/lib/y700 ]; then { [ -e /var/lib/y700/cx-auto.disabled ] && dis=yes || dis=no; }; else dis=unreadable; fi   # -x: the dynamic user can look inside
+if [ -e /run/y700-cx-auto.armed ]; then since=$(date -r /run/y700-cx-auto.armed '+%F_%T' 2>/dev/null || echo yes); else since=-; fi
+if [ -d /run/user/0 ]; then u0=yes; else u0=no; fi
+n=$(ls /run/systemd/sessions 2>/dev/null | wc -l | tr -d ' ')
+if [ "$n" -gt 0 ] && ! cat /run/systemd/sessions/* >/dev/null 2>&1; then sshn='?'; else sshn=$(grep -ls '^SERVICE=sshd' /run/systemd/sessions/* 2>/dev/null | wc -l | tr -d ' '); fi
+echo "cx-auto  cx_disabled=$dis armed_since=$since u0=$u0 ssh_sessions=$sshn"
+echo "device   dpms=$(cat /sys/class/drm/card*-DSI-1/dpms 2>/dev/null | head -1) bat=$(cat /sys/class/power_supply/qcom-battmgr-bat/status)/$(cat /sys/class/power_supply/qcom-battmgr-bat/capacity)%"
+echo "---- last lines of $LOG"
+tail -n 14 "$LOG" 2>/dev/null | cut -c1-220

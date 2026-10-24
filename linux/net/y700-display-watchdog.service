@@ -1,0 +1,7 @@
+# /etc/systemd/system/y700-display-watchdog.service -- see /usr/local/libexec/y700-display-watchdog
+[Unit]
+Description=y700: re-program the panel when the DPU keeps timing out on vblank
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/y700-display-watchdog

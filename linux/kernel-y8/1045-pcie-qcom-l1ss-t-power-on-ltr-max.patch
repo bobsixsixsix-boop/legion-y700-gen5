@@ -1,0 +1,185 @@
+From 1045000000000000000000000000000000001045 Mon Sep 17 00:00:00 2001
+From: y700 workspace <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 03:00:00 +0000
+Subject: [PATCH y8 1045] PCI: qcom + baldur DT: L1SS exit timing and an optional LTR ceiling for the WCN7860 link
+
+NOT BUILT, NOT TESTED on the tablet (written on the Win11 side, 2026-10-16;
+research in linux/power/PCIE-L1SS.md; git apply --check passes on
+v7.3-rc4 + 0049 + 0056 + the tb323fu dts, hunks offset by 6 lines). Apply
+after 1041/1042 on the v7.3-rc4 + tb323fu 0001-0130 tree. Two independent
+parts; part 1 is recommended regardless, part 2 is a contingency that stays
+off unless the setpci experiment in tools/y700-l1ssbench.sh shows a gain:
+
+1. arch/arm64/boot/dts/qcom/baldur-wifi.dtsi: t-power-on-us = <80> on the
+   Root Port node. The Root Port's L1 PM Substates capability reports
+   T_POWER_ON = 0, so aspm.c computes LTR_L1.2_THRESHOLD and T_PwrOn as if
+   the PHY/REFCLK came back instantly on L1.2 exit; Qualcomm describes the
+   result as "improper L1.2 exit behavior" with AER reports ("PCI: qcom:
+   Program correct T_POWER_ON value for L1.2 exit timing", 2025-11, where
+   80 us = scale 1 value 8 was hardcoded for all their targets). The
+   property is consumed by pcie-qcom since v7.3 (e9769bb17269 "PCI: qcom:
+   Program T_POWER_ON"); no upstream DT sets it yet. Zero effect until the
+   link really uses L1.2, which today it almost never does (31 entries in
+   4 h vs 1.63 M L1.1 entries).
+
+2. drivers/pci/controller/dwc/pcie-qcom.c: module parameter
+   pcie_qcom.ltr_max_latency_us (default 0 = no change). When set, the
+   post-enumeration bus walk programs that value into the LTR Max Snoop /
+   Max No-Snoop Latency registers of every endpoint whose registers read 0,
+   with LTR disabled around the write (PCIe r6.0 sec 6.18) and before
+   pci_enable_link_state_locked() turns the L1 substates on. The ordering
+   holds because pci_walk_bus() visits the Root Port first and that visit
+   is a no-op for ASPM (pcie_aspm_get_link() has no upstream bridge for a
+   Root Port, aspm.c), so the link's L1SS is only enabled on the endpoint's
+   visit, after this write. On resume post_init runs again, before the
+   endpoint's own pci_restore_state(): after the PERST cycle the registers
+   read 0 and L1SS is still disabled, so the write simply repeats (the
+   later restore writes the same value); if the config space survived they
+   read non-zero and nothing is touched. Nothing on a devicetree platform programs these
+   registers (x86 BIOS does); a firmware that reads 0 as "I may request
+   0 ns" then never lets the Downstream Port pick L1.2 over L1.1
+   (precedent: Kioxia NVMe, PCI/ASPM "Update LTR threshold based upon
+   reported max latencies" thread, 2022). For the WCN7860 this is the
+   least likely of the three explanations in PCIE-L1SS.md: the link did
+   enter L1.2 31 times with these registers at 0, and Android's pci-msm
+   leaves them at 0 as well while its DRV state machine relies on L1.2.
+   The more likely story is that the 4 h count was taken with firmware
+   power save off (before 1041) and that host-side link activity (134 L1
+   exits/s) keeps the firmware's activity-based LTR at its "active" value.
+   Whether the ceiling matters at all is exactly what the setpci
+   experiment in tools/y700-l1ssbench.sh (state 7, LTR_US=3000) decides;
+   only turn this parameter on if that experiment shows a measurable gain.
+   Build note: the code reads pdev->ltr_path, which include/linux/pci.h
+   declares under #ifdef CONFIG_PCIEASPM, so this half needs PCIEASPM=y
+   (config-t49-y9 has it); it is not upstreamable as written.
+
+Expected saving is small either way: the whole associated-idle Wi-Fi+PCIe
+residual is about 0.06 W and L1.1 -> L1.2 only removes the PHYs' common
+mode keepers (estimate <= 0.01-0.02 W, below the +-0.03 W battery noise).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/baldur-wifi.dtsi | 11 ++++
+ drivers/pci/controller/dwc/pcie-qcom.c    | 71 +++++++++++++++++++++++
+ 2 files changed, 82 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi b/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
+index 01f07af..e0115c2 100644
+--- a/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
++++ b/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
+@@ -191,6 +191,17 @@
+ 	wake-gpios = <&tlmm 104 GPIO_ACTIVE_LOW>;
+ 	reset-gpios = <&tlmm 102 GPIO_ACTIVE_LOW>;
+ 
++	/*
++	 * The Root Port's L1SS capability reports T_POWER_ON = 0, so aspm.c
++	 * derives LTR_L1.2_THRESHOLD and T_PwrOn as if the PHY and REFCLK
++	 * came back instantly on L1.2 exit. 80 us is what Qualcomm programs
++	 * on all its targets ("PCI: qcom: Program correct T_POWER_ON value
++	 * for L1.2 exit timing", 2025-11: scale 1, value 8); pcie-qcom reads
++	 * it from the Root Port node since v7.3 (e9769bb17269). It changes
++	 * nothing until the link really uses L1.2.
++	 */
++	t-power-on-us = <80>;
++
+ 	wifi@0 {
+ 		compatible = "pci17cb,110e";
+ 		reg = <0x10000 0x0 0x0 0x0 0x0>;
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index b58a607..5315348 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -193,6 +193,20 @@
+ #define QCOM_PCIE_LINK_SPEED_TO_BW(speed) \
+ 		Mbps_to_icc(PCIE_SPEED2MBS_ENC(pcie_get_link_speed(speed)))
+ 
++/*
++ * Nothing on a devicetree platform programs an Endpoint's LTR Max Snoop /
++ * Max No-Snoop Latency registers (on x86 the BIOS does, typically 1-3 ms).
++ * They power up as 0, and at least one firmware family then reports an LTR
++ * of 0, "tolerates no delay" (Kioxia NVMe, see the PCI/ASPM "Update LTR
++ * threshold based upon reported max latencies" thread, 2022), so the
++ * Downstream Port never chooses L1.2 over L1.1. Let the platform supply the
++ * ceiling the BIOS would have supplied. 0 (default) changes nothing.
++ */
++static u32 ltr_max_latency_us;
++module_param(ltr_max_latency_us, uint, 0444);
++MODULE_PARM_DESC(ltr_max_latency_us,
++		 "Program this LTR Max Snoop/No-Snoop Latency (us) into endpoints whose LTR registers read 0; 0 = leave them (default)");
++
+ struct qcom_pcie_resources_1_0_0 {
+ 	struct clk_bulk_data *clks;
+ 	int num_clks;
+@@ -1107,6 +1121,59 @@ static int qcom_pcie_post_init_2_7_0(struct qcom_pcie *pcie)
+ 	return 0;
+ }
+ 
++static void qcom_pcie_set_ltr_max_latency(struct pci_dev *pdev, u32 lat_us)
++{
++	u64 ns = (u64)lat_us * 1000;
++	u32 cur, val = 0, scale;
++	u16 ltr;
++
++	if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ENDPOINT)
++		return;
++
++	ltr = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_LTR);
++	if (!ltr)
++		return;
++
++	/* Some devices only support dword access to LTR (see aspm.c) */
++	pci_read_config_dword(pdev, ltr + PCI_LTR_MAX_SNOOP_LAT, &cur);
++	if (cur) {
++		pci_dbg(pdev, "LTR max latencies already %#x, leaving them\n", cur);
++		return;
++	}
++
++	/* LatencyScale n = 2^(5n) ns, LatencyValue is 10 bits; round up */
++	for (scale = 0; scale < 6; scale++) {
++		u64 unit = 1ULL << (5 * scale);
++
++		if (ns <= (u64)PCI_LTR_VALUE_MASK * unit) {
++			val = DIV_ROUND_UP_ULL(ns, unit);
++			break;
++		}
++	}
++	if (scale == 6) {
++		scale = 5;
++		val = PCI_LTR_VALUE_MASK;
++	}
++	val |= scale << PCI_LTR_SCALE_SHIFT;
++	val |= val << 16;			/* No-Snoop: the same */
++
++	/*
++	 * PCIe r6.0 sec 6.18: program the ceilings before LTR is enabled.
++	 * pci_configure_ltr() already enabled it during enumeration, but the
++	 * L1 substates are not enabled yet at this point (the devicetree
++	 * default is L0s/L1 only; pci_enable_link_state_locked() below turns
++	 * them on), so toggling LTR off around the write is legal.
++	 */
++	pcie_capability_clear_word(pdev, PCI_EXP_DEVCTL2, PCI_EXP_DEVCTL2_LTR_EN);
++	pci_write_config_dword(pdev, ltr + PCI_LTR_MAX_SNOOP_LAT, val);
++	if (pdev->ltr_path)
++		pcie_capability_set_word(pdev, PCI_EXP_DEVCTL2,
++					 PCI_EXP_DEVCTL2_LTR_EN);
++
++	pci_info(pdev, "LTR Max Snoop/No-Snoop Latency set to %u us (%#x)\n",
++		 lat_us, val);
++}
++
+ static int qcom_pcie_enable_aspm(struct pci_dev *pdev, void *userdata)
+ {
+ 	/*
+@@ -1114,6 +1181,10 @@ static int qcom_pcie_enable_aspm(struct pci_dev *pdev, void *userdata)
+ 	 * substates.
+ 	 */
+ 	pci_set_power_state_locked(pdev, PCI_D0);
++
++	if (ltr_max_latency_us)
++		qcom_pcie_set_ltr_max_latency(pdev, ltr_max_latency_us);
++
+ 	pci_enable_link_state_locked(pdev, PCIE_LINK_STATE_ALL);
+ 
+ 	return 0;
+-- 
+2.43.0

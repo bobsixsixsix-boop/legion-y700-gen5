@@ -1,0 +1,61 @@
+From e3d51ba3771cf7fd6feecfcf49701cfd55d66346 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 04:34:45 +0000
+Subject: [PATCH] aw882xx: mute/unmute the amplifiers at trigger time (tb323fu)
+
+ASoC calls mute_stream(0) at the end of prepare and mute_stream(1) in
+hw_free (soc-pcm.c __soc_pcm_prepare / soc_pcm_hw_clean, v7.3-rc4).
+On kaanapali's q6apm MI2S back end the bit clock is started by the back
+end's TRIGGER_START (q6apm-lpass-dais.c q6apm_lpass_dai_trigger ->
+q6apm_graph_start) and stopped by its next prepare
+(q6apm_lpass_dai_prepare stops a started graph) or shutdown. So today:
+
+- the start work (pwd off, PLL poll every 2 ms) runs before the clock
+  exists; it only succeeds when TRIGGER_START follows within the 20 ms
+  poll window, and the ACP profile probe (prepare, never started)
+  produces the five 'pll&clk check fail / start failed' rounds at boot;
+- an xrun recovery in PipeWire (snd_pcm_drop + snd_pcm_prepare +
+  start, alsa-pcm.c alsa_recover) stops and restarts the back-end graph
+  while the amplifiers stay powered and unmuted at full gain
+  (aw882xx_start_pa returns 'already start').
+
+With .mute_unmute_on_trigger the core unmutes each codec DAI right after
+the CPU DAI's TRIGGER_START and mutes it before TRIGGER_STOP
+(soc-dai.c snd_soc_pcm_dai_trigger), i.e. always with the clock running,
+and an xrun recovery becomes a clean stop/start of the amplifiers.
+The DPCM links are nonatomic (sound/soc/qcom/common.c), so the sleeping
+aw882xx_mute() is allowed there.
+
+Costs: aw882xx_mute(1) (device_stop, ~19 ms per amplifier, ~33 ms with
+fade-flag) now runs inside snd_pcm_drop instead of snd_pcm_close; an
+xrun now costs ~20-30 ms of amplifier restart. Not built, not run.
+---
+ kernel/out-of-tree/aw882xx/aw882xx.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/kernel/out-of-tree/aw882xx/aw882xx.c b/kernel/out-of-tree/aw882xx/aw882xx.c
+index c69d968..3b473ca 100644
+--- a/kernel/out-of-tree/aw882xx/aw882xx.c
++++ b/kernel/out-of-tree/aw882xx/aw882xx.c
+@@ -440,6 +440,18 @@ static const struct snd_soc_dai_ops aw882xx_dai_ops = {
+ 	.set_sysclk = aw882xx_set_dai_sysclk,
+ 	.hw_params = aw882xx_hw_params,
+ 	.mute_stream = aw882xx_mute,
++	/*
++	 * tb323fu: unmute on TRIGGER_START / mute on TRIGGER_STOP instead of
++	 * prepare / hw_free. On the q6apm MI2S back end the bit clock only
++	 * runs between the back end's TRIGGER_START (graph start) and its next
++	 * prepare or shutdown (graph stop): with prepare-time unmuting the
++	 * start work polled the PLL before any clock existed (every
++	 * profile-probe open failed five times), and on an xrun recovery
++	 * (drop, prepare, start) the back end stopped the clock under a
++	 * powered, unmuted amplifier. The DPCM links are nonatomic
++	 * (qcom common.c), so aw882xx_mute() may sleep here.
++	 */
++	.mute_unmute_on_trigger = 1,
+ 	.shutdown = aw882xx_shutdown,
+ };
+ 
+-- 
+2.55.0.windows.3
+

@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Id": "fyi.y700.controlpanel",
+        "Name": "Y700 控制面板",
+        "Name[en]": "Y700 control panel",
+        "Description": "亮度、音量、旋转锁定、游戏性能浮层、旁路供电、切换到 Android",
+        "Icon": "preferences-system",
+        "Category": "System Information",
+        "Authors": [ { "Name": "bobsixsixsix-boop", "Email": "304558835+bobsixsixsix-boop@users.noreply.github.com" } ],
+        "License": "GPL-3.0-or-later",
+        "Version": "1.0",
+        "FormFactors": [ "tablet", "desktop" ]
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

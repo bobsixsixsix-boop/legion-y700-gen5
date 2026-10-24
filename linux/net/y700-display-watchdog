@@ -1,0 +1,56 @@
+#!/bin/sh
+# y700-display-watchdog: recover the panel when the DPU keeps timing out on vblank.
+#
+# Seen 2026-10-13 after a hard reset (tablet came up at 164 Hz): from ~3 min after boot every commit
+# ended in "[dpu error] vblank timeout" / "wait for commit done returned -110" (2100+ in 15 min), each
+# one an 80 ms stall, so the whole desktop felt frozen. Turning the idle-refresh policy off did nothing;
+# a mode switch (164 -> 120) plus a DPMS off/on re-programmed the DSI link and the errors stopped at
+# once. Runs from a timer every minute: 15+ timeouts in the last minute -> that recovery, with a
+# notification. The mode switch blanks the screen for a moment. Success = every step returned 0 and
+# the kernel logged no vblank timeout in the 8 s after it; then the next attempt waits 10 minutes.
+# A failed attempt exits 1 (unit shows failed) and the next one waits 3 minutes, 10 from the third
+# failure in a row. The helper's refresh policy (auto / manual N / off) is read first and put back.
+STAMP=/run/y700-display-watchdog.last      # "<epoch> ok" | "<epoch> fail <consecutive failures>"
+now=$(date +%s)
+n=$(journalctl -k --since "-1min" -o cat 2>/dev/null | grep -c "vblank timeout")
+[ "$n" -ge 15 ] || exit 0
+read -r last state fails 2>/dev/null < "$STAMP" || { last=0; state=ok; fails=0; }
+: "${fails:=0}"
+wait=600; [ "$state" = fail ] && [ "$fails" -lt 3 ] && wait=180
+[ $((now - last)) -ge $wait ] || { echo "DPU still timing out ($n/min) but last recovery ($state) was $((now - last)) s ago, waiting"; exit 0; }
+echo "$now fail $((fails + 1))" > "$STAMP"      # provisional: rewritten as ok below when the recovery checked out
+echo "DPU vblank timeouts ($n in the last minute): re-programming the panel"
+U="sudo -u user env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0"
+# the helper's refresh policy, restored verbatim at the end (auto | manual <hz> | off)
+status=$(tb323fu-ctl --json status 2>/dev/null)
+policy=$(printf '%s' "$status" | tr -d ' \n' | grep -o '"Refresh":{[^}]*}' | grep -o '"Policy":"[a-z]*"' | cut -d'"' -f4)
+prate=$(printf '%s' "$status" | tr -d ' \n' | grep -o '"Refresh":{[^}]*}' | grep -o '"Rate":[0-9]*' | cut -d: -f2)
+cur=$($U kscreen-doctor -o 2>/dev/null | grep -oE "1904x3040@[0-9]+\.[0-9]+\*" | grep -oE "@[0-9]+" | tr -d @)
+# 2026-10-16: with y700-refresh-auto running, "the current mode" may be a video rate (30/60) it set; restoring that would
+# look like the owner choosing it. Go back to the daemon's base instead - it lowers again by itself if a video still wants it.
+rbase=$($U gdbus call --session -d fyi.y700.RefreshAuto -o /RefreshAuto -m fyi.y700.RefreshAuto.status 2>/dev/null | grep -o '\\"base_hz\\": [0-9]*\|"base_hz": [0-9]*' | grep -o '[0-9]*$')
+[ -n "$rbase" ] && cur=$rbase
+err=""
+[ -n "$cur" ] || err="$err; cannot read the current mode"
+other=120; [ "$cur" = 120 ] && other=90
+$U kscreen-doctor output.DSI-1.mode.1904x3040@$other >/dev/null 2>&1 || err="$err; mode switch to $other Hz failed"; sleep 3
+$U kscreen-doctor --dpms off >/dev/null 2>&1 || err="$err; dpms off failed"; sleep 2
+$U kscreen-doctor --dpms on >/dev/null 2>&1 || err="$err; dpms on failed"; sleep 3
+if [ -n "$cur" ]; then $U kscreen-doctor output.DSI-1.mode.1904x3040@$cur >/dev/null 2>&1 || err="$err; mode switch back to $cur Hz failed"; fi
+case "$policy" in
+manual) tb323fu-ctl refresh manual "${prate:-$cur}" >/dev/null 2>&1 || err="$err; refresh manual ${prate:-$cur} failed" ;;
+off)    tb323fu-ctl refresh off >/dev/null 2>&1 || err="$err; refresh off failed" ;;
+*)      tb323fu-ctl refresh auto >/dev/null 2>&1 || err="$err; refresh auto failed" ;;
+esac
+# did it work? the DPU must stay quiet for a while (the failure was one timeout per commit)
+sleep 8
+after=$(journalctl -k --since "-8s" -o cat 2>/dev/null | grep -c "vblank timeout")
+[ "$after" -eq 0 ] || err="$err; still $after vblank timeouts in the 8 s after the recovery"
+if [ -n "$err" ]; then
+	echo "recovery FAILED${err}"
+	$U notify-send -a "Y700" -i video-display "显示引擎自动复位失败" "面板提交一直超时，重新编程 DSI 链路没有解决${err}。如果整机仍卡顿，请重启。" 2>/dev/null
+	exit 1
+fi
+echo "$now ok" > "$STAMP"
+$U notify-send -a "Y700" -i video-display "显示引擎已自动复位" "面板提交一直超时（整机卡顿），已重新编程 DSI 链路；刷新率保持 ${cur:-120} Hz，刷新策略保持 ${policy:-auto}。" 2>/dev/null
+echo "done (mode $cur -> $other -> $cur, policy ${policy:-auto}$([ "$policy" = manual ] && echo " $prate"), no timeouts in 8 s)"

@@ -1,0 +1,15 @@
+=== 2026-10-18 03:49:57 cx-exp E5 20 min (level E3c) on 7.3.0-rc4-tb323fu-t49-y12, battery Discharging 77 %, aco=N aso=N dl=off
+03:50:12 before: cluster[use=542054 rej=1507578] cluster1[use=519386 rej=1630880] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+03:50:12 MARK E5 start 20min
+03:50:12 knobs: aco=Y aso=Y aoss_set=0
+PING 192.168.0.1 (192.168.0.1) 1000(1028) bytes of data.
+E5 t+1m                       0.53 W (min 0.34 max 0.74, 15 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 0.9% idle[WFI=2% cpu-sleep-0=72% cpu-sleep-1=25%] | irq 518/s | gpu=160MHz ddr=609MHz llcc=294MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/532x cxsd=0%/0x aosd=0%/0x
+03:52:27 t+2m: cluster[use=542101 rej=1507578] cluster1[use=521414 rej=1630880] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E5 t+12m                      0.51 W (min 0.32 max 0.61, 13 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 0.5% idle[WFI=1% cpu-sleep-0=74% cpu-sleep-1=25%] | irq 491/s | gpu=160MHz ddr=602MHz llcc=294MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/483x cxsd=0%/0x aosd=0%/0x
+04:03:44 t+13m: cluster[use=542572 rej=1507583] cluster1[use=531548 rej=1630880] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+04:10:14 done E5 20 min without a reset
+04:10:14 after:  cluster[use=542832 rej=1507585] cluster1[use=537306 rej=1630881] system[use=443252 rej=15801] apss=416522/9896666ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+04:10:14 MARK E5 end aco=N aso=N
+04:10:14 cx-when-idle: E5@E3c:20 exit 0
+04:25:15 cx-when-idle: idle 15 min on battery, display off: starting E4@E3c:20
+

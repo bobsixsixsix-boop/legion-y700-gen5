@@ -1,0 +1,13 @@
+# Per event device of the G9 gamepad, as root: started by 69-y700-padkeys.rules (SYSTEMD_WANTS) when
+# the pad appears, ends with it. Grabs the real node and forwards it through a uinput clone without
+# the home key (see src/main.rs). If it can't run, the pad stays hidden from apps: --remove in
+# install.sh brings the plain pad back.
+[Unit]
+Description=Y700 gamepad home key (%I)
+BindsTo=dev-input-%i.device
+After=dev-input-%i.device
+
+[Service]
+ExecStart=/usr/local/bin/y700-padkeys /dev/input/%I
+Restart=on-failure
+RestartSec=1

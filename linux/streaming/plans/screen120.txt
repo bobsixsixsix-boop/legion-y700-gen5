@@ -1,0 +1,10 @@
+# 120 fps screening, 2 min each, dynamic content, Wi-Fi power save as is (on)
+# label codec WxH fps kbps secs ps content
+s120-hevc-native-80   HEVC  3040x1904 120 80000  120 keep dynamic
+s120-h264-native-80   H.264 3040x1904 120 80000  120 keep dynamic
+s120-av1-native-80    AV1   3040x1904 120 80000  120 keep dynamic
+s120-hevc-2560-60     HEVC  2560x1600 120 60000  120 keep dynamic
+s120-hevc-1920-40     HEVC  1920x1200 120 40000  120 keep dynamic
+s120-h264-1920-40     H.264 1920x1200 120 40000  120 keep dynamic
+s120-av1-1920-40      AV1   1920x1200 120 40000  120 keep dynamic
+s120-hevc-native-150  HEVC  3040x1904 120 150000 120 keep dynamic

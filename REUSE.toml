@@ -1,0 +1,215 @@
+# REUSE metadata for this repository (https://reuse.software/spec-3.3/).
+#
+# How to read this file:
+# - When several annotations match a file, the LAST matching annotation wins,
+#   so the general defaults come first and specific paths come later.
+# - precedence = "closest": a file's own SPDX header wins over this table.
+# - precedence = "override": this table wins over anything inside the file.
+# - In paths, "*" does not cross a "/" and "**" matches across directories.
+# See README.md (Licensing) and NOTICE.md for the same information in prose.
+
+version = 1
+
+# 1. Default for everything not matched below: scripts, programs, configuration.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# 2. Documentation prose. Some documents quote license and copyright lines of
+#    other files, so the table overrides whatever a scan of the text would find.
+[[annotations]]
+path = ["*.md", "**.md"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# 3. Kernel patches under linux/kernel-*/, including the cumulative
+#    y700*.patch diffs and the .patch.upstream originals. Released under
+#    GPL-2.0-only like the kernel; see PATCHES.md for each patch's origin.
+[[annotations]]
+path = [
+  "linux/kernel-*/**.patch",
+  "linux/kernel-*/**.patch.upstream",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The authors named in each patch (From:, Signed-off-by:; see PATCHES.md)"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# 4. Kernel configuration under linux/kernel-*/.
+[[annotations]]
+path = [
+  "linux/kernel-*/config-*",
+  "linux/kernel-*/inventory/config-*",
+  "linux/kernel-*/*.fragment",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Joonhoe Kim and contributors (tb323fu-linux)",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# 5. Unmodified copies of upstream tb323fu-linux kernel configuration.
+[[annotations]]
+path = [
+  "linux/kernel-y5/baldur-extra.fragment",
+  "linux/kernel-y5/config-tb323fu-t49",
+  "linux/kernel-y8/inventory/config-t49.release",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Joonhoe Kim and contributors (tb323fu-linux)"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# 6. Kernel patches kept outside linux/kernel-*/ (drafts and a driver parameter).
+[[annotations]]
+path = [
+  "linux/audio/aw882xx-mute-on-trigger.DRAFT.patch",
+  "linux/audio/aw882xx-quiet-stream-log.DRAFT.patch",
+  "linux/power/soc-qcom-ice-runtime-pm.DRAFT.patch",
+  "linux/wifi/ath12k-wcn7860-mlo-param.patch",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# 7. A patch to an upstream board device tree, which is BSD-3-Clause.
+[[annotations]]
+path = "linux/audio/1050-arm64-dts-qcom-baldur-audio-aw882xx-fade-flag.DRAFT.patch"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Joonhoe Kim and contributors (tb323fu-linux board device trees)",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# 8. Scripts that embed Linux kernel source excerpts as patch anchors.
+[[annotations]]
+path = [
+  "linux/kernel-y6/make-1032.py",
+  "linux/kernel-y7/make-1033.py",
+  "linux/kernel-y8/make-1041.py",
+  "linux/carplay/aptest/txdbg-patch.py",
+  "linux/carplay/aptest/noenc-patch.py",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 bobsixsixsix-boop",
+  "The Linux kernel contributors (embedded source excerpts)",
+]
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# 9. LIVI integration (CarPlay / wireless Android Auto), GPL-3.0-or-later like LIVI.
+[[annotations]]
+path = "linux/carplay/livi/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# 10. Unmodified copies of tb323fu-linux files (MIT).
+[[annotations]]
+path = [
+  "y700-recovery/tools/boot-repack-kernel.py",
+  "y700-recovery/tools/build-boot.sh",
+  "linux/usbport/tb323fu-usb-port.upstream-0.4.2",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Joonhoe Kim and contributors"
+SPDX-License-Identifier = "MIT"
+
+# 11. Copy of a tb323fu-linux document (docs/recovery.md at 0c7c0c4); changes: a note
+#     at the top, relative links rewritten to the upstream repository.
+[[annotations]]
+path = "y700-recovery/notes/recovery.md"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Joonhoe Kim and contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# 12. Files adapted from tb323fu-linux (MIT upstream).
+[[annotations]]
+path = [
+  "linux/usbport/y700-usb-port",
+  "linux/usbport/70-tb323fu-usb-port.rules",
+  "switcher/device/switch-to-linux.sh",
+  "linux/power/keyhold.c",
+  "linux/power/keyhold-event-driven.patch",
+  "linux/power/keyhold-model-test.py",
+  "linux/power/tb323fu-dsp-no-cdsp.conf",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Joonhoe Kim and contributors",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "MIT"
+
+# 13. Patch against the tb323fu-linux helper (GPL-3.0-or-later upstream).
+[[annotations]]
+path = "linux/power/helperd-slow-poll.patch"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Joonhoe Kim and contributors",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# 14. Patch and edit scripts for kwin-effect-upscale (GPL-2.0-or-later upstream).
+#     kwin-upscale-x11.sh and sgsr.frag in the same directory carry their own
+#     complete SPDX headers and fall under annotation 1 ("closest").
+[[annotations]]
+path = [
+  "linux/games/sgsr/kwin-effect-upscale-sgsr.patch",
+  "linux/games/sgsr/add-sgsr.py",
+  "linux/games/sgsr/add-rotation-aspect.py",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Jens Koehler (kwin-effect-upscale)",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# 15. Task cards built on Plasma Mobile's mobiletaskswitcher (GPL-2.0-or-later,
+#     as declared in metadata.json).
+[[annotations]]
+path = [
+  "linux/gesture/taskswitcher/y700-taskswitcher.patch",
+  "linux/gesture/taskswitcher/metadata.json",
+  "linux/gesture/taskswitcher/ui/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Devin Lin and the Plasma Mobile contributors (mobiletaskswitcher)",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# 16. Own reimplementation of a published reproducer sequence; the file's
+#     header states the license but no copyright holder.
+[[annotations]]
+path = "linux/power/cx-collapse/dczva-stress.c"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# 17. Screenshots of this project's UI over KDE Plasma 6.6's default wallpaper
+#     "Sub-Arctic" (wallpapers/Next in KDE breeze, CC-BY-SA-4.0). The app icons
+#     in them are their owners' trademarks.
+[[annotations]]
+path = [
+  "linux/dock/tests/shots/01-desktop.png",
+  "linux/dock/tests/shots/c2-notes.png",
+  "linux/dock/tests/shots/c3-swiped.png",
+  "linux/dock/tests/shots/c4-cleared.png",
+  "linux/dock/tests/shots/h-widget-grid.png",
+  "linux/dock/tests/shots/r1-notes-real.png",
+  "linux/dock/tests/shots/r4-banners-real.png",
+  "linux/dock/tests/shots/r8-notes-real.png",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 bobsixsixsix-boop",
+  "Krystian Zajdel (KDE Plasma wallpaper Sub-Arctic)",
+]
+SPDX-License-Identifier = "CC-BY-SA-4.0"

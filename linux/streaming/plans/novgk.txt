@@ -1,0 +1,8 @@
+# After Riot Vanguard (vgk.sys) was stopped on the PC (2026-10-19 20:5x): host now
+# produces a steady 121 fps.  Redo the run that still had the 33 s stalls, and the
+# native / 1920 screening points, to see what is left on the tablet side.
+# label codec WxH fps kbps secs ps content
+l120-dyn-pson-novgk   HEVC  2560x1600 120 60000  600 on  dynamic
+n120-hevc-native-80   HEVC  3040x1904 120 80000  180 on  dynamic
+n120-hevc-1920-40     HEVC  1920x1200 120 40000  180 on  dynamic
+n120-h264-2560-60     H.264 2560x1600 120 60000  180 on  dynamic

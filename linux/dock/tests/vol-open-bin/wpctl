@@ -1,0 +1,24 @@
+#!/bin/sh
+# Stand-in for wpctl in the headless bed (vol-open-run.sh puts this directory first on the control centre's PATH;
+# the bed has no sound server). The default sink is one line in $XDG_RUNTIME_DIR/sb-audio: "0.40" or "0.40 MUTED".
+#   get-volume @DEFAULT_AUDIO_SINK@          -> "Volume: 0.40" / "Volume: 0.40 [MUTED]", as wpctl prints it
+#   set-volume @DEFAULT_AUDIO_SINK@ 80%|0.8  (absolute only)
+#   set-mute @DEFAULT_AUDIO_SINK@ 0|1
+# A change appends "Event 'change' on sink #1" to $S.events, which the pactl stand-in's `subscribe` follows.
+# $S.lag (seconds): get-volume reads the level at once and answers that much later - a slow read racing a drag.
+S=$XDG_RUNTIME_DIR/sb-audio
+[ -s "$S" ] || echo 0.40 > "$S"
+read -r v m < "$S"
+put() { [ -n "$2" ] && line="$1 $2" || line=$1; echo "$line" > "$S.$$" && mv -f "$S.$$" "$S"; echo "Event 'change' on sink #1" >> "$S.events"; }
+case "$1" in
+get-volume)
+    [ -s "$S.lag" ] && sleep "$(cat "$S.lag")"
+    echo "Volume: $v${m:+ [MUTED]}" ;;
+set-volume)
+    case "$3" in *%) n=$(awk -v p="${3%\%}" 'BEGIN { printf "%.2f", p / 100 }') ;; *) n=$(awk -v p="$3" 'BEGIN { printf "%.2f", p }') ;; esac
+    put "$n" "$m" ;;
+set-mute)
+    [ "$3" = 1 ] && put "$v" MUTED || put "$v" "" ;;
+*)
+    echo "sb wpctl stand-in: '$*' is not faked" >&2; exit 1 ;;
+esac

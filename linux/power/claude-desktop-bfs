@@ -1,0 +1,8 @@
+#!/bin/sh
+# /usr/local/bin/claude-desktop - ahead of /usr/bin in the session PATH, so every Claude launcher (menu, desktop
+# icon, claude:// links: all say Exec=claude-desktop) starts the app with Chromium's frame-callback-driven
+# begin-frame source. Without it the GPU-process compositor ticks at refresh rate while KWin has the window
+# "suspended" (screen off, minimized, other desktop) and keeps the CPU cluster / system domain from powering down.
+# Claude reads --enable-features back before appending its own, so this value is merged, not overwritten.
+# Installed by linux/power/chromium-bfs.py (README "Chromium 新帧源开关"); `chromium-bfs.py --undo` removes it.
+exec /usr/lib/claude-desktop/claude-desktop --enable-features=WaylandExternalBeginFrameSource "$@"

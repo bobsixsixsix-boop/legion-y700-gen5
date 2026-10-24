@@ -1,0 +1,51 @@
+bfsclaude 2026-10-18 12:46:08  claude 44.7.0  dpms=Off  SETTLE=45 WIN=60
+
+== default (/usr/lib/claude-desktop/claude-desktop)  dpms=Off  gpu=142810  gpu-args: --ozone-platform=wayland 
+  proc 142747   browser        cpu   1.0 %
+    thread 142747   claude-desktop       17.3 wakeups/s
+    thread 142747   ThreadPoolForeg       3.7 wakeups/s
+    thread 142747   Chrome_IOThread      16.6 wakeups/s
+    thread 142747   claude-desktop       16.1 wakeups/s
+    thread 142747   ThreadPoolSingl       5.0 wakeups/s
+  proc 142754   zygote         cpu   0.0 %
+  proc 142755   zygote         cpu   0.0 %
+  proc 142757   zygote         cpu   0.0 %
+  proc 142810   gpu-process    cpu   0.3 %
+    thread 142810   VizCompositorTh      60.3 wakeups/s
+  proc 142813   utility        cpu   0.5 %
+    thread 142813   ThreadPoolForeg       4.1 wakeups/s
+    thread 142813   Chrome_ChildIOT       7.0 wakeups/s
+  proc 142874   renderer       cpu   0.0 %
+  proc 142946   renderer       cpu   5.0 %
+    thread 142946   claude-desktop       19.3 wakeups/s
+    thread 142946   ThreadPoolForeg      16.7 wakeups/s
+    thread 142946   Chrome_ChildIOT      14.0 wakeups/s
+    thread 142946   ThreadPoolForeg       9.4 wakeups/s
+    thread 142946   ThreadPoolForeg       4.9 wakeups/s
+    thread 142946   ThreadPoolForeg       2.8 wakeups/s
+    thread 142946   ThreadPoolForeg       2.5 wakeups/s
+    thread 142946   DedicatedWorker       2.8 wakeups/s
+    thread 142946   DedicatedWorker       2.1 wakeups/s
+  proc 143114   utility        cpu   0.0 %
+  proc 143156   utility        cpu   0.0 %
+  stopped after 2 s
+
+== bfs (/usr/local/bin/claude-desktop)  dpms=Off  gpu=149937  gpu-args: --ozone-platform=wayland WaylandExternalBeginFrameSource 
+  proc 149876   browser        cpu   0.6 %
+    thread 149876   claude-desktop        9.5 wakeups/s
+    thread 149876   Chrome_IOThread       2.4 wakeups/s
+    thread 149876   claude-desktop       15.4 wakeups/s
+  proc 149883   zygote         cpu   0.0 %
+  proc 149884   zygote         cpu   0.0 %
+  proc 149886   zygote         cpu   0.0 %
+  proc 149937   gpu-process    cpu   0.0 %
+  proc 149942   utility        cpu   0.1 %
+  proc 150005   renderer       cpu   0.0 %
+  proc 150061   renderer       cpu   0.7 %
+    thread 150061   claude-desktop        7.1 wakeups/s
+  proc 150252   utility        cpu   0.0 %
+  proc 150254   utility        cpu   0.0 %
+  proc 150400   utility        cpu   0.0 %
+  stopped after 2 s
+
+done 12:50:00  dpms=Off  claude left: 0

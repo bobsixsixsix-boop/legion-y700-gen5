@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Y700 video state",
+  "version": "1.5",
+  "description": "Tells y700-refresh-auto when a video plays full screen and at what frame rate, so the panel's refresh rate can follow it; hides AV1 from pages (no hardware decoder for it on this tablet) and hides the page behind a fullscreen video (the GPU keeps drawing it).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzEJtUBxSg0WnlbNNCJUcqDOHm7z9CuenHMTRtFj6Xtjlb/wqfY2kMkGiu6UWaM2eNavbTkNa9oikut+7kZ02Z2Sj0wt3fW8H0XJM3KkUaP02OOQISjmWAQKtcVu2OEt9TZKi4yEIMRuO7y2THEBvGbRfb7gz71hJBvViJdvIJ8fTBLwr/bvUv242AmzMh6imB2OSuIq4LJdV4By78TxtWPDhBU0FgXM9e+EVAPtmF3qIDoNxGutDP1qkB1b3G6c/snjJmQCkf+AYVMmKrIRZyWm+HTb9TUiHjmhoBiXCy51o0ZwHz8e7PNjJMWxDlQoIOSQ++0pmB860yNtAmn3g1wIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "background": {"service_worker": "sw.js"},
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"],
+    "all_frames": true,
+    "match_about_blank": true,
+    "run_at": "document_idle"
+  }, {
+    "matches": ["<all_urls>"],
+    "js": ["no-av1.js"],
+    "all_frames": true,
+    "match_about_blank": true,
+    "run_at": "document_start",
+    "world": "MAIN"
+  }]
+}

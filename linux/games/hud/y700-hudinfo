@@ -1,0 +1,15 @@
+#!/bin/sh
+# y700-hudinfo: the game overlay's status line on the command line, e.g.
+#   60Hz | CPU 3% 1228MHz 33C | GPU 0% 160MHz 31C | SKIN 29C | 0.6W batt
+# While the overlay (y700-hud-overlay.service) runs with the screen on, its cache - written every sample, at most
+# 6 s old - is printed at once. Otherwise (overlay off, or screen off: it does not sample then) the overlay's
+# binary takes one sample over a 1 s window (`y700-hud-overlay --line`, no window, no cache files).
+# Until 2026-10-17 this was a shell sampler of its own (~30 processes and 52 ms of CPU per sample) that the
+# overlay also used; the sampling and its rules now live only in overlay/src/sampler.rs.
+R=${XDG_RUNTIME_DIR:-/tmp}; CACHE=$R/y700-hud.txt
+if systemctl --user is-active --quiet y700-hud-overlay.service 2>/dev/null &&
+   [ $(( $(date +%s) - $(stat -c %Y "$CACHE" 2>/dev/null || echo 0) )) -le 10 ]; then
+	cat "$CACHE"
+	exit 0
+fi
+exec "$(dirname "$(readlink -f "$0")")/y700-hud-overlay" --line

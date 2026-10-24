@@ -1,0 +1,24 @@
+From: ArmadaOS (1370-iris-psc-last), carried for y700 y13
+Subject: [PATCH] media: iris: don't flag an empty PSC_LAST buffer as an error
+
+On a resolution/bit-depth change the firmware returns the last capture
+buffer of the old sequence with HFI_BUF_FW_FLAG_PSC_LAST and no payload.
+Only HFI_BUF_FW_FLAG_LAST was exempted from V4L2_BUF_FLAG_ERROR, so
+userspace (libva-v4l2 / Chromium seek, mid-stream resolution changes)
+saw a spurious error buffer. Treat PSC_LAST like LAST.
+
+Originally from: armada-os/armada (1370-iris-psc-last)
+---
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -389,7 +389,7 @@
+ 	buf->flags = iris_hfi_gen2_get_driver_buffer_flags(inst, hfi_buffer->flags);
+ 
+ 	if (!buf->data_size && inst->state == IRIS_INST_STREAMING &&
+-	    !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST)) {
++	    !(hfi_buffer->flags & (HFI_BUF_FW_FLAG_LAST | HFI_BUF_FW_FLAG_PSC_LAST))) {
+ 		buf->flags |= V4L2_BUF_FLAG_ERROR;
+ 	}
+ 

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stand-in for tb323fu-ctl in the headless bed: the real one, but `--json status` (the first command of the control
+# centre's status pipeline) waits $XDG_RUNTIME_DIR/sb-status-lag seconds first. On the tablet the pipeline takes
+# 0.35 s idle (this call 0.25 s of it, 10-22) and longer under load; in the bed it would race the scenario's
+# screenshots, and what vol-open.sh checks is that the volume does not wait for it.
+[ "$1 $2" = "--json status" ] && [ -s "$XDG_RUNTIME_DIR/sb-status-lag" ] && sleep "$(cat "$XDG_RUNTIME_DIR/sb-status-lag")"
+exec /usr/bin/tb323fu-ctl "$@"

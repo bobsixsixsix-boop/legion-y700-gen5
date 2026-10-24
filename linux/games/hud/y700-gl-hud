@@ -1,0 +1,9 @@
+#!/bin/sh
+# y700-gl-hud CMD...: run an OpenGL game so that the overlay's sampler (overlay/src/sampler.rs) can read its frame rate.
+# Mesa's Gallium HUD (invisible) dumps the fps once a second into a dump dir private to this launch
+# (gl/<pid>/fps); the sampler finds it through the game's GALLIUM_HUD_DUMP_DIR. Steam launch option:
+#   y700-gl-hud %command%
+# Vulkan games do not need this (MangoHud logs them); it does no harm there.
+D="$HOME/.cache/y700-hud/gl/$$"; mkdir -p "$D"
+export GALLIUM_HUD=fps GALLIUM_HUD_VISIBLE=false GALLIUM_HUD_PERIOD=1 GALLIUM_HUD_DUMP_DIR="$D"
+exec "$@"

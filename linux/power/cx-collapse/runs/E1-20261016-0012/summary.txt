@@ -1,0 +1,38 @@
+=== 2026-10-16 03:15:53 7.3.0-rc4-tb323fu-t49-y9 up 17606s boot_id e2b6380a-0542-403a-a632-1f6b2ce6e3a5
+== boots (the run must be inside the last one)
+ -2 a2281a28146f4ff39f8bbfff66800a0b Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:16:11 JST
+ -1 baa113c4fe0f487ebfd5c6c625f3b791 Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:22:18 JST
+  0 e2b6380a0542403aa6321f6b2ce6e3a5 Tue 2026-07-28 05:44:02 JST Fri 2026-10-16 03:15:53 JST
+== cx-exp unit
+no cx-exp process
+== knobs now
+aco=N dl=off dpms=On bat=Not charging/98%
+== pd idle_states
+-- cluster
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     8066958        300121     234119     71836      0          0
+-- cluster1
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     10552172       119694     139928     28629      0          0
+-- system
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          0          0          0          0
+== cpuidle state1 per cpu (usage/rejected/time us)
+cpu0 cpu-sleep-0 usage=1353899 rej=58 time=16698160066
+cpu3 cpu-sleep-0 usage=374945 rej=34 time=17385819910
+cpu5 cpu-sleep-0 usage=293965 rej=13 time=17435466252
+cpu6 cpu-sleep-1 usage=344580 rej=11 time=17361684432
+cpu7 cpu-sleep-1 usage=139173 rej=3 time=17480832371
+== qcom_stats
+-- apss: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- cxsd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- aosd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- ddr: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+== kernel trouble lines in the last 200 min
+== flightrec MARKs
+MARK t=6552.8 at=00:11:39 E1 start 180min
+MARK t=17356.0 at=03:11:42 E1 end aco=N aso=-
+== flightrec sums between MARK E1 start and MARK E1 end (pd= increments)
+rows=10803  cl0 use=300121 rej=360  cl1 use=119694 rej=113  sys use=0
+== flightrec: rows with rej>0 on cl0 (should be ~0 while aco=Y)
+333

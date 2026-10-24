@@ -1,0 +1,10 @@
+# Ubuntu's packaged Rust crates (apt librust-*-dev) instead of crates.io: an offline build from the official
+# archive, the same versions the distribution builds its own Rust GTK programs with.
+[source.crates-io]
+replace-with = "debian"
+
+[source.debian]
+directory = "/usr/share/cargo/registry"
+
+[net]
+offline = true

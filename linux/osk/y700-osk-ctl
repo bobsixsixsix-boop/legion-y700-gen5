@@ -1,0 +1,25 @@
+#!/bin/sh
+# y700-osk-ctl on|off|status|restart  (run as the desktop user)
+#   on       use the Y700 keyboard (y700-osk) in the normal session
+#   off      go back to the original fcitx5-osk everywhere (nothing is uninstalled)
+#   restart  restart KWin's input method chain (launcher -> fcitx5 -> keyboard)
+#   status   which keyboard owns the bus names now
+set -e
+CONF="$HOME/.config/y700-osk"
+RUN=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+restart() {
+    busctl --user call fyi.fortime.Fcitx5Osk.KwinLauncher /fyi/fortime/Fcitx5Osk/KwinLauncher/Controller \
+        fyi.fortime.Fcitx5Osk.KwinLauncher.Controller1 RestartKwinInputMethod >/dev/null
+}
+case "$1" in
+on)      rm -f "$CONF/disabled" "$RUN/y700-osk.fallback" "$RUN/y700-osk.crashes"; restart; echo "y700-osk: on" ;;
+off)     mkdir -p "$CONF"; : > "$CONF/disabled"; restart; echo "y700-osk: off (fcitx5-osk)" ;;
+restart) restart ;;
+status)
+    pid=$(busctl --user status fyi.fortime.Fcitx5Osk 2>/dev/null | sed -n 's/^PID=//p')
+    if [ -n "$pid" ]; then echo "keyboard: $(tr '\0' ' ' < /proc/$pid/cmdline) (pid $pid)"; else echo "keyboard: not running"; fi
+    [ -e "$CONF/disabled" ] && echo "switch: off (y700-osk-ctl on to enable)"
+    [ -e "$RUN/y700-osk.fallback" ] && echo "fallback: y700-osk crashed 3 times; fcitx5-osk until next login or 'y700-osk-ctl on'"
+    exit 0 ;;
+*) echo "usage: y700-osk-ctl on|off|status|restart" >&2; exit 2 ;;
+esac

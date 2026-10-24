@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CarPlay
+Comment=无线 CarPlay 和 Android Auto（LIVI 10.0.0）
+Exec=/usr/local/bin/y700-carplay
+Icon=/opt/livi-10.0.0/livi.png
+Terminal=false
+Categories=AudioVideo;
+StartupWMClass=dev.f-io.livi
+StartupNotify=true

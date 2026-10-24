@@ -1,0 +1,6 @@
+com.ss.android.ugc.aweme
+com.ss.android.ugc.aweme.lite
+com.ss.android.ugc.live
+com.smile.gifmaker
+com.kuaishou.nebula
+com.tencent.wemeet.app

@@ -1,0 +1,12 @@
+# /etc/default/y700-gpu-floor: read by the y700-gpu-floor daemon at start (systemctl restart y700-gpu-floor to apply)
+# GPU devfreq floor (MHz) while Chrome plays a full-screen video; an OPP of the Adreno: 160 191 222 282 342 382 422 461
+# 500 578 646 726 826 902 1000 1050 1200. Never lowers the helper's profile floor (performance = 461 stays).
+FLOOR_MHZ=342
+# GPU ceiling (MHz, 0 = off) while the same condition holds: Chrome's fence-deadline "wait boosts" (~140/s in a real
+# YouTube session) would otherwise pin the GPU at 1200 MHz (~5 W); a boost never goes above max_freq. 500 measured
+# 3.5 W against 4.6 W uncapped on the live session. Must be >= FLOOR_MHZ, else ignored.
+CEIL_MHZ=500
+# seconds the floor is kept after the full-screen video stops (seeks, short stalls)
+RELEASE_S=3
+# whose /run/user/<uid>/y700-video the Chrome extension's state files are in
+USER_UID=1000

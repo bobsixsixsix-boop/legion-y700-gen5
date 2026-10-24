@@ -1,0 +1,233 @@
+#!/bin/sh
+# /usr/local/bin/y700-carplay -- the desktop icon "CarPlay" (linux/carplay/livi/, 2026-10-17): wireless CarPlay and,
+# since 10-20, wireless Android Auto (LIVI's own; on in config.json, see install-livi.sh).
+# Runs LIVI 10.0.0 unmodified (/opt/livi -> /opt/livi-10.0.0, unpacked from the official arm64 AppImage) as the
+# desktop user, and tidies up around it. Since 10.0.0 the AppImage's entry is the sh script LIVI, which execs
+# resources/core/livi-core; core starts the compositor and the Slint UI (livi-ui) itself. So $pid below is livi-core.
+#   before: the MFi authentication coprocessor (/dev/i2c-99, not part of this tree) must be up - LIVI's helper opens /dev/i2c-99 once, at its start. avahi-daemon is
+#           started: the helper announces CarPlay with avahi-publish-service / avahi-browse, which need the daemon,
+#           and nothing else here does, so it is disabled at boot (a resident mDNS responder on the home Wi-Fi is
+#           wakeups for nothing on this tablet) and stopped again after LIVI.
+#   after:  LIVI stops its access point when it quits normally, but a crash leaves livi-wifi-ap.service running and
+#           NetworkManager locked out of wlp1s0 (99-livi-ap-unmanaged.conf). Stop the unit, run the helper's teardown
+#           if that file is still there, and end a root helper the crash left behind (livi-core's own stale-helper
+#           check only looks for the AppImage's staged copy in ~/.config/LIVI/driver/, never used here).
+#   video:  LIVI hands the hardware decoder's (iris, v4l2h265dec) NV12 dmabuf straight to waylandsink, and
+#           livi-compositor cannot import it (Mesa: eglCreateImageKHR BAD_ALLOC; KWin takes the same buffer). The
+#           pipeline fails not-negotiated and CarPlay stays black. LIVI_GST_SINK replaces the sink's name inside
+#           LIVI's pipeline string, so a chain fits there: glupload imports the planes itself, the GPU converts,
+#           gldownload hands waylandsink RGB. ~40 % of one core at 1152x720@60, against ~85 % for LIVI_GST_SWDEC.
+#           An empty LIVI_GST_SINK in the environment gives LIVI's own sink back.
+#           Before that, the iPhone's stream says colorimetry 1:3:7:1 (full-range BT.709, sRGB transfer), which the
+#           v4l2 decoder refuses outright: not-negotiated again, black (10-17 23:40, the real phone). LIVI_GST_PRELOAD
+#           loads y700-gst-colorimetry.so into gst-host, which has the parser say 1:3:5:1 instead (see its source).
+#           An empty LIVI_GST_PRELOAD in the environment leaves gst-host without it.
+#           10.0.0's GStreamer brings its own libwayland-client (1.23), found first through its RUNPATH. The system
+#           Mesa's libEGL_mesa then fails to load (undefined wl_fixes_interface, new in 1.24), no GL element gets an
+#           EGLDisplay and the chain above stops at once: black again (10-23, the real phone). LIVI_GST_PRELOAD also
+#           names the system's libwayland-client, so that one is loaded first and the bundled copy (same soname) never.
+#           LIVI_GST_SWDEC=1 in the environment is the fallback that needs neither (software decode, ~85 % of a core).
+#   screen: while the phone's picture comes in, the panel neither dims nor goes off (keep_awake below).
+#   start:  an iPhone that asked for CarPlay over Bluetooth while the hotspot's interface was gone gets its Bluetooth
+#           link dropped once the access point is up, so LIVI asks it again (unstick below).
+# Log of the last two runs: ~/.cache/y700-carplay/livi.log (and .log.1).
+LIVI=/opt/livi/LIVI
+CORE=/opt/livi-10.0.0/resources/core/livi-core
+HELPER=/opt/livi-10.0.0/resources/driver/livi-helperd
+UNIT=livi-wifi-ap.service
+NM_CONF=/etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf
+IFACE=wlp1s0            # the hotspot's interface, wifiInterface in config.json (install-livi.sh)
+
+# Android Auto sends no frame while its picture stands still (10-20: 27 s without one in the first test), so its
+# session counts as the phone being there too: a TCP connection established on LIVI's Android Auto port 5277. It ends
+# when the phone leaves (LIVI's ping timeout, ~6 s after the phone's side went in that test).
+aa_session() { ss -Htn state established '( sport = :5277 )' 2>/dev/null | grep -q .; }
+
+# keep_awake's command under kde-inhibit: returns once 12 s pass without a frame and without an Android Auto session,
+# or LIVI ($2) is gone.
+if [ "$1" = --while-frames ]; then
+    while kill -0 "$2" 2>/dev/null; do
+        : >"$4"; sleep 12
+        [ "$3" -nt "$4" ] || aa_session || exit 0
+    done
+    exit 0
+fi
+
+# The iPhone can ask for CarPlay over Bluetooth while the hotspot's interface is gone (10-23, the first LIVI 10 dry
+# run): LIVI pages the last phone ~1 s after it starts (the station's link-local is enough for that), the phone
+# answered ~1 s later and asked ~0.5 s after, and by then LIVI had started its hotspot unit, whose ExecStartPre
+# y700-carplay-ap-settle had unloaded ath12k (~1.6 s without wlp1s0). livi-helperd's wait_for_ap
+# (livi-runtime/src/bringup.rs, 9.4.0's the same) takes a missing interface for "no access point" instead of waiting
+# for it, sends no CarPlayStartSession ("no link-local on wlp1s0") and keeps the Bluetooth session up without one; its
+# reconnect loop leaves a phone with a live link alone, so CarPlay never starts until the phone's Bluetooth goes. (In
+# 9.4.0's tests the phone answered after ~7 s, the access point was up by then.) So once the access point is on air,
+# the phone's Bluetooth link is dropped; LIVI pages it again within seconds and this time sends the start. Not when a
+# start went out meanwhile or the phone left; at most 3 times a run. Reads LIVI's log ($2) as it is written, from
+# the start; ends with LIVI ($1). A wired iPhone's failure names its USB interface, not $IFACE, and is left alone.
+unstick() {
+    tail -n +1 --pid="$1" -F "$2" 2>/dev/null | {
+        n=0 mac= k=0           # k: lines read, so "meanwhile" is what the log has after the failure's line
+        while IFS= read -r line; do
+            k=$((k + 1))
+            case "$line" in
+                *"phone connected mac="*)
+                    mac=${line##*mac=}; mac=${mac%% *} ;;
+                *"bt bring-up failed: no link-local on \"$IFACE\""*)
+                    [ -n "$mac" ] && [ $n -lt 3 ] || continue
+                    n=$((n + 1)) at=$k
+                    i=0
+                    while [ $i -lt 60 ] && kill -0 "$1" 2>/dev/null; do
+                        iw dev "$IFACE" info 2>/dev/null | grep -q 'type AP' &&
+                            ip -6 addr show dev "$IFACE" scope link 2>/dev/null | grep -q inet6 && break
+                        sleep 0.5; i=$((i + 1))
+                    done
+                    if ! kill -0 "$1" 2>/dev/null; then
+                        break
+                    elif [ $i -ge 60 ]; then
+                        echo "[y700-carplay] unstick: no access point on $IFACE within 30 s, $mac left as it is"
+                    elif tail -n +$((at + 1)) "$2" | grep -q 'CarPlayStartSession ip='; then
+                        echo "[y700-carplay] unstick: a start went out meanwhile, $mac left as it is"
+                    elif ! timeout 5 bluetoothctl info "$mac" </dev/null 2>/dev/null | grep -q 'Connected: yes'; then
+                        echo "[y700-carplay] unstick: $mac left Bluetooth meanwhile"
+                    else
+                        echo "[y700-carplay] unstick: $mac asked for CarPlay before the access point was up," \
+                            "dropping its Bluetooth link so LIVI asks it again ($n/3, $(date +%T))"
+                        timeout 10 bluetoothctl disconnect "$mac" </dev/null >/dev/null 2>&1 ||
+                            echo "[y700-carplay] unstick: bluetoothctl disconnect $mac failed"
+                    fi ;;
+            esac
+        done
+    }
+}
+if [ "$1" = --unstick ]; then         # by hand or from test-unstick.sh: --unstick <LIVI's pid> <its log>
+    unstick "$2" "$3"
+    exit 0
+fi
+
+# A second tap on the icon while it runs: LIVI is already on screen.
+if pgrep -u "$(id -u)" -f "^$CORE" >/dev/null; then
+    exit 0
+fi
+
+LOGDIR="${XDG_CACHE_HOME:-$HOME/.cache}/y700-carplay"
+mkdir -p "$LOGDIR"
+[ -f "$LOGDIR/livi.log" ] && mv -f "$LOGDIR/livi.log" "$LOGDIR/livi.log.1"
+exec >"$LOGDIR/livi.log" 2>&1
+echo "[y700-carplay] start $(date '+%F %T')"
+
+# optional: a systemd unit that provides the MFi authentication coprocessor on /dev/i2c-99 (not part of this repo)
+AUTH_UNIT="${Y700_CARPLAY_AUTH_UNIT:-}"
+if [ -n "$AUTH_UNIT" ] && ! systemctl -q is-active "$AUTH_UNIT"; then
+    echo "[y700-carplay] $AUTH_UNIT was not running, starting it"
+    sudo -n systemctl start "$AUTH_UNIT"
+fi
+i=0
+while [ ! -e /dev/i2c-99 ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+[ -e /dev/i2c-99 ] || echo "[y700-carplay] /dev/i2c-99 missing, CarPlay will not authenticate"
+sudo -n systemctl start avahi-daemon.service
+
+cleanup() {
+    state=$(systemctl is-active "$UNIT" 2>/dev/null)
+    case "$state" in
+        inactive | "") ;;
+        *) echo "[y700-carplay] $UNIT still $state, stopping it"; sudo -n systemctl stop "$UNIT" ;;
+    esac
+    if [ -e "$NM_CONF" ]; then
+        echo "[y700-carplay] $NM_CONF left behind, tearing the access point down"
+        t=/usr/local/sbin/livi-helperd
+        [ -x "$t" ] || t="$HELPER"
+        sudo -n "$t" --wifi-ap-teardown
+    fi
+    if pgrep -f "^$HELPER" >/dev/null; then
+        echo "[y700-carplay] a helper outlived LIVI, ending it"
+        sudo -n pkill -TERM -f "^$HELPER"
+        sleep 2
+        sudo -n pkill -KILL -f "^$HELPER"
+    fi
+    # Before it takes wlp1s0, LIVI copies the netplan Wi-Fi profiles from /run to /etc (persist_nm_profiles) and
+    # never removes them. NM keeps reading the /run originals (same UUID, /run wins), so the copies only show once a
+    # profile leaves netplan: a network deleted in the settings would come back from /etc. Remove the copies that
+    # are still byte-identical to their /run original; LIVI makes them again next time.
+    sudo -n sh -c '
+        n=0
+        for f in /etc/NetworkManager/system-connections/netplan-*.nmconnection; do
+            [ -f "$f" ] || continue
+            r=/run/NetworkManager/system-connections/${f##*/}
+            if [ -f "$r" ] && cmp -s "$f" "$r"; then rm -f "$f"; n=$((n + 1)); fi
+        done
+        if [ $n -gt 0 ]; then
+            echo "[y700-carplay] removed $n Wi-Fi profile copies LIVI left in /etc"
+            nmcli connection reload
+        fi'
+    sudo -n systemctl stop avahi-daemon.service avahi-daemon.socket
+}
+
+export LIVI_GST_SINK="${LIVI_GST_SINK-glupload ! glcolorconvert ! gldownload ! waylandsink}"
+echo "[y700-carplay] LIVI_GST_SINK=$LIVI_GST_SINK"
+WL=/usr/lib/aarch64-linux-gnu/libwayland-client.so.0    # the system's, see the header
+export LIVI_GST_PRELOAD="${LIVI_GST_PRELOAD-/usr/local/lib/y700-carplay/y700-gst-colorimetry.so $WL}"
+echo "[y700-carplay] LIVI_GST_PRELOAD=$LIVI_GST_PRELOAD"
+
+# Panel refresh: y700-refresh-auto (linux/display/refresh-auto) lowers the panel to a video's rate while a player state
+# file in $XDG_RUNTIME_DIR/y700-video names the fullscreen window's pid. LIVI's window is livi-compositor. The iPhone
+# sends up to 60 fps while something moves and ~30 on a still picture (with LIVI's cluster dashboards off, README
+# "帧率"), so the file says 60. Not 30 even when still: the frames are not synchronised with the panel, and at 30 Hz
+# one that comes a little late misses its refresh and is replaced by the next. Touch still holds the base rate (120)
+# for 3 s, the daemon's rule for every player.
+# One file per run: the daemon drops it when that pid exits; a compositor LIVI restarted itself would get none (base).
+refresh_follow() {
+    dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/y700-video"
+    i=0
+    while [ $i -lt 120 ] && kill -0 "$pid" 2>/dev/null; do
+        c=$(pgrep -u "$(id -u)" -x livi-compositor | head -n 1)
+        if [ -n "$c" ]; then
+            mkdir -p -m 700 "$dir" &&
+                printf 'pid=%s\nplaying=1\nfullscreen=1\nosd=0\ndanmaku=0\nfps=60\n' "$c" >"$dir/livi-$c.tmp" &&
+                mv -f "$dir/livi-$c.tmp" "$dir/livi-$c" &&
+                echo "[y700-carplay] refresh-auto: livi-compositor $c, 60 Hz while it is fullscreen"
+            return
+        fi
+        sleep 0.5; i=$((i + 1))
+    done
+    echo "[y700-carplay] refresh-auto: no livi-compositor within 60 s, the panel stays at its base rate"
+}
+
+# Screen: in the car the tablet runs on battery, where KDE's power management (PowerDevil, battery profile at Plasma's
+# defaults) dims an idle panel and turns it off after 5 min without a touch - while driving nobody touches CarPlay for
+# that long (10-19). While the phone's frames come in, kde-inhibit holds a screen-saver and a power inhibition, which
+# PowerDevil honours ~5 s later: no dimming, no screen off, no lock, no sleep. When the phone leaves, the frames stop
+# and 12 s later the hold ends, so LIVI left open in a parked car does not keep the panel lit. The signal: gst-host
+# appends a line to its log every 5 s in which frames arrived (none without, LIVI's take_stats), a still picture
+# included - "[cp_screen] recv" for the iPhone, "[feed] recv" for an Android phone (Android Auto's video reaches
+# gst-host through core's feed socket, 10-20 from 9.4.0's source); the log's mtime is all that is read, so both count.
+# An Android phone sends nothing while its picture is still, so its Android Auto session counts too (aa_session).
+# One sleep and one ss per 12 s, nothing else wakes.
+keep_awake() {
+    frames="${XDG_CONFIG_HOME:-$HOME/.config}/LIVI/log/gst-host.log"
+    stamp="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/y700-carplay-frames"
+    if ! command -v kde-inhibit >/dev/null; then
+        echo "[y700-carplay] keep-awake: no kde-inhibit, the panel may dim and go off"
+        return
+    fi
+    while kill -0 "$pid" 2>/dev/null; do
+        : >"$stamp"; sleep 12
+        [ "$frames" -nt "$stamp" ] || aa_session || continue
+        echo "[y700-carplay] keep-awake: phone frames or an Android Auto session, the panel stays on $(date +%T)"
+        kde-inhibit --power --screenSaver "$0" --while-frames "$pid" "$frames" "$stamp" >/dev/null 2>&1
+        echo "[y700-carplay] keep-awake: released $(date +%T)"
+    done
+    rm -f "$stamp"
+}
+
+# LIVI's own sudo calls go to classic sudo, see /usr/local/lib/y700-carplay/bin/sudo.
+PATH="/usr/local/lib/y700-carplay/bin:$PATH" "$LIVI" "$@" &
+pid=$!
+refresh_follow &
+keep_awake &
+unstick "$pid" "$LOGDIR/livi.log" &
+trap 'kill -TERM $pid 2>/dev/null' INT TERM HUP
+rc=0
+while kill -0 $pid 2>/dev/null; do wait $pid; rc=$?; done
+echo "[y700-carplay] LIVI exited rc=$rc $(date '+%F %T')"
+cleanup
+exit $rc

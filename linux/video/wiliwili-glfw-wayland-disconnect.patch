@@ -1,0 +1,127 @@
+diff --git a/library/borealis/library/lib/extern/glfw/src/wl_init.c b/library/borealis/library/lib/extern/glfw/src/wl_init.c
+index 6d3359e..b4b0d9d 100644
+--- a/library/borealis/library/lib/extern/glfw/src/wl_init.c
++++ b/library/borealis/library/lib/extern/glfw/src/wl_init.c
+@@ -934,7 +934,8 @@ void _glfwTerminateWayland(void)
+     {
+         // Allow libdecor to finish receiving all its requested globals
+         // and ensure the associated sync callback object is destroyed
+-        while (!_glfw.wl.libdecor.ready)
++        // y700: unless the compositor is gone, then this would spin forever
++        while (!_glfw.wl.libdecor.ready && !_glfw.wl.disconnected)
+             _glfwWaitEventsWayland();
+ 
+         libdecor_unref(_glfw.wl.libdecor.context);
+diff --git a/library/borealis/library/lib/extern/glfw/src/wl_platform.h b/library/borealis/library/lib/extern/glfw/src/wl_platform.h
+index 2c4c713..300b964 100644
+--- a/library/borealis/library/lib/extern/glfw/src/wl_platform.h
++++ b/library/borealis/library/lib/extern/glfw/src/wl_platform.h
+@@ -468,6 +468,9 @@ typedef struct _GLFWlibraryWayland
+ 
+     const char*                 tag;
+ 
++    // y700: the connection to the compositor is gone (see handleDisconnect)
++    GLFWbool                    disconnected;
++
+     struct wl_cursor_theme*     cursorTheme;
+     struct wl_cursor_theme*     cursorThemeHiDPI;
+     struct wl_surface*          cursorSurface;
+diff --git a/library/borealis/library/lib/extern/glfw/src/wl_window.c b/library/borealis/library/lib/extern/glfw/src/wl_window.c
+index c8855e9..64ca957 100644
+--- a/library/borealis/library/lib/extern/glfw/src/wl_window.c
++++ b/library/borealis/library/lib/extern/glfw/src/wl_window.c
+@@ -819,9 +819,13 @@ static const struct libdecor_frame_interface libdecorFrameInterface =
+ static GLFWbool createLibdecorFrame(_GLFWwindow* window)
+ {
+     // Allow libdecor to finish initialization of itself and its plugin
+-    while (!_glfw.wl.libdecor.ready)
++    // y700: unless the compositor is gone, then this would spin forever
++    while (!_glfw.wl.libdecor.ready && !_glfw.wl.disconnected)
+         _glfwWaitEventsWayland();
+ 
++    if (_glfw.wl.disconnected)
++        return GLFW_FALSE;
++
+     window->wl.libdecor.frame = libdecor_decorate(_glfw.wl.libdecor.context,
+                                                   window->wl.surface,
+                                                   &libdecorFrameInterface,
+@@ -1221,6 +1225,29 @@ static void inputText(_GLFWwindow* window, uint32_t scancode)
+     }
+ }
+ 
++// y700 (2026-10-21): the connection to the compositor is gone (a fatal libwayland error; error
++// is the errno of the call that failed). Report and remember it once, so that the libdecor
++// ready loops stop waiting; ask every window to close on every call, which also reaches a
++// window created after the disconnect (handleEvents comes back here each time it is called)
++//
++static void handleDisconnect(int error)
++{
++    if (!_glfw.wl.disconnected)
++    {
++        _glfw.wl.disconnected = GLFW_TRUE;
++        _glfwInputError(GLFW_PLATFORM_ERROR,
++                        "Wayland: Lost the connection to the compositor: %s",
++                        strerror(error));
++    }
++
++    _GLFWwindow* window = _glfw.windowListHead;
++    while (window)
++    {
++        _glfwInputWindowCloseRequest(window);
++        window = window->next;
++    }
++}
++
+ static void handleEvents(double* timeout)
+ {
+ #if defined(GLFW_BUILD_LINUX_JOYSTICK)
+@@ -1245,23 +1272,28 @@ static void handleEvents(double* timeout)
+     {
+         while (wl_display_prepare_read(_glfw.wl.display) != 0)
+         {
+-            if (wl_display_dispatch_pending(_glfw.wl.display) > 0)
++            const int count = wl_display_dispatch_pending(_glfw.wl.display);
++            if (count > 0)
++                return;
++
++            // y700 (2026-10-21): -1 is a fatal display error, e.g. EPIPE once the compositor
++            // is gone. The events still queued then can never be dispatched, so prepare_read
++            // keeps failing with EAGAIN and this loop used to spin at 100 % CPU forever
++            // (wiliwili after a re-login, with no window left)
++            if (count < 0)
++            {
++                handleDisconnect(errno);
+                 return;
++            }
+         }
+ 
+         // If an error other than EAGAIN happens, we have likely been disconnected
+         // from the Wayland session; try to handle that the best we can.
+         if (!flushDisplay())
+         {
++            const int error = errno;
+             wl_display_cancel_read(_glfw.wl.display);
+-
+-            _GLFWwindow* window = _glfw.windowListHead;
+-            while (window)
+-            {
+-                _glfwInputWindowCloseRequest(window);
+-                window = window->next;
+-            }
+-
++            handleDisconnect(error);
+             return;
+         }
+ 
+@@ -1271,7 +1303,10 @@ static void handleEvents(double* timeout)
+             return;
+         }
+ 
+-        if (fds[DISPLAY_FD].revents & POLLIN)
++        // y700: also read on a bare hangup / socket error, so that libwayland records the
++        // disconnect (the next round then ends up in handleDisconnect) instead of this loop
++        // polling a dead socket that is always ready
++        if (fds[DISPLAY_FD].revents & (POLLIN | POLLHUP | POLLERR))
+         {
+             wl_display_read_events(_glfw.wl.display);
+             if (wl_display_dispatch_pending(_glfw.wl.display) > 0)

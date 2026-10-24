@@ -1,0 +1,9 @@
+#!/bin/sh
+# Bypass charging on/off: on a charger the tablet runs from the charger and the battery is held (less heat).
+if tb323fu-ctl --json battery | grep -q '"Bypass": *true'; then w=off; else w=on; fi
+if out=$(tb323fu-ctl bypass $w 2>&1); then
+	[ $w = on ] && m="旁路供电：已打开（插电时由充电器直接供电，电池不充不放）" || m="旁路供电：已关闭（恢复正常充电）"
+	notify-send -a "Y700" -i battery "$m" "$(sh "$HOME/.local/bin/y700-power")"
+else
+	notify-send -a "Y700" -i dialog-error "旁路供电切换失败" "$out"
+fi

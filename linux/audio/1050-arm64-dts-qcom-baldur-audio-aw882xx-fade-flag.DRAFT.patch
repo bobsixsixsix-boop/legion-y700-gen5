@@ -1,0 +1,56 @@
+From b799ac6509a9dcc16f9671ddf2d65e7c3a23ab09 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 04:33:20 +0000
+Subject: [PATCH] arm64: dts: qcom: baldur-audio: enable the aw882xx volume
+ fade
+
+The out-of-tree aw882xx driver (v1.15.0) only ramps the amplifier's
+digital volume on start/stop when the DT says fade-flag = <1>
+(aw882xx_device.c aw_device_parse_fade_flag_dt; default 0, the boot log
+says 'fade-flag: 0'). Without it aw882xx_dev_mute() releases and sets
+HMUTE at the full aw_dev_N_volume gain, so any non-zero sample at that
+instant becomes a step.
+
+With the flag, aw_dev_reg_fw_update() parks the volume at the mute
+value, device_start() ramps it up after HMUTE is released (16 steps of
+64 x 0.094 dB, 100 us apart by default, about 5 ms with the I2C
+writes) and device_stop() ramps it down before HMUTE (500 us apart,
+about 10-13 ms per amplifier, run in hw_free). aw_dev_N_volume keeps
+working as before; aw882xx_fadein_us / aw882xx_fadeout_us and the
+fade_step sysfs file tune the ramp at run time.
+
+Not verified on hardware: whether the analog power-stage transitions
+(AMPPD/PWDN) themselves click is not affected by this change.
+---
+ arch/arm64/boot/dts/qcom/baldur-audio.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/baldur-audio.dtsi b/arch/arm64/boot/dts/qcom/baldur-audio.dtsi
+index f9ab99f..63a0332 100644
+--- a/arch/arm64/boot/dts/qcom/baldur-audio.dtsi
++++ b/arch/arm64/boot/dts/qcom/baldur-audio.dtsi
+@@ -30,6 +30,13 @@
+ 		aw-re-max = <30000>;
+ 		rename-flag = <1>;
+ 		sync-load = <1>;
++		/*
++		 * Ramp the amplifier's digital volume on every start/stop
++		 * (aw_dev_fade_in/out: mute volume <-> aw_dev_N_volume in
++		 * 64-step increments). Without it the driver flips HMUTE
++		 * at full gain; the vendor default is off.
++		 */
++		fade-flag = <1>;
+ 		#sound-dai-cells = <0>;
+ 	};
+ 
+@@ -43,6 +50,7 @@
+ 		aw-re-max = <30000>;
+ 		rename-flag = <1>;
+ 		sync-load = <1>;
++		fade-flag = <1>;
+ 		#sound-dai-cells = <0>;
+ 	};
+ };
+-- 
+2.55.0.windows.3
+

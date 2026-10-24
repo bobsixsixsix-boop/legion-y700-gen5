@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Id": "y700-edge",
+        "Name": "Y700 左右边缘返回手势",
+        "Description": "从屏幕左缘或右缘向内滑动 = 返回键（y700-control-center 发键：浏览器 Alt+←，其余 Esc）",
+        "Authors": [
+            {
+                "Name": "bobsixsixsix-boop",
+                "Email": "304558835+bobsixsixsix-boop@users.noreply.github.com"
+            }
+        ],
+        "License": "GPL-3.0-or-later",
+        "Version": "2.0",
+        "EnabledByDefault": true
+    },
+    "X-Plasma-API": "javascript"
+}

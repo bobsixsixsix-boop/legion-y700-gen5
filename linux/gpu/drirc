@@ -1,0 +1,42 @@
+<?xml version="1.0" standalone="yes"?>
+<!--
+y700 (installed as /etc/drirc): the OpenGL of the Chromium-based programs below goes through zink (GL on the
+tb323fu Turnip Vulkan driver) instead of the distribution's freedreno GL, whose GL path hangs the Adreno 840
+(kernel "hangcheck recover!" + "offending task: <the program>"; the whole desktop resets with it).
+  chrome          Google Chrome: touch-scroll hangs on a heavy page. Added 2026-10-14.
+  ChatGPT         OpenAI's Electron desktop app /usr/lib/chatgpt/ChatGPT: 3 hangs of its GPU process on 10-19,
+                  then on XWayland (GLX); since 10-22 a Wayland client (EGL). Added 2026-10-23.
+  steamwebhelper  the Steam client's CEF UI, run natively from ~/.local/share/Steam/steamrtarm64 (no container,
+                  host Mesa through GLX; steamclient.so sets LIBGL_KOPPER_DISABLE=true for it): 1 hang on 10-19.
+                  Added 2026-10-23.
+Matched by program name, which Mesa (util/u_process.c) takes from argv[0] (program_invocation_name): its
+basename, or the basename of the realpath of /proc/self/exe only when that path is a prefix of argv[0] (an
+argv[0] with arguments glued on). So the name to write is the basename of the first field after "(" in the
+kernel's "offending task: COMM (ARGV...)" line, not COMM (Steam's GPU thread reads steamweb:gdrv0), and a
+program whose argv[0] is /proc/self/exe cannot be matched here at all (Mesa sees "exe"). It holds however the
+program is started: menu, taskbar, xdg-open links, Plasma session restore (which replays the program's own
+command line and so bypasses the env prefix in Chrome's launchers). Only these names, only on the msm GPU;
+KWin, Plasma and everything else stay on freedreno GL. A program already running keeps the driver it started
+with.
+Check one name without touching the program, in the user session (bash): exec -a /x/ChatGPT eglinfo -B
+(also with -p x11 / -p wayland, or glxinfo -B); the renderer must read
+"zink Vulkan 1.4(Adreno (TM) 840 (MESA_TURNIP))", with any other name "Adreno (TM) 840".
+The checklist (tools/y700-checklist.py, DRIRC_ZINK: name and date added) expects exactly the programs zinked
+here. Undo one program: delete its application block here AND its DRIRC_ZINK entry, install both
+(install -m 644 -o root -g root linux/gpu/drirc /etc/drirc; the checklist as /usr/local/bin/y700-checklist),
+then restart that program. Editing only /etc/drirc on the tablet makes the checklist WARN every day.
+See README "Chrome 让 GPU 卡死".
+-->
+<driconf>
+    <device driver="loader" kernel_driver="msm">
+        <application name="Google Chrome" executable="chrome">
+            <option name="dri_driver" value="zink" />
+        </application>
+        <application name="ChatGPT desktop" executable="ChatGPT">
+            <option name="dri_driver" value="zink" />
+        </application>
+        <application name="Steam client UI" executable="steamwebhelper">
+            <option name="dri_driver" value="zink" />
+        </application>
+    </device>
+</driconf>

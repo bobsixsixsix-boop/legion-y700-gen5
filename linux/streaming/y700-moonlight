@@ -1,0 +1,21 @@
+#!/bin/bash
+# y700-moonlight [moonlight args...]: Moonlight (flatpak) with a CPU performance floor while it is open.
+#
+# Why (2026-10-20, runs/streaming/c120-*): at 120 fps on the 120 Hz panel Moonlight has no slack, and with the CPU
+# idling at 768 MHz the decode/render threads wake up too slowly for some frames: ~3 % of the frames on screen were
+# repeats (1 % low 51 fps, 0.1 % low 21 fps, worst frame 67 ms) although every frame arrived (120/s decoded, Wi-Fi
+# clean). The GPU clock, V-Sync and the refresh daemon were ruled out by A/B runs. A CPU minimum of 2 GHz fixed it
+# (0.2-0.7 % repeats, 0.1 % low 60 fps, worst 16.7 ms); this does the same, scoped: Moonlight runs under
+# uclamp.min UC, and every thread it starts (the stream threads included) inherits it. uclamp.min only raises the
+# clock while those threads run (schedutil: ~1.25 x max x UC / 1024, i.e. ~2.6-2.9 GHz at 512), it does not pin
+# the CPU. Measured c120-launcher: 0.79 % repeats, 1 % low 67, 0.1 % low 60 fps, worst 16.7 ms.
+# No root needed (uclampset, util-linux; raising your own process's uclamp needs no capability).
+# Y700_ML_UCLAMP overrides 512.
+#
+# KWin's floor is NOT set here: kwin_wayland carries the file capability cap_sys_nice, and the kernel (cap_safe_nice)
+# refuses to change the scheduling of a process with more capabilities than the caller. The root service
+# y700-kwin-uclamp (linux/streaming/kwin-uclamp, 2026-10-20, the owner chose a permanent floor) keeps KWin at 512;
+# both together measured 0.30-0.47 % repeats, 1 % low 81-92, 0.1 % low 60 fps (c120-svc1..3).
+UC=${Y700_ML_UCLAMP:-512}
+exec uclampset -m "$UC" -- /usr/bin/flatpak run --branch=stable --arch=aarch64 --command=moonlight \
+    com.moonlight_stream.Moonlight "$@"

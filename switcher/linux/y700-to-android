@@ -1,0 +1,16 @@
+#!/bin/bash
+# "切换到 Android": confirm, then hand over to the upstream back-to-android (it checks
+# that boot_b is the Android image, copies it into boot_a, verifies, saves the running
+# Linux image for the Android-side switcher, and reboots).
+HASH=$(head -c 64 /etc/tb323fu/android-boot.sha256 2>/dev/null)
+ui() { command -v kdialog >/dev/null && kdialog "$@"; }
+if [ ${#HASH} -ne 64 ]; then
+	ui --title "切换到 Android" --error "找不到安卓启动镜像的哈希（/etc/tb323fu/android-boot.sha256），已取消。"; exit 1
+fi
+ui --title "切换到 Android" --yes-label "切换并重启" --no-label "取消" \
+	--warningyesno "会把安卓启动镜像写回 boot_a，核对无误后立即重启。\n未保存的工作会丢失。" || exit 0
+LOG=$(mktemp)
+if ! sudo -n /usr/sbin/back-to-android "$HASH" >"$LOG" 2>&1; then
+	ui --title "切换到 Android" --detailedsorry "切换没有完成，仍在 Linux。" "$(cat "$LOG")"
+	rm -f "$LOG"; exit 1
+fi

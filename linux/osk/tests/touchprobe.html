@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>touchprobe</title>
+<style>
+  body { margin: 0; font: 28px sans-serif; background: #222; color: #eee }
+  #f { position: fixed; left: 40px; top: 40px; width: 700px; height: 90px; font-size: 40px }
+  #pad { position: fixed; left: 40px; top: 200px; width: 700px; height: 400px; background: #444 }
+  #out { position: fixed; left: 780px; top: 40px; white-space: pre; font-size: 18px }
+</style>
+<input id="f" placeholder="text field">
+<div id="pad">not a text field</div>
+<div id="out"></div>
+<script>
+  // records what Chromium makes of the virtual finger (tests/vtouch.py): touch, pointer, click, focus
+  window.log = [];
+  const add = s => { log.push(s); document.getElementById('out').textContent = log.slice(-24).join('\n'); };
+  for (const t of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'click'])
+    document.addEventListener(t, e => add(`${t} ${e.pointerType || ''} ${Math.round(e.clientX ?? e.changedTouches?.[0]?.clientX ?? -1)},${Math.round(e.clientY ?? e.changedTouches?.[0]?.clientY ?? -1)} ${e.target.id}`), true);
+  document.getElementById('f').addEventListener('focus', () => add('focus field'));
+  document.getElementById('f').addEventListener('blur', () => add('blur field'));
+</script>

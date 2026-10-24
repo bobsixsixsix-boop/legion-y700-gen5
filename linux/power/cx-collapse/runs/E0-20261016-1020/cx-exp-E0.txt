@@ -1,0 +1,11 @@
+=== 2026-10-16 10:20:40 cx-exp E0 20 min (level -) on 7.3.0-rc4-tb323fu-t49-y10, battery Discharging 90 %, aco=N aso=N dl=off
+10:20:55 before: cluster[use=57000 rej=595926] cluster1[use=48263 rej=430201] system[use=47658 rej=2769] apss=42495/1352374ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+10:20:55 MARK E0 start 20min
+10:20:55 knobs: aco=N aso=N aoss_set=0
+E0 t+1m                       0.43 W (min 0.34 max 0.73, 13 distinct I in 75 s, Discharging) | backlight 962 | panel 120:100% | cpu busy 0.7% idle[WFI=4% cpu-sleep-0=71% cpu-sleep-1=24%] | irq 471/s | gpu=160MHz ddr=582MHz llcc=289MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/537x cxsd=0%/0x aosd=0%/0x
+10:23:11 t+2m: cluster[use=57000 rej=600053] cluster1[use=48263 rej=433235] system[use=47658 rej=2769] apss=42495/1352374ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+10:26:56 watchdog: 48 touch/key interrupts in 10 s - the owner is using the tablet, stopping
+10:26:58 after:  cluster[use=57000 rej=606158] cluster1[use=48263 rej=438773] system[use=47658 rej=2769] apss=42495/1352374ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+10:26:58 MARK E0 end aco=N aso=N
+10:26:58 cx-ladder: E0:20 exit 4
+10:26:58 cx-ladder: stopping after E0:20 (exit 4)

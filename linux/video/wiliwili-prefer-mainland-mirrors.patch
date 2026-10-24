@@ -1,0 +1,76 @@
+diff --git a/wiliwili/source/activity/player_base_activity.cpp b/wiliwili/source/activity/player_base_activity.cpp
+index 74cd9c3..d3e5668 100644
+--- a/wiliwili/source/activity/player_base_activity.cpp
++++ b/wiliwili/source/activity/player_base_activity.cpp
+@@ -2,6 +2,7 @@
+ // Created by fang on 2023/1/3.
+ //
+ 
++#include <algorithm>
+ #include <utility>
+ #include <borealis/core/thread.hpp>
+ #include <borealis/core/touch/tap_gesture.hpp>
+@@ -684,12 +685,60 @@ void BasePlayerActivity::onVideoPlayUrl(const bilibili::VideoUrlResult& result)
+             brls::Logger::debug("Dash quality: {}; video: {}; audio: {}", videoUrlResult.quality, v.codecid, a.id);
+         }
+ 
++        // y700: order the mirror URLs before handing them to the player. From outside China the API's
++        // base_url is upos-sz-mirrorcosov (Tencent COS overseas), the backups upos-hz-mirrorakam (Akamai).
++        // On 2026-10-13 the cosov edge node this network resolved to served truncated
++        // objects from its cache ("Stream ends prematurely" at the same offset on every reconnect: picture
++        // frozen, audio on), and the mainland upos mirrors were the way out: the upos signature in the URL
++        // is valid on every *.bilivideo.com upos host (what BBDown's --upos-host relies on). Measured
++        // again on 2026-10-14 (signed URLs, 20 MiB each): cosov 38-68 MB/s on one network and 49-61 MB/s on
++        // another, the mainland ali mirror 4.7 MB/s on the first and unreachable on the second. So the
++        // order is the API's own (cosov, akam) and the mainland copies derived from the cosov URL come
++        // after them as backups for the day an edge node misbehaves again. Logged at info.
++        auto preferMirrors = [](const std::vector<std::string>& urls) {
++            static const std::string cosov = "upos-sz-mirrorcosov.bilivideo.com";
++            static const char* const mainland[] = {"upos-sz-mirrorali.bilivideo.com", "upos-sz-mirrorcos.bilivideo.com",
++                                                   "upos-sz-mirrorhw.bilivideo.com"};
++            std::vector<std::string> out;
++            auto add = [&](const std::string& u) {
++                if (std::find(out.begin(), out.end(), u) == out.end()) out.push_back(u);
++            };
++            for (const auto& u : urls) add(u);                       // the API's order: cosov, then akam
++            for (const auto& u : urls) {                              // then mainland copies of the cosov URL
++                auto pos = u.find(cosov);
++                if (pos == std::string::npos) continue;
++                for (auto h : mainland) add(std::string(u).replace(pos, cosov.size(), h));
++            }
++            return out;
++        };
++        std::vector<std::string> videos;
++        videos.emplace_back(v.base_url);
++        videos.insert(videos.end(), v.backup_url.begin(), v.backup_url.end());
++        videos = preferMirrors(videos);
++        audios = preferMirrors(audios);
++        // One audio URL per attempt, the one ranked like the video: every URL in the list was passed as
++        // its own audio-file= option before, and mpv keeps only the last one, so the audio stayed on the
++        // original cosov host whatever the video did. A candidate that fails moves on to the next pair
++        // (the player's backup-URL mechanism), which is the only failover there is for audio.
++        auto audioFor = [&](size_t i) {
++            std::vector<std::string> one;
++            if (!audios.empty()) one.push_back(audios[std::min(i, audios.size() - 1)]);
++            return one;
++        };
++        {
++            std::string order, aorder;
++            for (const auto& u : videos) order += (order.empty() ? "" : " | ") + u.substr(0, u.find('/', 8));
++            for (const auto& u : audios) aorder += (aorder.empty() ? "" : " | ") + u.substr(0, u.find('/', 8));
++            brls::Logger::info("Video mirror order: {}", order);
++            brls::Logger::info("Audio mirror order: {}", aorder);
++        }
++
+         // 给播放器设置链接
+-        this->video->setUrl(v.base_url, start, end, audios);
++        this->video->setUrl(videos[0], start, end, audioFor(0));
+ 
+         // 设置备份视频链接
+-        for (const auto& backup_url : v.backup_url) {
+-            this->video->setBackupUrl(backup_url, start, end, audios);
++        for (size_t i = 1; i < videos.size(); i++) {
++            this->video->setBackupUrl(videos[i], start, end, audioFor(i));
+         }
+     } else {
+         // flv

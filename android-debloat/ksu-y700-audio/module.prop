@@ -1,0 +1,6 @@
+id=y700_audio
+name=Y700 Audio Tweaks
+version=1
+versionCode=1
+author=y700
+description=缩短 audioserver TimeCheck 看门狗超时（14s→5s+2s），杜比音效偶发互等死锁时更快自恢复

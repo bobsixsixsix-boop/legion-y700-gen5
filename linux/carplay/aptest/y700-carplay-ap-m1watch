@@ -1,0 +1,39 @@
+#!/bin/bash
+# y700-carplay-ap-m1watch LOG PID [LIMIT] -- stop a hostapd whose access point never gets a 4-way handshake out.
+# TEST TOOL (linux/carplay/aptest/, 2026-10-17): apjoin.sh WATCH=N runs it from /root/ on each hostapd. It was
+# meant for production (y700-carplay-ap-tune ran it on every hostapd LIVI starts) and was taken out the same day.
+#
+# The firmware state it reacts to (README, step 10, "问题二"): the WCN7850 hands every EAPOL-Key 1/4 straight back
+# as "dropped by FW" (HTT WBM status 1, ~56 us after the TX, no peer resolved), for every association. From hostapd's
+# debug log (LOG) it looks like this: the 1/4 goes out again and again ("WPA_PTK entering state PTKSTART": at 0, 0.1,
+# 1.1, 2.1 s) and the station never answers (no "PTKCALCNEGOTIATING"); a station that hears the 1/4 answers within
+# milliseconds, even with a wrong passphrase. After LIMIT 1/4s (default 3, ~1.1 s after the association) without an
+# answer from the same station: SIGTERM PID, and the caller starts a new hostapd.
+#
+# Why it is not used: the idea was that each access point is a new draw (7 of 36 sessions bad). The WATCH=3 run
+# (join-212700) said otherwise: in the bad stretch from 21:36:59 to 21:43:37 it stopped ~40 hostapds in a row -
+# new access points, NetworkManager station spells in between - and every one of them dropped the 1/4s; the
+# stretch ended on its own. A new hostapd does not get out of that state.
+# Prints one line when it stops hostapd. Exit status: 10 = stopped PID, 0 = PID ended on its own.
+export LC_ALL=C
+LOG=$1; PID=$2; LIMIT=${3:-3}
+[ -n "$LOG" ] && [ -n "$PID" ] || { echo "usage: y700-carplay-ap-m1watch LOG PID [LIMIT]" >&2; exit 2; }
+# tail ends within a second of PID; grep keeps the loop to the state machine lines (hostapd -d writes a lot more).
+# The loop is bash, not awk: Ubuntu's mawk reads a pipe in blocks and saw the lines only when hostapd was gone.
+# A line: "1792238925.615216: WPA: 02:00:00:00:00:20 WPA_PTK entering state PTKSTART".
+declare -A sent heard
+tail -n0 -F --pid="$PID" "$LOG" 2>/dev/null | grep --line-buffered -F ' WPA_PTK entering state ' |
+    while read -r _ _ sta _ _ _ st; do
+        case $st in
+        AUTHENTICATION) sent[$sta]=0; heard[$sta]=0 ;;
+        PTKCALCNEGOTIATING) heard[$sta]=1 ;;
+        PTKSTART)
+            [ "${heard[$sta]:-0}" = 1 ] && continue
+            sent[$sta]=$(( ${sent[$sta]:-0} + 1 ))
+            [ "${sent[$sta]}" -lt "$LIMIT" ] && continue
+            echo "station $sta never answered ${sent[$sta]} EAPOL-Key 1/4s: the firmware drops this access point's" \
+                "handshakes, stopping hostapd $PID for a new one"
+            kill "$PID"
+            exit 10 ;;
+        esac
+    done

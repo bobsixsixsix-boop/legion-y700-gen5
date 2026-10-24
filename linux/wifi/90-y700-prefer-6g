@@ -1,0 +1,16 @@
+#!/bin/sh
+# y700: if the tablet lands on HOME_2.4G (HOME_6G not seen in the first scan), move to
+# HOME_6G once it shows up. HOME_5G is left manual: it loses beacons ~10 s after connecting.
+[ "$2" = up ] && [ "$CONNECTION_ID" = "HOME_2.4G" ] || exit 0
+(
+	for i in 1 2 3 4 5 6; do
+		sleep 20
+		[ "$(nmcli -g GENERAL.CONNECTION dev show "$1")" = "HOME_2.4G" ] || exit 0
+		nmcli dev wifi rescan ifname "$1" 2>/dev/null; sleep 5
+		if nmcli -g SSID dev wifi list ifname "$1" | grep -qx HOME_6G; then
+			logger -t y700-prefer-6g "HOME_6G visible, switching from HOME_2.4G"
+			nmcli con up HOME_6G ifname "$1" || nmcli con up HOME_2.4G ifname "$1"
+			exit 0
+		fi
+	done
+) >/dev/null 2>&1 &

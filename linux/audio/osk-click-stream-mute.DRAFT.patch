@@ -1,0 +1,23 @@
+y700-osk: do not activate the click stream while key clicks are off (y700 DRAFT, NOT APPLIED, 2026-10-16)
+
+Osk::show() and Osk::click() call Sound::setActive(true) before play(), and play() drops the click when
+the volume is 0. With key clicks switched off, every keyboard show and every key press still activates the
+stream for the 10 s idle window (osk.cpp:134-137), which runs the whole speaker path on silence: PipeWire
+starts the ALSA sink, the PCM and both DSP graphs run, both aw882xx amplifiers are powered (SUSPEND.md 2.2, 2.5, 5.5).
+Skip the activation while the volume is 0; raising the volume and the next click activate it as before.
+Screen-on only; no effect when key clicks are on. Not built, not tested.
+
+diff --git a/linux/osk/src/sound.cpp b/linux/osk/src/sound.cpp
+--- a/linux/osk/src/sound.cpp
++++ b/linux/osk/src/sound.cpp
+@@ -180,6 +180,10 @@
+ void Sound::setActive(bool on)
+ {
+     if (on == m_active) return;
++    // key clicks switched off: do not wake the speaker path (PCM, DSP graph, both amplifiers) only to
++    // play silence for the 10 s idle window (linux/audio/SUSPEND.md); the next click after the volume
++    // is raised again activates the stream as before
++    if (on && m_volume.load() <= 0) return;
+     m_active = on;
+     if (!m_stream) return;
+     pw_thread_loop_lock(m_loop);

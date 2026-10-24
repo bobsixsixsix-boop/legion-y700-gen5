@@ -1,0 +1,11 @@
+t=30.0 at=05:50:14 up=30.03 bat=+5795mW dpms=On wifi=up/+571 gov=teo aco=N aso=N dl=full busy=14.4 ctxt=154656 irqt=123921 irq=Function call interrup:62907,arch_timer:20497,a90000.i2c:12794 c0=wfi:77120,ret:10212,rej:0 c1=wfi:15431,ret:3281,rej:0 pd=cl0:0/64,cl1:0/93,sys:0/0 qs=apss:0/+0,cxsd:0/+0,aosd:0/+0,ddr:0/+0
+t=40.0 at=05:50:55 up=40.03 bat=+9107mW dpms=On wifi=up/+18202 gov=teo aco=N aso=N dl=full busy=34.5 ctxt=330764 irqt=168554 irq=Function call interrup:107541,arch_timer:25615,Rescheduling interrupt:11043 c0=wfi:89062,ret:10417,rej:0 c1=wfi:15263,ret:3841,rej:0 pd=cl0:0/0,cl1:0/1127,sys:0/0 qs=apss:0/+0,cxsd:0/+0,aosd:0/+0,ddr:0/+0
+
+off-ok     07:00:30-07:09:50 rows   56  bat  331 mW  cl0   0.0/s  cl1   0.0/s  sys   0.0/s  apss   0%  cxsd +0  | dpms Off:56  aco N:56 
+E3a-ok     07:10:30-07:17:50 rows  441  bat  305 mW  cl0  33.2/s  cl1  11.2/s  sys  26.2/s  apss  34%  cxsd +0  | dpms Off:441  aco Y:441 
+E3a-stuck  07:18:30-07:25:00 rows  391  bat  317 mW  cl0   0.6/s  cl1  10.1/s  sys   0.0/s  apss   0%  cxsd +0  | dpms Off:391  aco Y:391 
+off-stuck  07:26:00-07:35:00 rows   54  bat  351 mW  cl0   0.0/s  cl1   0.0/s  sys   0.0/s  apss   0%  cxsd +0  | dpms Off:54  aco N:54 
+E3b-stuck  07:36:00-07:50:20 rows  861  bat  313 mW  cl0   0.5/s  cl1  10.2/s  sys   0.0/s  apss   0%  cxsd +0  | dpms Off:861  aco Y:861 
+E3b-ok     07:59:00-08:13:40 rows  881  bat  274 mW  cl0  35.6/s  cl1  11.6/s  sys  27.9/s  apss  36%  cxsd +0  | dpms Off:881  aco Y:881 
+E3c-ok     08:15:30-08:30:10 rows  881  bat  285 mW  cl0  35.1/s  cl1  11.8/s  sys  27.7/s  apss  36%  cxsd +0  | dpms Off:881  aco Y:881 
+armed-now  08:31:30-08:36:00 rows   27  bat  267 mW  cl0  37.3/s  cl1  10.6/s  sys  30.1/s  apss  39%  cxsd +0  | dpms Off:27  aco Y:27 

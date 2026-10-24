@@ -1,0 +1,36 @@
+#!/bin/sh
+# y700-oskgate-rebuild: rebuild the y700_oskgate KWin effect when the KWin package changed.
+# Called by apt after every dpkg run (/etc/apt/apt.conf.d/99y700-oskgate, installed by install.sh);
+# cheap when nothing changed (one dpkg-query). The effect's plugin IID carries the KWin version, so a
+# KWin upgrade makes the old .so unloadable; the keyboard then falls back to focus-driven popups until
+# this has rebuilt it (the new one loads with the new KWin, i.e. after the next login).
+# Never fails the apt run: any error is logged (journalctl -t y700-oskgate) and ignored.
+SRC=/usr/local/src/y700-osk/kwin-gate
+B=/usr/local/src/y700-osk/build-gate
+STAMP=/usr/local/share/y700-osk/oskgate.kwin-version
+DEST=/usr/lib/aarch64-linux-gnu/qt6/plugins/kwin/effects/plugins/y700_oskgate.so
+log() { logger -t y700-oskgate "$*"; echo "y700-oskgate: $*"; }
+
+ver=$(dpkg-query -W -f '${Version}' kwin-wayland 2>/dev/null) || exit 0
+[ -n "$ver" ] || exit 0
+[ "$(cat "$STAMP" 2>/dev/null)" = "$ver" ] && [ "${1:-}" != "--force" ] && exit 0
+[ -d "$SRC" ] || { log "no source in $SRC: cannot rebuild for KWin $ver"; exit 0; }
+dkwin=$(dpkg-query -W -f '${Version}' kwin-dev 2>/dev/null)
+if [ "$dkwin" != "$ver" ]; then
+    log "kwin-dev ($dkwin) does not match kwin-wayland ($ver): not rebuilding (apt install kwin-dev)"
+    exit 0
+fi
+log "KWin is now $ver: rebuilding the effect"
+rm -rf "$B"
+if ! { cmake -S "$SRC" -B "$B" -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null 2>&1 && cmake --build "$B" >/dev/null 2>&1; }; then
+    log "build FAILED for KWin $ver (the keyboard stays focus-driven): rebuild by hand, see linux/osk/install.sh"
+    exit 0
+fi
+so="$B/bin/kwin/effects/plugins/y700_oskgate.so"
+if LD_BIND_NOW=1 ldd -r "$so" 2>&1 | grep -qiE 'undefined symbol|not found'; then
+    log "rebuilt plugin has unresolved symbols: NOT installed"
+    exit 0
+fi
+install -D -m 644 "$so" "$DEST" && mkdir -p "$(dirname "$STAMP")" && echo "$ver" > "$STAMP"
+log "installed for KWin $ver (active after the next login)"
+exit 0

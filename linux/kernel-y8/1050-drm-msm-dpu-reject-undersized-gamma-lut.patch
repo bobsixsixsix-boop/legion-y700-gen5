@@ -1,0 +1,35 @@
+From: h0cheung 816d1a26 (after lore, xiaqinghuan 2026-10-13), rebased for y700 y13
+Subject: [PATCH] drm/msm/dpu: reject gamma LUT blobs of the wrong size
+
+dpu_crtc_atomic_check() accepted any GAMMA_LUT blob length, while the
+DSPP setup reads DPU_GAMMA_LUT_SIZE entries: an undersized blob is an
+out-of-bounds read. Reject it with -EINVAL in atomic_check.
+Rebased: our tree has the vfp-only-update check right after needs_dirtyfb.
+
+Originally from: h0cheung/tb322fc-linux-kernel 816d1a26 (after xiaqinghuan's
+  patch on lore, 2026-10-13)
+---
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -1611,6 +1611,19 @@
+ 
+ 	bool needs_dirtyfb = dpu_crtc_needs_dirtyfb(crtc_state);
+ 
++	/*
++	 * The DSPP/PCC gamma path programs DPU_GAMMA_LUT_SIZE entries from
++	 * the blob; a shorter blob from userspace would be read past its end.
++	 */
++	if (crtc_state->gamma_lut &&
++	    crtc_state->gamma_lut->length !=
++			DPU_GAMMA_LUT_SIZE * sizeof(struct drm_color_lut)) {
++		DRM_DEBUG_ATOMIC("%s: invalid gamma LUT size %zu, expected %zu\n",
++				 dpu_crtc->name, crtc_state->gamma_lut->length,
++				 DPU_GAMMA_LUT_SIZE * sizeof(struct drm_color_lut));
++		return -EINVAL;
++	}
++
+ 	if (dpu_crtc_can_update_vfp(crtc, state, crtc_state)) {
+ 		DRM_DEBUG_ATOMIC("crtc%d: vfp-only mode change, no modeset\n",
+ 				 crtc->base.id);

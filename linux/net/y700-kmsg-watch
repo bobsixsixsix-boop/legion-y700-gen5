@@ -1,0 +1,294 @@
+#!/usr/bin/python3 -IS
+"""y700-kmsg-watch: start the y700 Wi-Fi / display watchdogs when the kernel logs their error line.
+
+Replaces y700-wifi-watchdog.timer and y700-display-watchdog.timer, which ran both oneshot scripts every ~65 s
+(a systemd job, a cgroup, /bin/sh and journalctl each time) although nothing is wrong 99.99 % of the time.
+This process sleeps in poll() on /dev/kmsg and does nothing until the kernel stores a log record. Then:
+
+  - a KERNEL record (facility 0) containing one of WATCHES -> `systemctl start --no-block <watchdog>.service`,
+    SETTLE s after the first match (a burst is looked at as a whole: even a healthy boot logs isolated vblank
+    timeouts in pairs ~60 ms apart, 10 lines in 70 min in kernel-y8/inventory/dmesg) and never sooner than
+    DEBOUNCE s after the previous start of that watchdog. Every match is therefore followed by a start within
+    DEBOUNCE s, and a storm costs one start per DEBOUNCE s per watchdog.
+    Userspace writes to /dev/kmsg are forced to facility >= 1 by the kernel (devkmsg_write), so journald, systemd
+    and tb323fu-emergency-key's "<1>tb323fu: ..." lines can never trigger a watchdog;
+  - a lost-records error (-EPIPE: the ring buffer overtook us) counts as a match for both, to be safe;
+  - "<15>y700-kmsg-watch: selftest <token>" written to /dev/kmsg by `y700-kmsg-watch --selftest` (root; the
+    daily y700-checklist) -> both watchdogs are started now and the result goes to RESULT for the caller.
+
+The watchdog scripts are unchanged and still decide everything themselves (count the lines in journalctl -k,
+cool-down, Wi-Fi radio switch, recovery, notification). Starting a unit whose start job is still running is
+merged into that job by systemd (job.c job_install -> jobs_may_late_merge), so it never runs twice at once.
+
+Zero wakeups while the kernel log is quiet: with nothing armed the loop calls poll(-1); glibc turns that into
+ppoll(fds, 1, NULL) on arm64 (no poll syscall there), the kernel's do_poll() then sleeps in
+schedule_hrtimeout_range(NULL) = schedule() with no hrtimer at all, on the log_wait queue that only
+wake_up_klogd() (a new record) wakes -- or a signal. A timeout exists only while a start is armed, i.e. only
+within DEBOUNCE seconds after a matching line. No threads, no sd_notify watchdog (that would be a
+periodic wakeup). Design, proof with file:line, install / verify / roll back: y700/linux/net/KMSG-WATCH.md.
+
+  y700-kmsg-watch               the daemon (y700-kmsg-watch.service: root, sandboxed, SCHED_IDLE)
+  y700-kmsg-watch --selftest    root, from outside: ping the daemon through /dev/kmsg, print its answer,
+                                exit 0 = it read the ping and both `systemctl start` calls returned 0
+"""
+import os
+import select
+import signal
+import sys
+import time
+
+KMSG = "/dev/kmsg"
+SYSTEMCTL = "/usr/bin/systemctl"
+RESULT = "/run/y700-kmsg-watch/selftest"    # RuntimeDirectory= of the unit
+TAG = "y700-kmsg-watch: selftest "
+DEBOUNCE = 20.0          # s: at most one start per watchdog per this long (the scripts look back 3 min / 1 min)
+SETTLE = 5.0             # s from the first matching line to the start (lets a burst arrive before the script counts)
+READ_MAX = 8192          # one record per read(); smaller than the record -> EINVAL (kernel: PRINTK_MESSAGE_MAX 2048)
+DRAIN_MAX = 256          # records handled per wakeup before the armed deadlines are looked at again (log storms)
+SELFTEST_WAIT = 10.0     # s the --selftest client waits for the answer
+# (substring, unit): the SAME strings the scripts count with `journalctl -k ... | grep -c`; change both together.
+# v7.3-rc4: ath12k mac.c ath12k_mac_flush() "failed to flush transmit queue, data pkts pending %d";
+#           dpu_encoder_phys_vid.c DPU_ERROR("vblank timeout: %x") -> "[drm:...] [dpu error]vblank timeout: 400000"
+WATCHES = (
+    ("failed to flush transmit queue", "y700-wifi-watchdog.service"),
+    ("vblank timeout", "y700-display-watchdog.service"),
+)
+UNITS = tuple(unit for _, unit in WATCHES)
+
+
+def short(unit):
+    return unit.split("-")[1] if unit.count("-") >= 2 else unit      # y700-wifi-watchdog.service -> wifi
+
+
+def parse(rec):
+    """One /dev/kmsg record -> (facility, seq, text) or None.
+    kernel/printk/printk.c info_print_ext_header() + msg_print_ext_body():
+      b"<prio>,<seq>,<usec>,<flag>[,caller=T123];<text>\\n[ SUBSYSTEM=...\\n DEVICE=...\\n]"
+    prio = facility << 3 | level; the text's bytes < 0x20, >= 0x7f and backslashes are escaped as \\xNN, so the
+    text is ASCII and never contains a newline: everything after the first newline is the device dictionary."""
+    head, sep, body = rec.partition(b";")
+    if not sep:
+        return None
+    fields = head.split(b",")
+    try:
+        prio, seq = int(fields[0]), int(fields[1])
+    except (IndexError, ValueError):
+        return None
+    return prio >> 3, seq, body.split(b"\n", 1)[0].decode("ascii", "replace")
+
+
+class Watcher:
+    """The decisions, free of I/O: start(unit) -> exit code, log(str), times are time.monotonic() seconds."""
+
+    def __init__(self, start, log, debounce=DEBOUNCE, settle=SETTLE, result=RESULT):
+        self.start, self.log, self.debounce, self.settle, self.result = start, log, debounce, settle, result
+        self.last = dict.fromkeys(UNITS)              # time of the last start (None: never)
+        self.due = {}                                 # unit -> time of the armed start
+        self.unanswered = dict.fromkeys(UNITS, 0)     # matches since the last start
+        self.first = {}                               # unit -> text of the first of those
+        self.matches = dict.fromkeys(UNITS, 0)
+        self.starts = dict.fromkeys(UNITS, 0)
+        self.failed = dict.fromkeys(UNITS, 0)
+        self.records = self.lost = self.overruns = self.bad = 0
+        self.seq = None
+        self.t0 = None
+
+    def begin(self, now):
+        """Once at start-up: let each script look back over whatever was logged before we were reading."""
+        self.t0 = now
+        for unit in UNITS:
+            self.fire(unit, now, "watcher start-up (catch-up for lines logged before it was reading)")
+
+    def record(self, rec, now):
+        p = parse(rec)
+        if p is None:
+            self.bad += 1
+            if self.bad <= 3:
+                self.log(f"unparsable /dev/kmsg record ignored: {rec[:80]!r}")
+            return
+        facility, seq, text = p
+        if self.seq is not None and seq > self.seq + 1:
+            self.lost += seq - self.seq - 1
+        self.seq = seq
+        self.records += 1
+        if facility == 0:
+            for needle, unit in WATCHES:
+                if needle in text:
+                    self.hit(unit, now, text)
+        elif TAG in text:
+            self.selftest(text.split(TAG, 1)[1].strip(), now)
+
+    def overrun(self, now):
+        """read() returned -EPIPE: records were overwritten before we read them (the kernel has moved us to the
+        oldest one left). One of them may have matched, so treat it as a match for every watchdog."""
+        self.overruns += 1
+        for unit in UNITS:
+            self.hit(unit, now, "kernel log records lost before they were read (EPIPE)")
+
+    def hit(self, unit, now, text):
+        self.matches[unit] += 1
+        self.unanswered[unit] += 1
+        self.first.setdefault(unit, text)
+        if unit not in self.due:
+            last = self.last[unit]
+            self.due[unit] = now + self.settle if last is None else max(now + self.settle, last + self.debounce)
+
+    def fire(self, unit, now, reason=None):
+        self.due.pop(unit, None)
+        n, first = self.unanswered[unit], self.first.pop(unit, "")
+        self.unanswered[unit] = 0
+        rc = self.start(unit)
+        self.last[unit] = now
+        self.starts[unit] += 1
+        if rc != 0:
+            self.failed[unit] += 1
+        lines = f"{n} matching line{'s' if n != 1 else ''} since the last start, first: {first[:200]}"
+        why = (reason + (f" (also answers {lines})" if n else "")) if reason else lines
+        self.log(f"start {unit}: {why}" + ("" if rc == 0 else f" -- systemctl FAILED (exit {rc})"))
+        return rc
+
+    def timeout(self, now):
+        """Seconds until the earliest armed start; None = nothing armed = poll(-1), no timer."""
+        if not self.due:
+            return None
+        return max(0.0, min(self.due.values()) - now)
+
+    def expire(self, now):
+        for unit in [u for u, t in self.due.items() if t <= now + 0.001]:
+            self.fire(unit, now)
+
+    def stats(self, now):
+        per = lambda d: " ".join(f"{short(u)}={d[u]}" for u in UNITS)
+        up = 0 if self.t0 is None else now - self.t0
+        return (f"up {up:.0f} s, records {self.records}, lost {self.lost}, overruns {self.overruns}, "
+                f"matches {per(self.matches)}, starts {per(self.starts)}, failed starts {per(self.failed)}")
+
+    def selftest(self, token, now):
+        if not (0 < len(token) <= 40 and all(c.isalnum() or c in "-_." for c in token)):
+            self.log("selftest record with a malformed token ignored")
+            return
+        rcs = {unit: self.fire(unit, now, f"selftest {token}") for unit in UNITS}
+        verdict = "ok" if all(rc == 0 for rc in rcs.values()) else "FAIL"
+        line = (f"selftest {token} {verdict} " + " ".join(f"{short(u)}={rc}" for u, rc in rcs.items())
+                + "; " + self.stats(now))
+        try:
+            os.makedirs(os.path.dirname(self.result), exist_ok=True)
+            tmp = self.result + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(line + "\n")
+            os.replace(tmp, self.result)
+        except OSError as e:
+            self.log(f"cannot write {self.result}: {e}")
+        self.log(line)
+
+
+def drain(read, w, now, limit=DRAIN_MAX):
+    """Read what is there (the fd is O_NONBLOCK), at most `limit` records, so that an endless storm still gets
+    back to expire() in the loop."""
+    for _ in range(limit):
+        try:
+            rec = read()
+        except BlockingIOError:          # -EAGAIN: nothing left
+            return
+        except BrokenPipeError:          # -EPIPE: overrun, the kernel reset our position to the oldest record
+            w.overrun(now)
+            continue
+        if not rec:
+            return
+        w.record(rec, now)
+
+
+def loop(w, wait, read, clock, rounds=None):
+    """wait(timeout s | None) -> True when the fd is readable. rounds: stop after that many wakeups (tests)."""
+    while rounds is None or rounds > 0:
+        readable = wait(w.timeout(clock()))
+        now = clock()
+        if readable:
+            drain(read, w, now)
+        w.expire(clock())
+        if rounds is not None:
+            rounds -= 1
+
+
+def log(msg):
+    try:
+        print(msg, flush=True)          # stdout = the journal (y700-kmsg-watch.service)
+    except OSError:
+        pass
+
+
+def systemctl_start(unit):
+    argv = [SYSTEMCTL, "start", "--no-block", "--no-ask-password", "--quiet", unit]
+    # CPython ignores SIGPIPE/SIGXFSZ; give the child the defaults back, as subprocess(restore_signals=True) does
+    sigdef = tuple(getattr(signal, n) for n in ("SIGPIPE", "SIGXFSZ") if hasattr(signal, n))
+    try:
+        pid = os.posix_spawn(SYSTEMCTL, argv, os.environ, setsigdef=sigdef)
+        return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+    except OSError as e:
+        log(f"cannot run {SYSTEMCTL}: {e}")
+        return 255
+
+
+def daemon():
+    fd = os.open(KMSG, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+    os.lseek(fd, 0, os.SEEK_END)        # devkmsg_llseek(SEEK_END): our seq = prb_next_seq(), only new records
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+
+    def wait(timeout):
+        ms = -1 if timeout is None else int(timeout * 1000) + 1    # round up: never wake before the deadline
+        events = poller.poll(ms)
+        for _, mask in events:
+            if mask & (select.POLLNVAL | select.POLLHUP):
+                raise SystemExit(f"{KMSG}: poll returned {mask:#x}, giving up (systemd restarts us)")
+        return bool(events)
+
+    w = Watcher(systemctl_start, log, result=RESULT)      # RESULT read now, not as the import-time default
+    log(f"reading {KMSG} from its end; starts {', '.join(UNITS)} on "
+        + ", ".join(repr(n) for n, _ in WATCHES)
+        + f" (kernel lines only), {SETTLE:g} s after the first line, at most once per {DEBOUNCE:g} s each")
+    w.begin(time.monotonic())
+    loop(w, wait, lambda: os.read(fd, READ_MAX), time.monotonic)
+
+
+def client_selftest(kmsg=KMSG, result=RESULT, timeout=SELFTEST_WAIT, sleep=time.sleep, clock=time.monotonic):
+    token = f"{os.getpid()}-{time.time_ns() // 1000000}"
+    fd = os.open(kmsg, os.O_WRONLY | os.O_CLOEXEC)
+    try:
+        # one write() = one record. <15> = user.debug: the kernel keeps facility 1 (it never lets userspace write
+        # facility 0) and level 7 is below the console loglevel, so the line is not printed on tty1 / ramoops
+        os.write(fd, f"<15>{TAG}{token}\n".encode())
+    finally:
+        os.close(fd)
+    end = clock() + timeout
+    while True:
+        try:
+            with open(result) as f:
+                line = f.read().strip()
+        except OSError:
+            line = ""
+        if line.startswith(f"selftest {token} "):
+            print(line)
+            return 0 if line.split()[2] == "ok" else 1
+        if clock() >= end:
+            print(f"selftest {token} NOANSWER: y700-kmsg-watch did not answer within {timeout:g} s "
+                  "(systemctl status y700-kmsg-watch)")
+            return 1
+        sleep(0.2)
+
+
+def main(argv):
+    if argv[1:] == ["--selftest"]:
+        return client_selftest()
+    if argv[1:]:
+        print("usage: y700-kmsg-watch [--selftest]   (see the header of this file)", file=sys.stderr)
+        return 2
+    try:
+        daemon()
+    except KeyboardInterrupt:
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,6 @@
+# G9 gamepad (GameSir-made Legion controller, USB 3537:1136): y700-padkeys grabs its joystick event
+# node and re-emits it through a uinput clone without the home key, so hide the real nodes from the
+# desktop: no ID_INPUT_JOYSTICK (SDL/Moonlight skip it, 70-uaccess gives it no ACL), root-only mode.
+# Before 70-uaccess, after 60-input-id. The clone has no USB parent, so ATTRS{idVendor} misses it.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", ATTRS{idVendor}=="3537", ATTRS{idProduct}=="1136", ENV{ID_INPUT_JOYSTICK}="", ENV{Y700_PADKEYS}="1", MODE="0600", GROUP="root", TAG+="systemd", ENV{SYSTEMD_WANTS}+="y700-padkeys@%k.service"
+SUBSYSTEM=="input", KERNEL=="js*", ATTRS{idVendor}=="3537", ATTRS{idProduct}=="1136", ENV{ID_INPUT_JOYSTICK}="", MODE="0600", GROUP="root"

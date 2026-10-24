@@ -1,0 +1,420 @@
+Bluetooth: Received HCI_IBS_WAKE_ACK in tx state 0
+Bluetooth: hci0: Frame reassembly failed (-84)
+qcom-apm gprsvc:service:2:1: CMD timeout for [1001021] opcode
+va_macro 7660000.codec: qcom,dmic-sample-rate dt entry missing
+qcom-soundwire 7630000.soundwire: din-ports (4) mismatch with controller (6)
+qcom-soundwire 7630000.soundwire: dout-ports (0) mismatch with controller (1)
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:4
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:4
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:4
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:4
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:0
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:1
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:2
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:3
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode1 check iis failed try switch to mode2 check
+[Awinic][1-0037]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0037]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0034]aw_dev_mode1_pll_check: pll&clk check fail
+[Awinic][1-0034]aw_dev_syspll_check: mode2 check iis failed
+[Awinic][1-0037]aw882xx_start_pa: start failed, cnt:4
+[Awinic][1-0034]aw882xx_start_pa: start failed, cnt:4
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+[NVT-ts-spi] nvt_ts_work_func 933: Recover for fw reset, FD
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+[drm:dpu_kms_wait_for_commit_done:528] [dpu error]wait for commit done returned -110
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+[NVT-ts-spi] nvt_ts_work_func 1044: Unknown pen format id!
+platform 3d6c000.gmu: delay in fenced register write (0x8c1)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel quiet_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel quiet_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel quiet_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel lcm_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel quiet_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+power_supply qcom-battmgr-bat: driver failed to report `status' property: -110
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+qcom-spmi-adc5-gen3 c426000.spmi:pmic@0:adc@9000: Reading ADC channel quiet_therm timed out
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+power_supply qcom-battmgr-bat: driver failed to report `capacity' property: -110
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x580)
+power_supply qcom-battmgr-bat: driver failed to report `status' property: -110
+arm-scmi arm-scmi.1.auto: timed out in resp(caller: do_xfer+0x15c/0x58

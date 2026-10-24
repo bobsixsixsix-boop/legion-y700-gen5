@@ -1,0 +1,25 @@
+#!/bin/sh
+# y700-wait-ssc: ExecStartPre of iio-sensor-proxy - wait until the sensor hub can answer (2026-10-16).
+# Boot race seen on 2026-10-15 22:15 and 2026-10-16 03:17: iio-sensor-proxy started at 03:17:48.81, found
+# "No sensors or missing kernel drivers" 30 ms later and exited; hexagonrpcd (which attaches the ADSP sensor
+# core, INIT_ATTACH_SNS) only started at 48.86 and finished at 49.01; systemd restarted the proxy 5 s later
+# and it worked - but KWin had come up in between (SDDM autologin at 48.5), found no orientation sensor and
+# never looked again, so the panel's "unlock rotation" was silently ignored all session.
+# Ready = hexagonrpcd has run and finished (it is a one-shot attach, Type=simple upstream) and the Snapdragon
+# Sensor Core QRTR service (400) is registered. Waits at most 20 s, then lets the proxy try anyway (its own
+# Restart=always stays the fallback). Paired with y700-iio-after-ssc.conf, which also orders SDDM after it.
+i=0
+while [ $i -lt 80 ]; do
+	st=$(systemctl show -p ActiveState --value hexagonrpcd.service 2>/dev/null)
+	ran=$(systemctl show -p ExecMainExitTimestampMonotonic --value hexagonrpcd.service 2>/dev/null)
+	if [ "$st" != active ] && [ "$st" != activating ] && [ "${ran:-0}" != 0 ] &&
+	   qrtr-lookup 2>/dev/null | awk '$1 == 400 {f = 1} END {exit !f}'; then
+		echo "sensor core ready after $((i / 4)).$((i % 4 * 25)) s (hexagonrpcd $st)"
+		sleep 0.5
+		exit 0
+	fi
+	sleep 0.25
+	i=$((i + 1))
+done
+echo "sensor core not confirmed after 20 s (hexagonrpcd $st) - starting the proxy anyway"
+exit 0

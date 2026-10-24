@@ -1,0 +1,61 @@
+# /etc/systemd/system/y700-kmsg-watch.service -- see /usr/local/libexec/y700-kmsg-watch, y700/linux/net/KMSG-WATCH.md
+# Event-driven trigger for y700-wifi-watchdog.service / y700-display-watchdog.service (their timers are disabled).
+# The watchdog units are started by systemd PID 1 in their own unit, so none of the sandboxing below reaches them.
+[Unit]
+Description=y700: start the Wi-Fi / display watchdogs when the kernel logs their error line
+# never stop restarting: the delay grows from 5 s to 10 min instead (RestartSteps/RestartMaxDelaySec)
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/y700-kmsg-watch
+Restart=always
+RestartSec=5s
+RestartSteps=5
+RestartMaxDelaySec=10min
+# --selftest answers here
+RuntimeDirectory=y700-kmsg-watch
+# systemctl then never second-guesses "am I in a chroot?" (it would read /proc/1/root, which this sandbox may not)
+Environment=SYSTEMD_OFFLINE=0
+
+# it sleeps in poll(); when it does run it must never compete with anything (systemctl inherits this)
+CPUSchedulingPolicy=idle
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=48M
+TasksMax=8
+
+# Sandbox: everything that keeps (a) reading /dev/kmsg and (b) `systemctl start` over /run/systemd/private as root.
+# Root is needed: PID 1 authorizes StartUnit on that socket by the caller's uid (no polkit rule to maintain).
+# CAP_SYSLOG is needed only when kernel.dmesg_restrict=1 (check_syslog_permissions); nothing else is kept.
+CapabilityBoundingSet=CAP_SYSLOG
+NoNewPrivileges=yes
+DevicePolicy=closed
+DeviceAllow=/dev/kmsg r
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+# Deliberately NOT set:
+#   ProtectKernelLogs=  makes /dev/kmsg inaccessible and drops CAP_SYSLOG (breaks it)
+#   PrivateDevices=     the private /dev has no kmsg (breaks it)
+#   User=/DynamicUser=  a non-root systemctl start goes through polkit (would need a polkit rule)
+#   WatchdogSec=        needs a periodic sd_notify: exactly the wakeups this replaces
+#   ProtectProc=/ProcSubset=  PID 1 would be invisible to systemctl; small gain, not verified
+#   MemoryDenyWriteExecute=   would kill CPython's JIT if this python3.14 build has it on (not checked)
+
+[Install]
+WantedBy=multi-user.target

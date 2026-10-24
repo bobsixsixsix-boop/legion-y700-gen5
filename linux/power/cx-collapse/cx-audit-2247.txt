@@ -1,0 +1,517 @@
+=== 2026-10-15 22:47:21 7.3.0-rc4-tb323fu-t49-y9 uptime 1494.63s, Charging, screen On
+== cmdline
+fw_devlink.sync_state=timeout fbcon=font:TER16x32 panic=10 oops=panic console=tty1 qcom_scm.download_mode=full baldur.end=hold consoleblank=120 no_console_suspend mem_sleep_default=s2idle cpuidle_psci_domain.allow_cluster_off=0 msm.idle_refresh_ms60=500 msm.idle_refresh_ms30=2000
+== cpuidle params
+N
+/sys/devices/system/cpu/cpu0/cpuidle/state0 WFI ARM WFI lat=1 res=1 usage=90907 rej=0
+/sys/devices/system/cpu/cpu0/cpuidle/state1 cpu-sleep-0 retention lat=222 res=560 usage=160075 rej=0
+/sys/devices/system/cpu/cpu6/cpuidle/state0 WFI ARM WFI lat=1 res=1 usage=29545 rej=0
+/sys/devices/system/cpu/cpu6/cpuidle/state1 cpu-sleep-1 retention lat=302 res=686 usage=57741 rej=0
+== psci debugfs
+/sys/kernel/debug/psci
+== pm_genpd summary
+domain                          status          children        performance
+    /device                         runtime status                  managed by
+------------------------------------------------------------------------------
+PDP1_1                          on                              0
+PDP0_0                          on                              0
+video_cc_mvs0c_gdsc             off-0                           0
+                                                video_cc_mvs0_gdsc
+    genpd:0:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_vpp0_gdsc         off-0                           0
+    genpd:4:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_vpp1_gdsc         off-0                           0
+    genpd:5:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0_gdsc              off-0                           0
+    genpd:1:2000000.video-codec     suspended                   0           SW
+video_cc_mvs0a_gdsc             off-0                           0
+    genpd:6:2000000.video-codec     suspended                   0           SW
+gx_clkctl_gx_gdsc               off-0                           0
+    genpd:1:3d6c000.gmu             suspended                   0           SW
+gpu_cc_cx_gdsc                  off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:2:3d64000.clock-controller  suspended                   0           SW
+    3da0000.iommu                   suspended                   0           SW
+    genpd:0:3d6c000.gmu             suspended                   0           SW
+disp_cc_mdss_core_int2_gdsc     on                              0
+    genpd:1:9801000.display-controller  active                      0           SW
+disp_cc_mdss_core_gdsc          on                              0
+    9800000.display-subsystem       active                      0           SW
+cam_cc_titan_top_gdsc           off-0                           0
+                                                cam_cc_ipe_0_gdsc, cam_cc_ofe_gdsc, cam_cc_tfe_0_gdsc, cam_cc_tfe_1_gdsc, cam_cc_tfe_2_gdsc
+    941b000.cci                     suspended                   0           SW
+    genpd:0:9527000.phy             suspended                   0           SW
+    genpd:0:9529000.phy             suspended                   0           SW
+    941d000.cci                     suspended                   0           SW
+    genpd:3:9253000.isp             suspended                   0           SW
+cam_cc_tfe_2_gdsc               off-0                           0
+    genpd:2:9253000.isp             suspended                   0           SW
+cam_cc_tfe_1_gdsc               off-0                           0
+    genpd:1:9253000.isp             suspended                   0           SW
+cam_cc_tfe_0_gdsc               off-0                           0
+    genpd:0:9253000.isp             suspended                   0           SW
+cam_cc_ofe_gdsc                 off-0                           0
+cam_cc_ipe_0_gdsc               off-0                           0
+gcc_usb3_phy_gdsc               on                              0
+    88e8000.phy                     active                      0           SW
+    aux_bridge.aux_bridge.0         unsupported                 0           SW
+gcc_usb30_prim_gdsc             off-0                           0
+    a600000.usb                     suspended                   0           SW
+gcc_ufs_phy_gdsc                on                              56
+    1d88000.crypto                  unsupported                 0           SW
+    1d84000.ufs                     active                      56          SW
+gcc_ufs_mem_phy_gdsc            on                              0
+    1d80000.phy                     unsupported                 0           SW
+gcc_pcie_0_phy_gdsc             on                              0
+    1c06000.phy                     unsupported                 0           SW
+gcc_pcie_0_gdsc                 on                              256
+    1c00000.pcie                    active                      256         SW
+gmxc                            off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:1:3d64000.clock-controller  suspended                   0           SW
+nsp2                            off-0                           0
+nsp                             off-0                           0
+    genpd:2:26300000.remoteproc     suspended                   0           SW
+mss                             off-0                           0
+mxc_ao                          off-0                           0
+mxc                             off-0                           0
+                                                cam_cc_titan_top_gdsc, video_cc_mvs0a_gdsc, video_cc_mvs0_vpp1_gdsc, video_cc_mvs0_vpp0_gdsc, video_cc_mvs0c_gdsc
+    genpd:1:956d000.clock-controller  suspended                   0           SW
+    genpd:1:20f0000.clock-controller  suspended                   0           SW
+    genpd:1:26300000.remoteproc     suspended                   0           SW
+    genpd:2:9527000.phy             suspended                   0           SW
+    genpd:2:9529000.phy             suspended                   0           SW
+    genpd:2:2000000.video-codec     suspended                   0           SW
+mx_ao                           off-0                           0
+mx                              off-0                           0
+    genpd:1:1760000.clock-controller  suspended                   0           SW
+    genpd:1:d00000.remoteproc       suspended                   0           SW
+mmcx_ao                         off-0                           0
+mmcx                            on                              384
+                                                cam_cc_titan_top_gdsc, disp_cc_mdss_core_gdsc, disp_cc_mdss_core_int2_gdsc, video_cc_mvs0a_gdsc, video_cc_mvs0_vpp1_gdsc, video_cc_mvs0_vpp0_gdsc, video_cc_mvs0c_gdsc
+    genpd:0:1760000.clock-controller  suspended                   0           SW
+    genpd:0:956d000.clock-controller  suspended                   0           SW
+    9ba2000.clock-controller        active                      64          SW
+    genpd:0:20f0000.clock-controller  suspended                   0           SW
+    genpd:0:9801000.display-controller  active                      384         SW
+    9ac0000.dsi                     active                      56          SW
+    9ac3000.dsi                     active                      56          SW
+    9ad2000.displayport-controller  suspended                   0           SW
+    genpd:1:9527000.phy             suspended                   0           SW
+    genpd:1:9529000.phy             suspended                   0           SW
+    genpd:3:2000000.video-codec     suspended                   0           SW
+lmx                             off-0                           0
+    genpd:1:6800000.remoteproc      suspended                   0           SW
+lcx                             off-0                           0
+    genpd:0:6800000.remoteproc      suspended                   0           SW
+gfx                             off-0                           0
+                                                gx_clkctl_gx_gdsc
+    genpd:0:3d64000.clock-controller  suspended                   0           SW
+ebi                             off-0                           0
+cx_ao                           off-0                           0
+cx                              off-0                           0
+    8804000.mmc                     suspended                   0           SW
+    genpd:0:d00000.remoteproc       suspended                   0           SW
+    genpd:0:26300000.remoteproc     suspended                   0           SW
+power-domain-system             on                              0
+                                                power-domain-cluster, power-domain-cluster1
+    18900000.rsc                    suspended                   0           SW
+power-domain-cluster1           on                              0
+                                                power-domain-cpu6, power-domain-cpu7
+power-domain-cluster            on                              0
+                                                power-domain-cpu0, power-domain-cpu1, power-domain-cpu2, power-domain-cpu3, power-domain-cpu4, power-domain-cpu5
+power-domain-cpu7               off-0                           0
+    genpd:0:cpu7                    suspended                   0           SW
+power-domain-cpu6               on                              0
+    genpd:0:cpu6                    active                      0           SW
+power-domain-cpu5               off-0                           0
+    genpd:0:cpu5                    suspended                   0           SW
+power-domain-cpu4               on                              0
+    genpd:0:cpu4                    active                      0           SW
+power-domain-cpu3               off-0                           0
+    genpd:0:cpu3                    suspended                   0           SW
+power-domain-cpu2               off-0                           0
+    genpd:0:cpu2                    suspended                   0           SW
+power-domain-cpu1               off-0                           0
+    genpd:0:cpu1                    suspended                   0           SW
+power-domain-cpu0               off-0                           0
+    genpd:0:cpu0                    suspended                   0           SW
+== genpd idle states (cpu/cluster/system domains)
+-- power-domain-cluster
+on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          58147      0          0          0
+0 ms
+-- power-domain-cluster1
+on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          42201      0          0          0
+0 ms
+-- power-domain-cpu0
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1418696        158562     0          0          0          0
+1418698 ms
+genpd:0:cpu0
+-- power-domain-cpu1
+on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1444379        91866      0          0          0          0
+1444381 ms
+genpd:0:cpu1
+-- power-domain-cpu2
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1452043        56915      0          0          0          0
+1452045 ms
+genpd:0:cpu2
+-- power-domain-cpu3
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1462538        50865      0          0          0          0
+1462540 ms
+genpd:0:cpu3
+-- power-domain-cpu4
+on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1460397        43248      0          0          0          0
+1460397 ms
+genpd:0:cpu4
+-- power-domain-cpu5
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1460685        43518      0          0          0          0
+1460687 ms
+genpd:0:cpu5
+-- power-domain-cpu6
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1453220        57651      0          0          0          0
+1453222 ms
+genpd:0:cpu6
+-- power-domain-cpu7
+off-0
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1473850        18792      0          0          0          0
+1473851 ms
+genpd:0:cpu7
+-- power-domain-system
+on
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     0              0          0          0          0          0
+0 ms
+18900000.rsc
+== qcom_stats
+-- adsp: Count: 10094 Last Entered At: 28851777791 Last Exited At: 28851767055 Accumulated Duration: 27953505395 
+-- adsp_island: Count: 8838 Last Entered At: 28851777791 Last Exited At: 28851767055 Accumulated Duration: 26611470814 
+-- aosd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- apss: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- cdsp: Count: 0 Last Entered At: 256662417 Last Exited At: 0 Accumulated Duration: 28596417115 
+-- cdsp1: 
+-- cxsd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- dcp: Count: 0 Last Entered At: 29468554 Last Exited At: 28752158 Accumulated Duration: 28823880624 
+-- ddr: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- ddr_stats: DDR LPM Stat Name:0xd4	count:0	Duration (ticks):0 DDR LPM Stat Name:0xd3	count:0	Duration (ticks):0 DDR LPM Stat Name:0x11	count:0	Duration (ticks):0 DDR LPM Stat Name:0xd0	count:0	Duration (ticks):0 
+-- display: 
+-- gpdsp0: 
+-- gpdsp1: 
+-- gpu: 
+-- modem: 
+-- slpi: 
+-- slpi_island: 
+-- soccp: Count: 7390 Last Entered At: 28849684150 Last Exited At: 28848066004 Accumulated Duration: 27861369740 
+-- wpss: 
+== interconnect summary (non-zero requests)
+ node                                  tag          avg         peak
+--------------------------------------------------------------------
+qup0_core_master@interconnect-0                       0            0
+qup1_core_master@interconnect-0                       0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+qup2_core_master@interconnect-0                       0            0
+qup3_core_master@interconnect-0                       2            2
+qup4_core_master@interconnect-0                       0            0
+qup0_core_slave@interconnect-0                        0            0
+qup1_core_slave@interconnect-0                        0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+qup2_core_slave@interconnect-0                        0            0
+qup3_core_slave@interconnect-0                        2            2
+qup4_core_slave@interconnect-0                        0            0
+llcc_mc@interconnect-1                          3728793      5412000
+  a600000.usb                            7            0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+  firmware:scm                           7            0            0
+ebi@interconnect-1                              3728793      5412000
+  a600000.usb                            7            0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+  firmware:scm                           7            0            0
+qnm_gemnoc_cnoc@1500000.interconnect               3200        57000
+  a600000.usb                            3            0            0
+  a98000.i2c                             3            0            0
+  a94000.i2c                             3            0            0
+  a90000.i2c                             3            0            0
+qnm_gemnoc_pcie@1500000.interconnect                  0            1
+qhs_aoss@1500000.interconnect                         0            0
+qhs_ipa@1500000.interconnect                          0            0
+qhs_ipc_router_fence@1500000.interconnect             0            0
+qhs_soccp@1500000.interconnect                        0            0
+qhs_tme_cfg@1500000.interconnect                      0            0
+qns_apss@1500000.interconnect                         0            0
+qss_cfg@1500000.interconnect                       3200        57000
+  a600000.usb                            3            0            0
+  a98000.i2c                             3            0            0
+  a94000.i2c                             3            0            0
+  a90000.i2c                             3            0            0
+qss_ddrss_cfg@1500000.interconnect                    0            0
+qxs_boot_imem@1500000.interconnect                    0            0
+qxs_imem@1500000.interconnect                         0            0
+xs_pcie@1500000.interconnect                          0            1
+qsm_cfg@1600000.interconnect                       3200        57000
+  a600000.usb                            3            0            0
+  a98000.i2c                             3            0            0
+  a94000.i2c                             3            0            0
+  a90000.i2c                             3            0            0
+qhs_ahb2phy0@1600000.interconnect                     0            0
+qhs_ahb2phy1@1600000.interconnect                     0            0
+qhs_camera_cfg@1600000.interconnect                   0            0
+qhs_clk_ctl@1600000.interconnect                      0            0
+qhs_crypto0_cfg@1600000.interconnect                  0            0
+qhs_display_cfg@1600000.interconnect                  0        57000
+qhs_eva_cfg@1600000.interconnect                      0            0
+qhs_gpuss_cfg@1600000.interconnect                    0            0
+qhs_i2c@1600000.interconnect                          0            0
+qhs_i3c_ibi0_cfg@1600000.interconnect                 0            0
+qhs_i3c_ibi1_cfg@1600000.interconnect                 0            0
+qhs_imem_cfg@1600000.interconnect                     0            0
+qhs_ipc_router@1600000.interconnect                   0            0
+qhs_mss_cfg@1600000.interconnect                      0            0
+qhs_pcie_cfg@1600000.interconnect                     0            0
+qhs_prng@1600000.interconnect                         0            0
+qhs_qdss_cfg@1600000.interconnect                     0            0
+qhs_qspi@1600000.interconnect                         0            0
+qhs_qup1@1600000.interconnect                         0            0
+  a98000.i2c                             3            0            0
+  a94000.i2c                             3            0            0
+  a90000.i2c                             3            0            0
+qhs_qup2@1600000.interconnect                         0            0
+qhs_qup3@1600000.interconnect                      3200         3200
+qhs_qup4@1600000.interconnect                         0            0
+qhs_sdc2@1600000.interconnect                         0            0
+qhs_sdc4@1600000.interconnect                         0            0
+qhs_spss_cfg@1600000.interconnect                     0            0
+qhs_tcsr@1600000.interconnect                         0            0
+qhs_tlmm@1600000.interconnect                         0            0
+qhs_ufs_mem_cfg@1600000.interconnect                  0            0
+qhs_usb3@1600000.interconnect                         0            0
+  a600000.usb                            3            0            0
+qhs_venus_cfg@1600000.interconnect                    0            0
+qhs_vsense_ctrl_cfg@1600000.interconnect              0            0
+qss_mnoc_cfg@1600000.interconnect                     0            0
+qss_pcie_anoc_cfg@1600000.interconnect                0            0
+xs_qdss_stm@1600000.interconnect                      0            0
+xs_sys_tcu_cfg@1600000.interconnect                   0            0
+qnm_aggre1_noc@1680000.interconnect                   0            0
+  a600000.usb                            7            0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+  firmware:scm                           7            0            0
+qnm_aggre2_noc@1680000.interconnect                   0            0
+qnm_apss_noc@1680000.interconnect                     0            0
+qnm_cnoc_data@1680000.interconnect                    0            0
+qns_gemnoc_sf@1680000.interconnect                    0            0
+  a600000.usb                            7            0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+  a90000.i2c                             7            0            0
+  firmware:scm                           7            0            0
+qsm_pcie_anoc_cfg@16c0000.interconnect                0            0
+xm_pcie@16c0000.interconnect                          0      1969000
+qns_pcie_gemnoc@16c0000.interconnect                  0      1969000
+srvc_pcie_aggre_noc@16c0000.interconnect              0            0
+qhm_qspi@16e0000.interconnect                         0            0
+qxm_crypto@16e0000.interconnect                       0            0
+  firmware:scm                           7            0            0
+qxm_qup1@16e0000.interconnect                         0            0
+  a98000.i2c                             7            0            0
+  a94000.i2c                             7            0            0
+== regulators: enabled (use/open/bypass/opmode/load)
+ regulator                      use open bypass  opmode voltage current     min     max
+---------------------------------------------------------------------------------------
+== clk_summary: enabled clocks (enable_cnt>0)
+                                 enable  prepare  protect                                duty  hardware                            connection
+   clock                          count    count    count        rate   accuracy phase  cycle    enable   consumer                         id
+---------------------------------------------------------------------------------------------------------------------------------------------
+ LPASS_HW_DCODEC                     5       5        0        0           0          0     50000      Y   codec@6ae0000                   no_connection_id         
+ LPASS_HW_MACRO                      5       5        0        0           0          0     50000      Y   codec@6ae0000                   no_connection_id         
+ LPASS_CLK_ID_WSA2_CORE_TX_MCLK      1       1        0        19200000    0          0     50000      Y   codec@6aa0000                   no_connection_id         
+ LPASS_CLK_ID_WSA_CORE_TX_MCLK       1       1        0        19200000    0          0     50000      Y   codec@6b00000                   no_connection_id         
+ LPASS_CLK_ID_RX_CORE_TX_MCLK        1       1        0        19200000    0          0     50000      Y   codec@6ac0000                   no_connection_id         
+ LPASS_CLK_ID_TX_CORE_MCLK           3       3        0        19200000    0          0     50000      Y   codec@6ae0000                   no_connection_id         
+    fsgen                            4       4        0        19200000    0          0     50000      Y      codec@6ae0000                   no_connection_id         
+ pcie0_pipe_clk                      1       1        0        125000000   0          0     50000      Y   deviceless                      no_connection_id         
+    gcc_pcie_0_pipe_clk_src          1       1        0        125000000   0          0     50000      Y      deviceless                      no_connection_id         
+       gcc_pcie_0_pipe_clk           1       1        0        125000000   0          0     50000      Y         1c06000.phy                     pipe                     
+ tcsr_pcie_0_clkref_en               1       1        0        0           0          0     50000      Y   1c06000.phy                     ref                      
+ gcc_ufs_phy_ahb_clk                 1       1        0        0           0          0     50000      Y   1d84000.ufs                     iface_clk                
+ gcc_qupv3_wrap_3_s_ahb_clk          1       1        0        0           0          0     50000      Y   19c0000.geniqup                 s-ahb                    
+ gcc_qupv3_wrap_3_m_ahb_clk          1       1        0        0           0          0     50000      Y   19c0000.geniqup                 m-ahb                    
+ gcc_pcie_0_slv_q2a_axi_clk          1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_pcie_0_slv_axi_clk              1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_pcie_0_mstr_axi_clk             1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_pcie_0_cfg_ahb_clk              2       2        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_disp_hf_axi_clk                 4       4        0        0           0          0     50000      Y   9ac3000.dsi                     bus                      
+ gcc_ddrss_pcie_sf_qtb_clk           1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_cnoc_pcie_sf_axi_clk            1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ gcc_aggre_noc_pcie_axi_clk          1       1        0        0           0          0     50000      Y   pcie@1c00000                    no_connection_id         
+ sleep-clk                           1       1        0        32000       0          0     50000      Y   17600000.watchdog               no_connection_id         
+ xo-board                            2       2        0        76800000    0          0     50000      Y   deviceless                      no_connection_id         
+    clk1                             1       1        0        76800000    0          0     50000      Y      wcn7860-pmu                     no_connection_id         
+    bi_tcxo                          2       2        0        38400000    0          0     50000      Y      26300000.remoteproc             xo                       
+       dsi0vco_clk                   1       1        0        1297439941  0          0     50000      Y         deviceless                      no_connection_id         
+          dsi0_pll_out_div_clk       1       1        0        1297439941  0          0     50000      Y            deviceless                      no_connection_id         
+             dsi0_pll_bit_clk        2       2        0        1297439941  0          0     50000      Y               deviceless                      no_connection_id         
+                dsi0_pclk_mux        1       1        0        1297439941  0          0     50000      Y                  deviceless                      no_connection_id         
+                   dsi0_phy_pll_out_dsiclk 2       2        0        259487989   0          0     50000      Y                     9ac3000.dsi                     dsi_pll_pixel            
+                      disp_cc_mdss_pclk0_clk_src 1       1        0        172991992   0          0     50000      Y                        9ac0000.dsi                     pixel_src                
+                         disp_cc_mdss_pclk0_clk 1       1        0        172991992   0          0     50000      Y                           9ac0000.dsi                     pixel                    
+                      disp_cc_mdss_pclk1_clk_src 1       1        0        172991992   0          0     50000      Y                        9ac3000.dsi                     pixel_src                
+                         disp_cc_mdss_pclk1_clk 1       1        0        172991992   0          0     50000      Y                           9ac3000.dsi                     pixel                    
+                dsi0_phy_pll_out_byteclk 2       2        0        162179992   0          0     50000      Y                  9ac3000.dsi                     dsi_pll_byte             
+                   disp_cc_mdss_byte0_clk_src 2       2        0        162179992   0          0     50000      Y                     9ac0000.dsi                     byte_src                 
+                      disp_cc_mdss_byte0_div_clk_src 1       1        0        81089996    0          0     50000      Y                        deviceless                      no_connection_id         
+                         disp_cc_mdss_byte0_intf_clk 1       1        0        81089996    0          0     50000      Y                           9ac0000.dsi                     byte_intf                
+                      disp_cc_mdss_byte0_clk 1       1        0        162179992   0          0     50000      Y                        9ac0000.dsi                     byte                     
+                   disp_cc_mdss_byte1_clk_src 2       2        0        162179992   0          0     50000      Y                     9ac3000.dsi                     byte_src                 
+                      disp_cc_mdss_byte1_div_clk_src 1       1        0        81089996    0          0     50000      Y                        deviceless                      no_connection_id         
+                         disp_cc_mdss_byte1_intf_clk 1       1        0        81089996    0          0     50000      Y                           9ac3000.dsi                     byte_intf                
+                      disp_cc_mdss_byte1_clk 1       1        0        162179992   0          0     50000      Y                        9ac3000.dsi                     byte                     
+       bi-tcxo-div2-clk              9       9        0        19200000    0          0     50000      Y         deviceless                      no_connection_id         
+          disp_cc_pll0               1       1        0        1950000000  0          0     50000      Y            deviceless                      no_connection_id         
+             disp_cc_mdss_mdp_clk_src 2       2        0        650000000   0          0     50000      ?               deviceless                      no_connection_id         
+                disp_cc_mdss_mdp_lut_clk 1       1        0        650000000   0          0     50000      N                  display-controller@9801000      no_connection_id         
+                disp_cc_mdss_mdp_clk 2       2        0        650000000   0          0     50000      Y                  display-controller@9801000      no_connection_id         
+          disp_cc_mdss_vsync_clk_src 1       1        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             disp_cc_mdss_vsync_clk  1       1        0        19200000    0          0     50000      Y               display-controller@9801000      no_connection_id         
+          disp_cc_mdss_esc1_clk_src  1       1        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             disp_cc_mdss_esc1_clk   1       1        0        19200000    0          0     50000      Y               9ac3000.dsi                     core                     
+          disp_cc_mdss_esc0_clk_src  1       1        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             disp_cc_mdss_esc0_clk   1       1        0        19200000    0          0     50000      Y               9ac0000.dsi                     core                     
+          disp_cc_mdss_ahb_clk_src   2       2        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             disp_cc_mdss_ahb_swi_div_clk_src 1       1        0        4800000     0          0     50000      Y               deviceless                      no_connection_id         
+                disp_cc_mdss_ahb_swi_clk 1       1        0        4800000     0          0     50000      Y                  display-subsystem@9800000       no_connection_id         
+             disp_cc_mdss_ahb_clk    6       6        0        19200000    0          0     50000      Y               9ad2000.displayport-controller  core_iface               
+          gcc_pcie_0_phy_aux_clk_src 1       1        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             gcc_pcie_0_phy_aux_clk  1       1        0        19200000    0          0     50000      Y               1c06000.phy                     aux                      
+          gcc_pcie_0_aux_clk_src     1       1        0        19200000    0          0     50000      ?            deviceless                      no_connection_id         
+             gcc_pcie_0_aux_clk      1       1        0        19200000    0          0     50000      Y               pcie@1c00000                    no_connection_id         
+          gcc_gpll4                  1       1        0        805999804   0          0     50000      N            deviceless                      no_connection_id         
+             gcc_ufs_phy_ice_core_clk_src 1       1        0        402999902   0          0     50000      ?               deviceless                      no_connection_id         
+                gcc_ufs_phy_ice_core_clk 1       1        0        402999902   0          0     50000      Y                  1d88000.crypto                  core                     
+          gcc_gpll0                  1       1        0        600000000   0          0     50000      N            deviceless                      no_connection_id         
+             gcc_gpll0_out_even      2       2        0        300000000   0          0     50000      Y               deviceless                      no_connection_id         
+                gcc_qupv3_wrap3_s5_clk_src 1       1        0        51200000    0          0     50000      ?                  deviceless                      no_connection_id         
+                   gcc_qupv3_wrap3_s5_clk 1       1        0        51200000    0          0     50000      Y                     1994000.serial                  se                       
+                gcc_pcie_0_phy_rchng_clk_src 1       1        0        100000000   0          0     50000      ?                  deviceless                      no_connection_id         
+                   gcc_pcie_0_phy_rchng_clk 1       1        0        100000000   0          0     50000      Y                     1c06000.phy                     rchng                    
+== wakeup sources (active_count, total_time)
+name		active_count	event_count	wakeup_count	expire_count	active_since	total_time	max_time	last_change	prevent_suspend_time
+c426000.spmi:pmic@0:rtc@6100	61		61		0		0		0		5		0		1442284		0
+qcom-battmgr-bat	33		35		0		0		0		479		51		1491671		0
+ucsi-source-psy-pmic_glink.ucsi.01	4		6		0		0		0		0		0		1131662		0
+qcom-battmgr-usb	3		3		0		0		0		14		9		1131728		0
+ucsi-source-psy-pmic_glink.ucsi.02	1		1		0		0		0		0		0		1399		0
+qcom-battmgr-wls	1		1		0		0		0		0		0		424		0
+== remoteproc
+soccp attached
+adsp running
+cdsp running
+== rpmh / aoss debugfs present?
+/sys/kernel/debug/qcom_aoss
+ddr_frequency_mhz
+prevent_aoss_sleep
+prevent_cx_collapse
+prevent_ddr_collapse
+== pstore: this boot's ramoops messages + archive
+[    0.000000] OF: reserved mem: 0x00000000c2000000..0x00000000c20bffff (768 KiB) map non-reusable ramoops@c2000000
+[    0.033880] ramoops: error in header, 1
+[    0.033984] ramoops: error in header, 1
+[    0.034078] ramoops: error in header, 1
+[    0.034175] ramoops: error in header, 1
+[    0.255494] ramoops: error in header, 2
+[    0.255518] pstore: Using crash dump compression: deflate
+[    0.255522] printk: legacy console [ramoops-1] enabled
+[    0.269201] pstore: Registered ramoops as persistent store backend
+[    0.269279] ramoops: using 0xc0000@0xc2000000, ecc: 16
+[    1.443169] baldur: -- pstore (this kernel's own ramoops, if it mounted) --
+[    1.444254] baldur:   console-ramoops-0
+[    3.486667] systemd[1]: Starting modprobe@efi_pstore.service - Load Kernel Module efi_pstore...
+[    3.501099] systemd[1]: modprobe@efi_pstore.service: Deactivated successfully.
+[    3.501181] systemd[1]: Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+/sys/fs/pstore/:
+total 0
+drwxr-x--- 2 root root 0 2026-10-15_22:22:16 .
+drwxr-xr-x 8 root root 0 1970-01-01_09:00:01 ..
+
+/var/lib/systemd/pstore/:
+total 332
+drwxr-xr-x  2 root root  4096 2026-10-15_22:22:16 .
+drwxr-xr-x 13 root root  4096 1970-01-02_07:08:00 ..
+-rw-------  1 root root 10144 1970-01-01_09:00:01 console-ramoops-0
+-rw-------  1 root root 97031 2026-10-13_00:49:05 dmesg-ramoops-0
+-rw-------  1 root root  7431 2026-10-11_04:36:59 dmesg-ramoops-0.enc.z
+-rw-------  1 root root 97024 2026-10-13_00:49:06 dmesg-ramoops-1
+-rw-------  1 root root  7608 2026-10-11_04:36:59 dmesg-ramoops-1.enc.z
+-rw-------  1 root root 97028 2026-10-13_00:49:06 dmesg-ramoops-2
+-rw-------  1 root root  6133 1970-01-01_09:00:10 pmsg-ramoops-0
+/dev/pmsg0
+pmsg ok
+== reboots today (journal boots)
+ -5 95db0645c1e84c98a17675c7109f470d Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 15:42:34 JST
+ -4 1e714ed31a0440989ba0a62eff1149ff Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 21:49:29 JST
+ -3 740256f6e3694a479bb8c8d06b3dca0b Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:15:40 JST
+ -2 a2281a28146f4ff39f8bbfff66800a0b Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:16:11 JST
+ -1 baa113c4fe0f487ebfd5c6c625f3b791 Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:22:18 JST
+  0 e2b6380a0542403aa6321f6b2ce6e3a5 Tue 2026-07-28 05:44:02 JST Thu 2026-10-15 22:47:21 JST
+== rawdump partition peek (read-only)
+brw-rw---- 1 root disk 8, 11 Oct 15 22:22 /dev/sda11
+536870912
+Raw_Dmp!
+OCIMEM.BIN
+CODERAM.BIN
+DATARAM.BIN
+MSGRAM0.BIN
+MSGRAM1.BIN
+MSGRAM2.BIN
+MSGRAM3.BIN
+MSGRAM4.BIN
+MSGRAM5.BIN
+MSGRAM6.BIN
+MSGRAM7.BIN
+MSGRAM8.BIN
+MSGRAM9.BIN
+MSGRAM10.BIN
+MSGRAM11.BIN
+MSGRAM12.BIN
+MSGRAM13.BIN
+MSGRAM14.BIN
+MSGRAM15.BIN
+SHRM_MEM.BIN
+DCC_SRAM.BIN
+DCC_CFG.BIN
+CD_STRCT.BIN
+CD_BTDDR.BIN
+CD_BTIMM.BIN
+CD_SHIMM.BIN
+CPUCPFW.BIN
+dmesg_dumps.bin
+lastkmsg.log
+...
+[firmware strings dumped from the rawdump partition omitted from the public copy]

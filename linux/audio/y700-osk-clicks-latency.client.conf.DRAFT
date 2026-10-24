@@ -1,0 +1,26 @@
+# y700 DIAGNOSTIC (not installed, 2026-10-16): H2 A/B for the keyboard click stream WITHOUT a rebuild.
+# Install as ~user/.config/pipewire/client.conf.d/90-y700-osk-clicks-latency.conf, then
+# `y700-osk-ctl restart` (the rule is read when y700-osk creates its stream: pw_stream_connect applies
+# stream.rules from client.conf + client.conf.d, PipeWire 1.6.2 src/pipewire/stream.c:2131-2133, after the
+# properties set in linux/osk/src/sound.cpp:113-120, so it overrides node.latency = 256/48000 there).
+# Matches only the node named y700-osk-clicks; every other client that loads client.conf is untouched
+# (pipewire-pulse uses its own pipewire-pulse.conf).
+# Effect: the click stream stops pulling a running graph down to quantum 256 (H2 test). Clicks with nothing
+# else playing reach the speaker ~24 ms later on average (quantum 1024 instead of 256).
+# Check it took: `pw-cli ls Node | grep -A25 'node.name = "y700-osk-clicks"' | grep node.latency` shows
+# 1024/48000 (avoid pw-dump for this: it enumerates EnumFormat on the speaker node and so opens/closes a
+# suspended PCM, linux/audio/SUSPEND.md section 4).
+# Rollback: rm the file, `y700-osk-ctl restart`.
+stream.rules = [
+  {
+    matches = [ { node.name = "y700-osk-clicks" } ]
+    actions = {
+      update-props = {
+        node.latency = 1024/48000
+        # H4 variant (unverified that a rule is enough: sound.cpp would also set SPA_NODE_FLAG_ASYNC,
+        # stream.c:2128-2129 runs before the rules): uncomment to make the stream async
+        #node.async = true
+      }
+    }
+  }
+]

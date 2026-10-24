@@ -1,0 +1,6 @@
+id=y700_dax
+name=Y700 ZUI Dolby (daxService)
+version=1
+versionCode=1
+author=y700
+description=ZUXOS 088 com.dolby.daxservice, 3-nop patch (skips the all-users registerReceiverAsUser), turns on Lenovo Dolby DAP tuning. Disable to revert.

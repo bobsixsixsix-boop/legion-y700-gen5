@@ -1,0 +1,6 @@
+ActiveState=inactive Result=success 
+processes: 29; affinity before:      29 ff 
+06:42:38 baseline dpms=Off armed=Y  cl0 0.1/s  cl1 10.0/s  sys 0.0/s  | arch_timer/s per cpu 83 90 56 14 2 3 8 4
+06:43:48 pinned67 dpms=Off armed=Y  cl0 26.3/s  cl1 0.0/s  sys 0.0/s  | arch_timer/s per cpu 40 27 5 7 3 3 165 9
+affinity after restore:     400 0-7 
+06:45:00 restored dpms=Off armed=Y  cl0 0.1/s  cl1 10.2/s  sys 0.0/s  | arch_timer/s per cpu 72 92 38 13 8 19 8 4

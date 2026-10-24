@@ -1,0 +1,14 @@
+=== 2026-10-18 00:48:40 cx-exp E0 20 min (level -) on 7.3.0-rc4-tb323fu-t49-y12, battery Discharging 81 %, aco=N aso=N dl=off
+00:48:55 before: cluster[use=537994 rej=1506448] cluster1[use=475588 rej=1573142] system[use=443147 rej=15776] apss=416430/9895449ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+00:48:55 MARK E0 start 20min
+00:48:55 knobs: aco=N aso=N aoss_set=0
+E0 t+1m                       0.35 W (min 0.31 max 0.45, 12 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 0.4% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=25%] | irq 482/s | gpu=160MHz ddr=624MHz llcc=298MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=97%/543x cxsd=0%/0x aosd=0%/0x
+00:51:11 t+2m: cluster[use=537994 rej=1506498] cluster1[use=475588 rej=1575296] system[use=443147 rej=15776] apss=416430/9895449ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E0 t+12m                      0.38 W (min 0.31 max 0.53, 12 distinct I in 75 s, Discharging) | backlight 664 | panel 120:100% | cpu busy 0.4% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=25%] | irq 457/s | gpu=160MHz ddr=589MHz llcc=291MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/512x cxsd=0%/0x aosd=0%/0x
+01:02:27 t+13m: cluster[use=537994 rej=1506922] cluster1[use=475588 rej=1585252] system[use=443147 rej=15776] apss=416430/9895449ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+01:08:57 done E0 20 min without a reset
+01:08:57 after:  cluster[use=537994 rej=1507176] cluster1[use=475588 rej=1590806] system[use=443147 rej=15776] apss=416430/9895449ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+01:08:57 MARK E0 end aco=N aso=N
+01:08:57 cx-when-idle: E0:20 exit 0
+01:23:58 cx-when-idle: idle 15 min on battery, display off: starting E4:40
+

@@ -1,0 +1,18 @@
+=== 2026-10-18 01:23:58 cx-exp E4 40 min (level E3a) on 7.3.0-rc4-tb323fu-t49-y12, battery Discharging 81 %, aco=N aso=N dl=off
+01:24:13 before: cluster[use=537994 rej=1507265] cluster1[use=475588 rej=1601787] system[use=443147 rej=15776] apss=416430/9895449ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+01:24:13 MARK E4 start 40min
+01:24:13 knobs: aco=Y aso=Y aoss_set=1
+E4 t+1m                       0.77 W (min 0.30 max 1.21, 15 distinct I in 75 s, Discharging) | backlight 200 | panel 120:56% 60:11% 30:33% | cpu busy 1.0% idle[WFI=2% cpu-sleep-0=72% cpu-sleep-1=24%] | irq 688/s | gpu=174MHz ddr=635MHz llcc=299MHz | sleep adsp=98%/1607x adsp_island=95%/1487x cdsp=100%/0x soccp=96%/617x cxsd=0%/0x aosd=0%/0x
+01:26:28 t+2m: cluster[use=538040 rej=1507265] cluster1[use=476567 rej=1601788] system[use=443156 rej=15776] apss=416438/9895528ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E4 t+12m                      0.82 W (min 0.28 max 1.43, 15 distinct I in 75 s, Discharging) | backlight 177 | panel 120:52% 60:19% 30:29% | cpu busy 0.9% idle[WFI=5% cpu-sleep-0=71% cpu-sleep-1=24%] | irq 738/s | gpu=160MHz ddr=589MHz llcc=291MHz | sleep adsp=98%/1625x adsp_island=95%/1484x cdsp=100%/0x soccp=96%/584x cxsd=0%/0x aosd=0%/0x
+01:37:45 t+13m: cluster[use=538526 rej=1507267] cluster1[use=481778 rej=1601789] system[use=443182 rej=15780] apss=416461/9895714ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E4 t+23m                      0.82 W (min 0.35 max 1.70, 15 distinct I in 75 s, Discharging) | backlight 177 | panel 120:55% 60:20% 30:25% | cpu busy 1.0% idle[WFI=7% cpu-sleep-0=68% cpu-sleep-1=23%] | irq 784/s | gpu=177MHz ddr=582MHz llcc=289MHz | sleep adsp=98%/1626x adsp_island=95%/1492x cdsp=100%/0x soccp=96%/548x cxsd=0%/0x aosd=0%/0x
+01:49:01 t+25m: cluster[use=539000 rej=1507270] cluster1[use=486686 rej=1601790] system[use=443213 rej=15788] apss=416485/9896090ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E4 t+35m                      0.70 W (min 0.30 max 1.19, 15 distinct I in 75 s, Discharging) | backlight 177 | panel 120:63% 60:8% 30:29% | cpu busy 0.6% idle[WFI=2% cpu-sleep-0=72% cpu-sleep-1=25%] | irq 630/s | gpu=160MHz ddr=589MHz llcc=291MHz | sleep adsp=98%/1484x adsp_island=97%/1400x cdsp=100%/0x soccp=97%/555x cxsd=0%/0x aosd=0%/0x
+02:00:17 t+36m: cluster[use=539504 rej=1507272] cluster1[use=491824 rej=1601793] system[use=443224 rej=15796] apss=416496/10213517ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+02:04:17 done E4 40 min without a reset
+02:04:17 after:  cluster[use=539750 rej=1507274] cluster1[use=493653 rej=1601797] system[use=443249 rej=15799] apss=416519/9896651ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+02:04:17 MARK E4 end aco=N aso=N
+02:04:17 cx-when-idle: E4:40 exit 0
+02:19:18 cx-when-idle: idle 15 min on battery, display off: starting E3b:30
+

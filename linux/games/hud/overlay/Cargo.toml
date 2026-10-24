@@ -1,0 +1,21 @@
+[package]
+name = "y700-hud-overlay"
+version = "0.1.0"
+edition = "2021"
+description = "y700 game overlay: the layer-shell status line above games (FPS, CPU, GPU, temperatures, power) and its sampler"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (apt librust-gtk4-dev, librust-gtk4-layer-shell-dev;
+# .cargo/config.toml points crates-io at /usr/share/cargo/registry): versions are the ones Ubuntu ships.
+[dependencies]
+gtk4 = "0.10"
+gtk4-layer-shell = "0.6"
+libc = "0.2"
+
+[[bin]]
+name = "y700-hud-overlay"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

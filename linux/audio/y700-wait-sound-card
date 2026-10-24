@@ -1,0 +1,19 @@
+#!/bin/sh
+# Wait (max ~90 s) until the TB323FU sound card exists, its amplifier controls
+# answer, and tb323fu-audio.service has run after the card appeared.
+i=0
+while [ $i -lt 180 ]; do
+	card=$(awk '/LENOVO|TB323FU/{print $1; exit}' /proc/asound/cards)
+	if [ -n "$card" ] && amixer -q -c "$card" cget name=aw_dev_1_volume >/dev/null 2>&1; then
+		t=$(systemctl show -P ExecMainExitTimestampMonotonic tb323fu-audio.service 2>/dev/null)
+		r=$(systemctl show -P ActiveState tb323fu-audio.service 2>/dev/null)
+		if [ "${t:-0}" != 0 ] && [ "$r" != activating ]; then
+			sleep 1
+			exit 0
+		fi
+	fi
+	i=$((i + 1))
+	sleep 0.5
+done
+echo "sound card not ready after 90 s" >&2
+exit 0

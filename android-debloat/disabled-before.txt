@@ -1,0 +1,6 @@
+com.android.nfc
+com.android.virtualization.terminal
+com.google.android.gms
+com.oplus.cota
+com.oplus.customize.coreapp
+com.oplus.ota

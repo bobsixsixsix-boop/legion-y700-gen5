@@ -1,0 +1,1 @@
+5aaf3ca5805c0a0d3eb58266c877d0cf0d944ea983037001c0d18bbf9c6713dd  /usr/local/src/y700-kernel/Image-t47-y1.gz

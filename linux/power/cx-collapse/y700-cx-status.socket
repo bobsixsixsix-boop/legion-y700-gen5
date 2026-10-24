@@ -1,0 +1,17 @@
+# /etc/systemd/system/y700-cx-status.socket - read-only experiment status for the Win11 side (2026-10-16).
+# Listens on the tablet's Tailscale address only (FreeBind: the address may come up after the socket).
+# curl http://100.64.0.10:8766/   (no ssh login -> no root user manager start/stop during measurements)
+# Install: install -m755 y700-cx-status /usr/local/libexec/; install -m644 y700-cx-status.socket
+#          y700-cx-status@.service /etc/systemd/system/; systemctl daemon-reload; systemctl enable --now y700-cx-status.socket
+# Undo:    systemctl disable --now y700-cx-status.socket; rm the three files; systemctl daemon-reload
+[Unit]
+Description=y700: CX experiment status on the tailnet (read-only, socket-activated)
+
+[Socket]
+ListenStream=100.64.0.10:8766
+FreeBind=yes
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

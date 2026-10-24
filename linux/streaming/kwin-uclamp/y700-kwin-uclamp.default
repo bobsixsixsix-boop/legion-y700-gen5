@@ -1,0 +1,22 @@
+# /etc/default/y700-kwin-uclamp: read by the y700-kwin-uclamp daemon at start (systemctl restart y700-kwin-uclamp to apply)
+# uclamp.min on every KWin thread, 0..1024 (1024 = the big core's full capacity). schedutil then asks for about
+# 1.25 x cluster max x UCLAMP_MIN / core capacity while KWin runs: 512 -> ~2.9 GHz on either cluster
+# (little: 3.63 GHz, capacity 799; big: 4.61 GHz, capacity 1024). Nothing is pinned while KWin sleeps.
+# 384 measured not enough at 120 fps (c120-uc384k 1.10 % repeats), 512 is what the A/B used (README "120 fps 掉帧").
+UCLAMP_MIN=512
+# whose kwin_wayland
+USER_UID=1000
+# seconds between rescans for threads KWin created after it started (they start at 0: KWin's main thread is
+# SCHED_RR|SCHED_RESET_ON_FORK); 0 = only the passes at 0, 10 and 60 s after KWin starts
+RESCAN_SEC=5
+# touch boost (src/touchboost.rs, 10-21): GPU min_freq while an edge gesture runs (cards, home, back, control
+# centre). At the 160 MHz floor KWin's GPU jobs took 14.5 ms p95 (a frame is 8.3 ms); 600 MHz: 7.6 ms. 0 = off.
+BOOST_GPU_MHZ=600
+# keep it this long after the last finger lifts (the release animation)
+BOOST_TAIL_MS=600
+# a touch anywhere this soon after that lift boosts again (dragging, tapping the cards)
+BOOST_REARM_MS=3000
+# never longer than this after an edge touch (a finger resting on the edge, a game)
+BOOST_MAX_MS=10000
+# an edge touch: first finger down within this share of the panel (per mille) of any side
+BOOST_EDGE_PERMILLE=20

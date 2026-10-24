@@ -1,0 +1,3 @@
+# may carry MAC/BT addresses and serial numbers: kept local only
+dmesg
+kernel-problems

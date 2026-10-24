@@ -1,0 +1,110 @@
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 262a20453..b97185b4e 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -2168,6 +2168,15 @@ static int ath12k_core_hw_group_create(struct ath12k_hw_group *ag)
+ 	return ret;
+ }
+ 
++/* y700 (TB323FU): WCN7860 with the Android GNG firmware completes ML association with an
++ * MLO AP but its EAPOL 2/4 over the MLO link is never acked (4WAY_HANDSHAKE_TIMEOUT), so
++ * 5/6 GHz MLO SSIDs never connect. Unless wcn7860_mlo=1, do not advertise MLO for this chip:
++ * the station then associates single-link (non-ML) and the handshake goes through.
++ */
++static bool ath12k_wcn7860_mlo;
++module_param_named(wcn7860_mlo, ath12k_wcn7860_mlo, bool, 0444);
++MODULE_PARM_DESC(wcn7860_mlo, "Advertise MLO on WCN7860 (default: off)");
++
+ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ {
+ 	struct ath12k_base *ab;
+@@ -2180,6 +2189,11 @@ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ 
+ 	if (ag->num_devices == 1) {
+ 		ab = ag->ab[0];
++		if (ab->hw_rev == ATH12K_HW_WCN7860_HW20 && !ath12k_wcn7860_mlo) {
++			ath12k_info(ab, "MLO disabled on WCN7860 (wcn7860_mlo=0)\n");
++			ag->mlo_capable = false;
++			return;
++		}
+ 		/* QCN9274 firmware uses firmware IE for MLO advertisement */
+ 		if (ab->fw.fw_features_valid) {
+ 			ag->mlo_capable =
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 98187638a..108a521d5 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -6,6 +6,7 @@
+  */
+ #include <linux/auxiliary_bus.h>
+ #include <linux/devm-helpers.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+@@ -454,6 +455,12 @@ static const u8 sm8350_bat_prop_map[] = {
+ 	[POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD] = BATT_CHG_CTRL_END_THR,
+ };
+ 
++static bool qcom_battmgr_is_sm8350_family(struct qcom_battmgr *battmgr)
++{
++	return battmgr->variant == QCOM_BATTMGR_SM8350 ||
++	       battmgr->variant == QCOM_BATTMGR_SM8550;
++}
++
+ static int qcom_battmgr_bat_sm8350_update(struct qcom_battmgr *battmgr,
+ 					  enum power_supply_property psp)
+ {
+@@ -533,6 +540,19 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		val->intval = battmgr->status.status;
++		/*
++		 * y700 (TB323FU): the firmware keeps reporting "Charging" while
++		 * external power is in but the battery is held (charge limit
++		 * reached, bypass) or is drained by the load. Tell those apart by
++		 * the battery current (positive = into the battery here).
++		 */
++		if (qcom_battmgr_is_sm8350_family(battmgr) &&
++		    val->intval == POWER_SUPPLY_STATUS_CHARGING &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    battmgr->status.current_now <= 0)
++			val->intval = battmgr->status.current_now < 0 ?
++				      POWER_SUPPLY_STATUS_DISCHARGING :
++				      POWER_SUPPLY_STATUS_NOT_CHARGING;
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_TYPE:
+ 		val->intval = battmgr->info.charge_type;
+@@ -566,6 +586,16 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 		break;
+ 	case POWER_SUPPLY_PROP_POWER_NOW:
+ 		val->intval = battmgr->status.power_now;
++		/*
++		 * y700: BATT_POWER_NOW always reads 0 on this firmware; derive it
++		 * from the current and voltage (uA * uV / 10^6 = uW), signed like
++		 * current_now.
++		 */
++		if (!val->intval && qcom_battmgr_is_sm8350_family(battmgr) &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_VOLTAGE_NOW) >= 0)
++			val->intval = (int)div_s64((s64)battmgr->status.current_now *
++						   battmgr->status.voltage_now, 1000000);
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+ 		if (unit != QCOM_BATTMGR_UNIT_mAh)
+@@ -1699,6 +1729,15 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 	battmgr->current_inverted = device_is_compatible(dev->parent,
+ 							 "qcom,kaanapali-pmic-glink");
+ 
++	/*
++	 * y700: only the SC8280XP battery-info message sets the unit. The
++	 * SM8350/SM8550 firmware answers BATT_CHG_FULL and BATT_CHG_FULL_DESIGN
++	 * in uAh (like BATT_CHG_COUNTER), so without this charge_full and
++	 * charge_full_design always read ENODATA and UPower shows 0 Wh.
++	 */
++	if (qcom_battmgr_is_sm8350_family(battmgr))
++		battmgr->unit = QCOM_BATTMGR_UNIT_mAh;
++
+ 	ret = qcom_battmgr_charge_control_thresholds_init(battmgr);
+ 	if (ret < 0)
+ 		return dev_err_probe(dev, ret,

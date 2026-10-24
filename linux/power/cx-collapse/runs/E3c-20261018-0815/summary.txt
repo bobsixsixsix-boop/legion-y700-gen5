@@ -1,0 +1,55 @@
+=== 2026-10-18 08:38:04 7.3.0-rc4-tb323fu-t49-y12 up 10069s boot_id 974b286c-f16a-4224-8e77-0ac25b21db92
+== boots (the run must be inside the last one)
+ -2 ae40dfafe250477099f9494e14d80c8e Tue 2026-07-28 05:44:02 JST Fri 2026-10-16 19:08:37 JST
+ -1 690a169c66e843c780f41f22eb12088f Tue 2026-07-28 05:44:02 JST Sun 2026-10-18 05:50:06 JST
+  0 974b286cf16a42248e770ac25b21db92 Tue 2026-07-28 05:44:02 JST Sun 2026-10-18 08:38:04 JST
+== cx-exp unit
+no cx-exp process
+== knobs now
+aco=Y aso=Y dl=off dpms=Off bat=Discharging/69%
+== pd idle_states
+-- cluster
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1562309        99955      33428      10137      0          0
+-- cluster1
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     7159111        80986      155652     22772      0          0
+-- system
+State  Time(ms)       Usage      Rejected   Above      Below      S2idle
+S0     1256329        76722      882        4355       0          0
+== cpuidle state1 per cpu (usage/rejected/time us)
+cpu0 cpu-sleep-0 usage=1071359 rej=4 time=8979034226
+cpu3 cpu-sleep-0 usage=520728 rej=4 time=9593228704
+cpu5 cpu-sleep-0 usage=407371 rej=2 time=9646934440
+cpu6 cpu-sleep-1 usage=380207 rej=11 time=9847942612
+cpu7 cpu-sleep-1 usage=190162 rej=7 time=9922297898
+== qcom_stats
+-- apss: Count: 75152 Last Entered At: 191107556642 Last Exited At: 191107801798 Accumulated Duration: 19005442796 
+-- cxsd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- aosd: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+-- ddr: Count: 0 Last Entered At: 0 Last Exited At: 0 Accumulated Duration: 0 
+== 1043 report lines
+[ 8609.477969] CPUidle PSCI: power-domain-system: allow_system_off=N, system domain state in system suspend only (parameter written)
+[ 8694.766567] CPUidle PSCI: power-domain-system: allow_system_off=Y, system domain state in runtime idle too (parameter written)
+[ 9597.020766] CPUidle PSCI: power-domain-system: allow_system_off=N, system domain state in system suspend only (parameter written)
+[ 9597.133782] CPUidle PSCI: power-domain-system: allow_system_off=Y, system domain state in runtime idle too (parameter written)
+== kernel trouble lines in the last 200 min
+      4 [drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000
+      1 WARNING: net/mac80211/airtime.c:532 at ieee80211_get_rate_duration+0x2c/0x170, CPU#1: NetworkManager/2285
+== flightrec MARKs
+MARK t=6313.4 at=07:35:28 E3b start 15min
+MARK t=7215.4 at=07:50:30 E3b end aco=N aso=N
+MARK t=7707.1 at=07:58:42 E3b start 15min
+MARK t=8609.5 at=08:13:44 E3b end aco=N aso=N
+MARK t=8694.7 at=08:15:10 E3c start 15min
+MARK t=9597.0 at=08:30:12 E3c end aco=N aso=N
+== selected run: the last "MARK ... E3c start 15min" and the end MARK after it
+MARK t=8694.7 at=08:15:10 E3c start 15min
+MARK t=9597.0 at=08:30:12 E3c end aco=N aso=N
+== flightrec MODE lines inside the run (want: MODE fast right after the start MARK)
+MODE fast t=8694.7 at=08:15:10 reason=experiment-mark
+== flightrec sums between MARK E3c start 15min and MARK E3c end (pd= and qs= are both per-row increments)
+rows=902  cl0 use=31405 rej=6  cl1 use=10631 rej=1  sys use=24757 rej=289
+qcom_stats entries / ms summed: apss +24292 / +318944 ms  cxsd +0 / +0  aosd +0 / +0  ddr +0 / +0
+span 901 s (1.00 rows/s)  residency apss 35 %  cxsd 0 %  aosd 0 %  ddr 0 %
+bat mean 286 mW over 902 rows (0 zero reads left out)

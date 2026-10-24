@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Y700 桌面效果图</title>
+<!-- 效果图：dock + 状态栏 + 下拉中心（OriginOS 风格）。画布按平板横屏 1600×1002 逻辑 px 1:1 画，缩放适配窗口。
+     dock 几何、材质、按压动效按 ../rom-report.md 的取值；OriginOS 7 的液态玻璃是另一档材质开关。
+     壁纸和图标是中性占位图（assets.js；build-assets.py 可用自己的图标重新生成）。 -->
+<script src="assets.js"></script>
+<style>
+:root {
+  --page: #e9eaee; --ink: #1b1d22; --muted: #5b606b; --panel: #ffffff; --line: #d5d8de; --accent: #2e6bf6;
+  --press-down: cubic-bezier(.25,.45,.30,1);
+  --press-up: cubic-bezier(.25,.45,.35,1);
+  --move: cubic-bezier(.25,.10,.25,1);
+  --drawer: cubic-bezier(.32,.72,0,1);
+  --ease-out: cubic-bezier(.23,1,.32,1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --page: #0d0e11; --ink: #eceef2; --muted: #9aa0ab; --panel: #1a1c21; --line: #2c2f36; }
+}
+:root[data-theme="dark"] { --page: #0d0e11; --ink: #eceef2; --muted: #9aa0ab; --panel: #1a1c21; --line: #2c2f36; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--page); color: var(--ink); overflow: hidden;
+  font-family: "HarmonyOS Sans SC", "MiSans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif; }
+#stage { position: fixed; inset: 0; }
+#frame { width: 1600px; height: 1002px; position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#tab { position: absolute; inset: 0; overflow: hidden; background: #16181e; user-select: none; touch-action: none;
+  color: #fff; border-radius: 0; }
+#wall { position: absolute; inset: 0; background-size: cover; background-position: center; }
+
+/* ---------- desktop icons (a sample desktop row) */
+#desk { position: absolute; left: 0; right: 0; top: 104px; display: flex; gap: 0; padding-left: 28px; }
+.dicon { width: 142px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.dicon .ic { width: 72px; height: 72px; transition: transform 250ms var(--press-up); }
+.dicon.pressed .ic { transform: scale(.9); transition: transform 200ms var(--press-down); }
+.dicon .lb { font-size: 15px; text-shadow: 0 1px 2px rgba(0,0,0,.55); white-space: nowrap; }
+.ic img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+
+/* ---------- app window (stand-in) */
+#app { position: absolute; left: 0; top: 28px; width: 1600px; height: 974px; transform-origin: 0 0; display: none;
+  overflow: hidden; z-index: 5; }
+#app.show { display: block; }
+#app .abar { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 20px; font-size: 16px;
+  background: rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); }
+#app .abar img { width: 26px; height: 26px; }
+#app .abody { position: absolute; inset: 52px 0 0 0; display: grid; place-items: center; }
+#app .hero { display: flex; flex-direction: column; align-items: center; gap: 18px; opacity: .9; }
+#app .hero img { width: 112px; height: 112px; }
+#app .hero .t { font-size: 22px; }
+#app .hero .s { font-size: 14px; opacity: .55; }
+#app .skel { position: absolute; left: 40px; right: 40px; bottom: 40px; display: grid; gap: 14px; }
+#app .skel i { display: block; height: 14px; border-radius: 7px; background: rgba(255,255,255,.06); }
+
+/* ---------- dock geometry (icon 60, padding 16, gap 20, height 92, bottom 18, radius 30) */
+#dock { position: absolute; left: 50%; bottom: 18px; height: 92px; z-index: 6; transform: translateX(-50%);
+  transition: transform 320ms var(--drawer), opacity 200ms ease; }
+#dock.away { transform: translate(-50%, 140px); opacity: 0; transition: transform 220ms var(--move), opacity 160ms ease; pointer-events: none; }
+#dock .bg { position: absolute; inset: 0; border-radius: 30px; overflow: hidden;
+  -webkit-backdrop-filter: blur(22px) saturate(1.45); backdrop-filter: blur(22px) saturate(1.45);
+  background: rgba(236,236,236,.13); }
+#dock .bg::after { content: ""; position: absolute; inset: 0; background: rgba(10,10,12,.20); }
+#dock.inapp .bg { -webkit-backdrop-filter: blur(40px) saturate(1.3); backdrop-filter: blur(40px) saturate(1.3); background: rgba(128,128,134,.30); }
+/* OriginOS 7 liquid glass: a light rim, a top sheen, and a highlight that follows the finger */
+body.os7 #dock .bg { box-shadow: inset 0 0 0 1px rgba(255,255,255,.13), inset 0 1px 0 rgba(255,255,255,.30); }
+body.os7 #dock .bg::before { content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 46%),
+              linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.07) 42%, rgba(255,255,255,0) 56%); }
+/* OS7 "点触光感": light ripples out from the finger */
+#dock .glow { position: absolute; width: 240px; height: 240px; margin: -120px 0 0 -120px; border-radius: 50%; z-index: 2;
+  background: radial-gradient(closest-side, rgba(255,255,255,.24), rgba(255,255,255,.06) 60%, rgba(255,255,255,0)); opacity: 0; pointer-events: none;
+  transform: scale(.4); transition: opacity 300ms ease, transform 300ms var(--ease-out); }
+body.os7 #dock .glow.on { opacity: 1; transform: scale(1); transition: opacity 80ms ease, transform 360ms var(--ease-out); }
+#dock .row { position: relative; z-index: 3; height: 92px; display: flex; align-items: center; padding: 0 16px; gap: 20px; }
+.ditem { width: 60px; height: 60px; position: relative; flex: none;
+  transition: transform 250ms var(--press-up), opacity 250ms var(--move), width 250ms var(--move), margin 250ms var(--move); }
+.ditem.pressed { transform: scale(.9); transition: transform 200ms var(--press-down); }
+.ditem.enter { opacity: 0; width: 0; margin-left: -20px; transform: scale(.6); }
+.ditem .dot { position: absolute; left: 50%; bottom: -10px; width: 4px; height: 4px; margin-left: -2px; border-radius: 2px;
+  background: rgba(255,255,255,.75); opacity: 0; transition: opacity 200ms ease; }
+body.dots .ditem.running .dot { opacity: 1; }
+.divider { width: 2px; height: 22px; border-radius: 1px; background: rgba(255,255,255,.6); flex: none; transition: opacity 200ms ease; }
+.drawer-ic { width: 60px; height: 60px; border-radius: 15px; background: rgba(255,255,255,.16); display: grid;
+  grid-template-columns: repeat(3, 8px); gap: 7px; place-content: center; }
+.drawer-ic i { width: 8px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.88); }
+body:not(.drawer) .ditem.drawer { display: none; }
+
+/* ---------- status bar */
+#sbar { position: absolute; left: 0; right: 0; top: 0; height: 28px; z-index: 11; pointer-events: none; display: flex; align-items: center;
+  justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: background 200ms ease; }
+#sbar.solid { background: #0e0f12; }
+#sbar .l, #sbar .r { display: flex; align-items: center; gap: 10px; height: 28px; }
+#sbar .r { gap: 12px; }
+#sbar svg { display: block; }
+#sbar .nic { width: 16px; height: 16px; border-radius: 4px; overflow: hidden; opacity: .9; }
+#sbar .nic img { width: 100%; height: 100%; }
+.batt { display: flex; align-items: center; gap: 5px; }
+.batt .cell { width: 24px; height: 12px; border-radius: 3.5px; border: 1.5px solid rgba(255,255,255,.8); position: relative; }
+.batt .cell::after { content: ""; position: absolute; right: -4px; top: 3px; width: 2px; height: 4px; border-radius: 0 1px 1px 0; background: rgba(255,255,255,.8); }
+.batt .lvl { position: absolute; left: 1.5px; top: 1.5px; bottom: 1.5px; border-radius: 1.5px; background: #fff; }
+#sbar .clockS { transition: opacity 200ms ease; }
+body.ccopen #sbar .clockS { opacity: 0; }
+
+/* gesture bands (shown in the options) */
+.band { position: absolute; z-index: 12; }
+#bandBottom { left: 40px; right: 40px; bottom: 0; height: 26px; display: none; }
+#bandBottom.on { display: block; }
+body.bands .band { background: rgba(255,80,80,.22); outline: 1px dashed rgba(255,120,120,.8); }
+body.bands #bandTopL { background: rgba(255,200,80,.18); }
+#bandTopR { right: 0; top: 0; width: 800px; height: 28px; }
+#bandTopL { left: 0; top: 0; width: 800px; height: 28px; }
+
+/* ---------- notification banner */
+#banner { position: absolute; z-index: 9; left: 50%; top: 10px; width: 560px; margin-left: -280px; padding: 16px 18px;
+  border-radius: 22px; display: flex; gap: 14px; align-items: center; color: #fff;
+  -webkit-backdrop-filter: blur(30px) saturate(1.5); backdrop-filter: blur(30px) saturate(1.5); background: rgba(30,32,38,.62);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); transform: translateY(-140%); opacity: 0;
+  transition: transform 260ms var(--ease-out), opacity 200ms ease; }
+#banner.show { transform: translateY(28px); opacity: 1; }
+#banner img { width: 44px; height: 44px; flex: none; }
+#banner .t { font-size: 15px; font-weight: 600; }
+#banner .b { font-size: 14px; opacity: .75; margin-top: 3px; }
+
+/* ---------- pull-down centre */
+#cc { position: absolute; inset: 0; z-index: 10; display: none; }
+#cc.show { display: block; }
+#cc .curtain { position: absolute; inset: 0; overflow: hidden; }
+/* the clip sits on the frost itself: clip-path on an ancestor would make it a backdrop root and the blur would see nothing */
+#cc .frost { position: absolute; inset: 0; -webkit-backdrop-filter: blur(48px) saturate(1.6); backdrop-filter: blur(48px) saturate(1.6);
+  background: rgba(12,14,20,.42); }
+#cc .edge { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,.18); }
+#cc .bodies { position: absolute; inset: 0; }
+#cc .body { position: absolute; inset: 0; transition: opacity 200ms ease, transform 260ms var(--ease-out); }
+#cc .body.off { opacity: 0; pointer-events: none; }
+#ncBody.off { transform: translateX(-60px); }
+#ccBody.off { transform: translateX(60px); }
+/* left pull = notifications, anchored left; right pull = controls, anchored right */
+.nc { position: absolute; left: 64px; top: 60px; bottom: 36px; width: 620px; display: flex; flex-direction: column; }
+.big .time { font-size: 80px; font-weight: 250; line-height: 1; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.big .date { font-size: 18px; opacity: .72; margin-top: 12px; }
+.cc { position: absolute; right: 64px; top: 52px; width: 940px; display: flex; flex-direction: column; gap: 20px; }
+.chead { display: flex; align-items: center; justify-content: space-between; height: 44px; }
+.chead .h { font-size: 22px; font-weight: 700; }
+.chips { display: flex; gap: 10px; }
+.chip { height: 38px; padding: 0 16px; border-radius: 19px; background: rgba(255,255,255,.12); display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; transition: transform 160ms var(--ease-out), background 150ms ease; }
+.chip.round { width: 38px; padding: 0; justify-content: center; }
+.press:active, .press.pressed { transform: scale(.96); }
+.nhead { display: flex; align-items: center; justify-content: space-between; height: 38px; margin: 36px 0 12px; }
+.nhead .h { font-size: 20px; font-weight: 700; }
+.ghost { height: 32px; padding: 0 14px; border-radius: 16px; background: rgba(255,255,255,.10); font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; transition: transform 160ms var(--ease-out); }
+.nlist { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; }
+.ncard { border-radius: 20px; background: rgba(255,255,255,.12); padding: 14px 16px; display: grid; grid-template-columns: 40px 1fr;
+  column-gap: 12px; row-gap: 2px; transition: transform 250ms var(--move), opacity 200ms ease, height 250ms var(--move), margin 250ms var(--move), padding 250ms var(--move); }
+.ncard img { width: 40px; height: 40px; grid-row: span 3; }
+.ncard .top { display: flex; justify-content: space-between; font-size: 12px; opacity: .6; }
+.ncard .t { font-size: 15px; font-weight: 600; }
+.ncard .b { font-size: 14px; opacity: .78; line-height: 1.4; }
+.ncard .acts { grid-column: 2; display: flex; gap: 8px; margin-top: 10px; }
+.ncard .acts span { height: 32px; padding: 0 14px; border-radius: 16px; background: rgba(255,255,255,.14); font-size: 13px; font-weight: 600; display: flex; align-items: center; }
+.nempty { font-size: 14px; opacity: .5; text-align: center; padding-top: 40px; display: none; }
+.trayh { font-size: 13px; opacity: .6; margin: 0 0 -8px; }
+.tray { display: flex; gap: 16px; }
+.titem { width: 104px; height: 84px; border-radius: 18px; background: rgba(255,255,255,.10); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 8px; font-size: 12px; transition: transform 160ms var(--ease-out); }
+.titem img { width: 32px; height: 32px; }
+.r1 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; height: 196px; }
+.conn { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
+.ctile { border-radius: 22px; background: rgba(255,255,255,.12); display: flex; align-items: center; gap: 12px; padding: 0 14px;
+  transition: transform 160ms var(--ease-out), background 150ms ease; min-width: 0; }
+.ctile .disc { width: 48px; height: 48px; border-radius: 24px; background: rgba(255,255,255,.14); display: grid; place-items: center; flex: none; transition: background 150ms ease; }
+.ctile.on .disc { background: var(--accent); }
+.ctile .tx { min-width: 0; }
+.ctile .t { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctile .s { font-size: 12px; opacity: .6; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media { border-radius: 22px; background: rgba(255,255,255,.12); padding: 20px 22px; display: flex; flex-direction: column; justify-content: space-between; }
+.media .src { font-size: 12px; opacity: .6; display: flex; align-items: center; gap: 8px; }
+.media .src img { width: 18px; height: 18px; }
+.media .t { font-size: 18px; font-weight: 600; margin-top: 8px; }
+.media .a { font-size: 13px; opacity: .65; margin-top: 4px; }
+.media .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.18); overflow: hidden; }
+.media .bar i { display: block; width: 38%; height: 100%; background: rgba(255,255,255,.85); }
+.media .ctl { display: flex; justify-content: center; gap: 26px; }
+.mbtn { width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; transition: transform 160ms var(--ease-out); }
+.mbtn.main { background: var(--accent); }
+.pills { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.pill { height: 60px; border-radius: 30px; background: rgba(255,255,255,.12); position: relative; overflow: hidden; }
+.pill .fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.92); border-radius: 30px 0 0 30px; }
+.pill .ico { position: absolute; left: 6px; top: 6px; width: 48px; height: 48px; border-radius: 24px; display: grid; place-items: center; }
+.pill .pct { position: absolute; right: 22px; top: 0; bottom: 0; display: flex; align-items: center; font-size: 17px; font-weight: 600; mix-blend-mode: difference; }
+.grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+.tile { height: 98px; border-radius: 22px; background: rgba(255,255,255,.12); display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; transition: transform 160ms var(--ease-out), background 150ms ease; }
+.tile .disc { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.14); display: grid; place-items: center; transition: background 150ms ease;
+  font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile.on .disc { background: var(--accent); }
+.tile .t { font-size: 13px; font-weight: 600; }
+.r4 { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 16px; height: 56px; }
+.seg { border-radius: 18px; background: rgba(255,255,255,.12); display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px; gap: 4px; }
+.seg span { border-radius: 14px; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: rgba(255,255,255,.7); transition: background 150ms ease, color 150ms ease; }
+.seg span.on { background: var(--accent); color: #fff; }
+.sq { border-radius: 18px; background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); display: grid; place-items: center; transition: transform 160ms var(--ease-out); }
+.wide { border-radius: 18px; background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; transition: transform 160ms var(--ease-out); }
+.handle { position: absolute; left: 50%; bottom: 14px; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: rgba(255,255,255,.32); }
+
+#toast { position: absolute; z-index: 13; left: 50%; bottom: 140px; transform: translate(-50%, 8px); max-width: 640px; padding: 12px 18px; border-radius: 14px;
+  background: rgba(20,22,27,.94); box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); font-size: 14px; opacity: 0; transition: opacity 180ms ease, transform 180ms var(--ease-out); pointer-events: none; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- options (outside the design) */
+#optBtn { position: fixed; left: 12px; bottom: 12px; z-index: 50; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); font: 600 13px/1 inherit; font-family: inherit; opacity: .9; }
+#opts { position: fixed; left: 12px; bottom: 54px; z-index: 50; width: 340px; max-width: calc(100vw - 24px); padding: 16px; border-radius: 14px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); font-size: 13px; display: none; }
+#opts.show { display: block; }
+#opts h3 { margin: 0 0 4px; font-size: 14px; }
+#opts .grp { margin-top: 14px; }
+#opts .lab { color: var(--muted); margin-bottom: 6px; }
+#opts .segs { display: flex; flex-wrap: wrap; gap: 6px; }
+#opts button { font: inherit; font-family: inherit; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink); }
+#opts button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#opts .note { color: var(--muted); margin-top: 6px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="frame"><div id="tab">
+  <div id="wall"></div>
+  <div id="desk"></div>
+  <div id="app"><div class="abar"><img alt=""><span class="nm"></span></div><div class="abody">
+    <div class="hero"><img alt=""><div class="t"></div><div class="s">（应用窗口示意）底边往上滑：回桌面</div></div>
+    <div class="skel"><i style="width:72%"></i><i style="width:54%"></i><i style="width:63%"></i></div></div></div>
+  <div id="dock"><div class="bg"></div><div class="glow"></div><div class="row"></div></div>
+  <div id="sbar"><div class="l"><span class="clockS"></span><span class="nics" style="display:flex;gap:6px"></span></div>
+    <div class="r"><span class="wifiS"></span><span class="btS"></span><span class="batt"><span class="cell"><span class="lvl"></span></span><span class="bp"></span></span></div></div>
+  <div class="band" id="bandTopL"></div><div class="band" id="bandTopR"></div><div class="band" id="bandBottom"></div>
+  <div id="banner"><img alt=""><div><div class="t"></div><div class="b"></div></div></div>
+  <div id="cc"><div class="curtain"><div class="frost"></div><div class="bodies">
+    <div class="body" id="ncBody"><div class="nc">
+      <div class="big"><div class="time"></div><div class="date"></div></div>
+      <div class="nhead"><div class="h">通知</div><div class="ghost press" id="clearAll">全部清除</div></div>
+      <div class="nlist" id="nlist"></div><div class="nempty" id="nempty">没有新通知</div>
+    </div></div>
+    <div class="body off" id="ccBody"><div class="cc">
+      <div class="chead"><div class="h">控制中心</div>
+        <div class="chips"><div class="chip press" data-k="batChip"></div><div class="chip round press" data-k="settings"></div></div></div>
+      <div class="r1"><div class="conn" id="conn"></div><div class="media" id="media"></div></div>
+      <div class="pills"><div class="pill" data-v="0.62" data-i="sun"></div><div class="pill" data-v="0.40" data-i="vol"></div></div>
+      <div class="grid" id="tiles"></div>
+      <div class="r4"><div class="seg" id="seg"><span>省电</span><span class="on">均衡</span><span>性能</span></div>
+        <div class="sq press" id="powerBtn"></div><div class="wide press" id="androidBtn"></div></div>
+      <div class="trayh">后台应用（原来托盘里的图标：点 = 打开，长按 = 它的菜单）</div>
+      <div class="tray" id="tray"></div>
+    </div></div>
+  </div><div class="edge"></div></div><div class="handle"></div></div>
+  <div id="toast"></div>
+</div></div></div>
+
+<button id="optBtn">效果图选项</button>
+<div id="opts">
+  <h3>效果图选项</h3>
+  <div class="grp"><div class="lab">进入应用后 dock</div><div class="segs" data-opt="mode">
+    <button data-v="A">A 常驻</button><button data-v="B">B 只在桌面</button><button data-v="B+" class="on">B+ 只在桌面 + 底边轻扫呼出</button></div>
+    <div class="note">A：应用窗口让出底部 118 px。B：应用占满，dock 只在桌面出现。B+：应用里从底边中间轻轻上滑一小段（不到 140 px）松手，dock 浮出来；滑得长 = 回桌面。</div></div>
+  <div class="grp"><div class="lab">dock 材质</div><div class="segs" data-opt="mat">
+    <button data-v="os6">OriginOS 6 磨砂</button><button data-v="os7" class="on">OriginOS 7 液态玻璃</button></div>
+    <div class="note">液态玻璃 = 细亮边 + 顶部一层高光 + 手指按下的位置会亮一下。</div></div>
+  <div class="grp"><div class="lab">其他</div><div class="segs">
+    <button data-tog="dots">运行中小圆点</button><button data-tog="drawer" class="on">「全部应用」按钮</button><button data-tog="bands">显示手势区</button></div>
+    <div class="note">vivo 原版 dock 没有运行中小圆点。</div></div>
+  <div class="grp"><div class="segs"><button id="fakeNotif">来一条通知</button><button id="openNC">通知中心</button><button id="openCC">控制中心</button></div>
+    <div class="note">照 vivo：状态栏左半往下拉 = 通知中心，右半往下拉 = 控制中心，都是整屏毛玻璃。打开后左右横滑互相切换；点空白或往上推收起。点横幅也会打开通知中心。</div></div>
+</div>
+
+<script>
+(() => {
+document.body.classList.add("os7", "drawer");
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const W = 1600, H = 1002, SB = 28;
+const tab = $("#tab"), frame = $("#frame");
+const I = window.ICONS || {};
+$("#wall").style.backgroundImage = `url(${window.WALL || ""})`;
+
+// ---------- glyphs (stroke icons, 24 grid)
+const G = {
+  wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.3a9.5 9.5 0 0 1 13 0M8.6 15.5a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/>',
+  bt: '<path d="M7 7l10 10-5 4V3l5 4L7 17"/>',
+  gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/>',
+  rotate: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  torch: '<path d="M8 3h8l-1 5H9z"/><path d="M9 8h6v12a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M12 12v3"/>',
+  auto: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  shot: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>',
+  rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
+  hud: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+  clip: '<rect x="6" y="4.5" width="12" height="16.5" rx="2"/><path d="M9.5 3h5v3h-5z"/><path d="M9 11h6M9 15h4"/>',
+  kbd: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  disp: '<rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  bypass: '<path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
+  ts: '<circle cx="6" cy="6" r="1.6" fill="currentColor"/><circle cx="12" cy="6" r="1.6" fill="currentColor"/><circle cx="18" cy="6" r="1.6" fill="currentColor" opacity=".4"/><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/><circle cx="6" cy="18" r="1.6" fill="currentColor" opacity=".4"/><circle cx="12" cy="18" r="1.6" fill="currentColor"/><circle cx="18" cy="18" r="1.6" fill="currentColor" opacity=".4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+  vol: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  power: '<path d="M12 3v8"/><path d="M6.5 6.5a7.5 7.5 0 1 0 11 0"/>',
+  android: '<path d="M5 15a7 7 0 0 1 14 0v1H5z"/><path d="M7.5 9.5L6 7M16.5 9.5L18 7"/><circle cx="9.5" cy="12.5" r=".8" fill="currentColor"/><circle cx="14.5" cy="12.5" r=".8" fill="currentColor"/>',
+  prev: '<path d="M7 5v14M18 5L9 12l9 7z" fill="currentColor"/>',
+  next: '<path d="M17 5v14M6 5l9 7-9 7z" fill="currentColor"/>',
+  play: '<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  pause: '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/>',
+};
+const svg = (k, s = 22, w = 1.8) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${G[k]}</svg>`;
+
+// ---------- apps
+const APPS = {
+  "google-chrome": { n: "Google Chrome", bg: "#202124" },
+  "com.anthropic.Claude": { n: "Claude", bg: "#262624" },
+  "org.telegram.desktop": { n: "Telegram", bg: "#17212b" },
+  "cn.xfangfang.wiliwili": { n: "wiliwili", bg: "#161616" },
+  "steam-arm64": { n: "Steam", bg: "#1b2838" },
+  "com.moonlight_stream.Moonlight": { n: "Moonlight", bg: "#121417" },
+  "chatgpt": { n: "ChatGPT", bg: "#212121" },
+  "CarPlay": { n: "CarPlay", bg: "#050505" },
+  "game": { n: "游戏", bg: "#2a1a10" },
+  "org.kde.konsole": { n: "Konsole 终端", bg: "#1d1f21" },
+  "org.kde.dolphin": { n: "Dolphin 文件", bg: "#24272b" },
+  "systemsettings": { n: "系统设置", bg: "#24272b" },
+};
+const DESK = ["com.moonlight_stream.Moonlight", "com.anthropic.Claude", "google-chrome", "steam-arm64", "org.telegram.desktop",
+  "cn.xfangfang.wiliwili", "game", "org.kde.konsole", "CarPlay", "chatgpt"];
+const PINNED = ["google-chrome", "com.anthropic.Claude", "org.telegram.desktop", "cn.xfangfang.wiliwili", "steam-arm64", "org.kde.dolphin"];
+let recents = ["org.kde.konsole", "CarPlay"];       // most recent first, max 3, never pinned apps
+const running = new Set(["com.anthropic.Claude", "cn.xfangfang.wiliwili", "org.kde.konsole", "CarPlay"]);
+const img = id => `<img alt="" src="${I[id] || ""}">`;
+
+// ---------- scale the 1600x1002 canvas into the window
+function fit() {
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  frame.style.transform = `scale(${s})`;
+  frame.style.left = (innerWidth - W * s) / 2 + "px"; frame.style.top = (innerHeight - H * s) / 2 + "px";
+  fit.s = s;
+}
+addEventListener("resize", fit); fit();
+const pt = e => { const r = tab.getBoundingClientRect(); return { x: (e.clientX - r.left) / fit.s, y: (e.clientY - r.top) / fit.s }; };
+const rectIn = el => { const r = el.getBoundingClientRect(), t = tab.getBoundingClientRect(); return { x: (r.left - t.left) / fit.s, y: (r.top - t.top) / fit.s, w: r.width / fit.s, h: r.height / fit.s }; };
+
+// press feedback that survives a slide-off (tap = released inside)
+function pressable(el, onTap, opts = {}) {
+  el.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    el.classList.add("pressed"); opts.down && opts.down(e);
+    const sx = e.clientX, sy = e.clientY;
+    const up = ev => {
+      el.classList.remove("pressed"); opts.up && opts.up(ev);
+      removeEventListener("pointerup", up); removeEventListener("pointercancel", up);
+      const r = el.getBoundingClientRect();
+      if (ev.type === "pointerup" && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom
+          && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 24 * fit.s) onTap && onTap(ev);
+    };
+    addEventListener("pointerup", up); addEventListener("pointercancel", up);
+  });
+}
+let toastT;
+function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 2600); }
+
+// ---------- desktop
+DESK.forEach(id => {
+  const d = document.createElement("div"); d.className = "dicon"; d.dataset.id = id;
+  d.innerHTML = `<div class="ic">${img(id)}</div><div class="lb">${APPS[id].n}</div>`;
+  pressable(d, () => openApp(id, d.querySelector(".ic")));
+  $("#desk").appendChild(d);
+});
+
+// ---------- dock
+const row = $("#dock .row"), glow = $("#dock .glow");
+function dockItem(id, kind) {
+  const d = document.createElement("div"); d.className = "ditem" + (kind ? " " + kind : ""); d.dataset.id = id;
+  d.innerHTML = kind === "drawer" ? `<div class="drawer-ic">${"<i></i>".repeat(9)}</div>` : `<div class="ic" style="width:60px;height:60px">${img(id)}</div><span class="dot"></span>`;
+  pressable(d, () => kind === "drawer" ? toast("全部应用：打开应用网格（Plasma 的 Application Dashboard 或自己画一个）") : openApp(id, d), {
+    down: e => { const p = pt(e), r = rectIn($("#dock")); glow.style.left = (p.x - r.x) + "px"; glow.style.top = (p.y - r.y) + "px"; glow.classList.add("on"); },
+    up: () => glow.classList.remove("on"),
+  });
+  return d;
+}
+function buildDock() {
+  row.innerHTML = "";
+  row.appendChild(dockItem("drawer", "drawer"));
+  PINNED.forEach(id => row.appendChild(dockItem(id)));
+  const dv = document.createElement("div"); dv.className = "divider"; row.appendChild(dv);
+  recents.forEach(id => row.appendChild(dockItem(id, "recent")));
+  syncDots();
+}
+function syncDots() {
+  $$(".ditem", row).forEach(d => d.classList.toggle("running", running.has(d.dataset.id)));
+  $(".divider", row).style.opacity = recents.length ? 1 : 0;
+}
+function touchRecent(id) {
+  if (PINNED.includes(id)) return;
+  const old = $$(".ditem.recent", row);
+  if (recents[0] === id) return;
+  const at = recents.indexOf(id);
+  recents = [id, ...recents.filter(x => x !== id)].slice(0, 3);
+  // leave + enter with the 250 ms move curve
+  if (at >= 0) old[at].remove(); else if (old.length >= 3) { const last = old[old.length - 1]; last.classList.add("enter"); setTimeout(() => last.remove(), 250); }
+  const n = dockItem(id, "recent"); n.classList.add("enter");
+  $(".divider", row).after(n);
+  requestAnimationFrame(() => requestAnimationFrame(() => n.classList.remove("enter")));
+  syncDots();
+}
+buildDock();
+
+// ---------- status bar
+const clockTxt = () => { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+function tick() {
+  const t = clockTxt(), d = new Date();
+  $("#sbar .clockS").textContent = t; $("#cc .time").textContent = t;
+  $("#cc .date").textContent = `${d.getMonth() + 1}月${d.getDate()}日 星期${"日一二三四五六"[d.getDay()]}`;
+}
+tick(); setInterval(tick, 5000);
+$("#sbar .wifiS").innerHTML = svg("wifi", 17, 2.1); $("#sbar .btS").innerHTML = svg("bt", 16, 2);
+const BAT = 56; $("#sbar .lvl").style.width = (19 * BAT / 100) + "px"; $("#sbar .bp").textContent = BAT;
+
+// ---------- app window
+let cur = null, src = null;
+function appTarget() { const a = mode === "A"; return { x: 0, y: SB, w: W, h: a ? H - SB - 118 : H - SB }; }
+function setAppTransform(r, t, radius, dur) {
+  const app = $("#app");
+  app.style.transition = dur ? `transform ${dur}ms var(--drawer), border-radius ${dur}ms var(--drawer), opacity ${Math.min(dur, 200)}ms ease` : "none";
+  app.style.transform = `translate(${r.x - t.x}px, ${r.y - t.y}px) scale(${r.w / t.w}, ${r.h / t.h})`;
+  app.style.borderRadius = radius + "px";
+}
+function openApp(id, fromEl) {
+  if (cur === id) return;
+  const app = $("#app"), t = appTarget();
+  cur = id; src = fromEl; running.add(id);
+  app.style.left = t.x + "px"; app.style.top = t.y + "px"; app.style.width = t.w + "px"; app.style.height = t.h + "px";
+  app.style.background = APPS[id].bg;
+  $(".abar img", app).src = I[id] || ""; $(".abar .nm", app).textContent = APPS[id].n;
+  $(".hero img", app).src = I[id] || ""; $(".hero .t", app).textContent = APPS[id].n;
+  const r = fromEl ? rectIn(fromEl) : { x: W / 2 - 40, y: H / 2 - 40, w: 80, h: 80 };
+  app.classList.add("show"); app.style.opacity = 0;
+  setAppTransform(r, t, 30, 0);
+  requestAnimationFrame(() => requestAnimationFrame(() => { app.style.opacity = 1; setAppTransform(t, t, 0, 300); }));
+  $("#sbar").classList.add("solid");
+  inApp(true);
+  setTimeout(() => touchRecent(id), 320);
+}
+function goHome() {
+  if (!cur) return;
+  const app = $("#app"), t = appTarget();
+  const el = $(`.ditem[data-id="${cur}"]`, row) || $(`.dicon[data-id="${cur}"] .ic`);
+  inApp(false);
+  const r = el ? rectIn(el) : { x: W / 2 - 40, y: H / 2 - 40, w: 80, h: 80 };
+  setAppTransform(r, t, 30, 300); app.style.opacity = 0;
+  $("#sbar").classList.remove("solid");
+  cur = null;
+  setTimeout(() => { if (!cur) app.classList.remove("show"); }, 310);
+}
+let revealed = false;
+function inApp(on) {
+  const dock = $("#dock");
+  $("#bandBottom").classList.toggle("on", on);
+  revealed = false; dock.classList.remove("inapp");
+  dock.classList.toggle("away", on && mode !== "A");
+}
+function revealDock() { revealed = true; const d = $("#dock"); d.classList.add("inapp"); d.classList.remove("away"); }
+$("#app").addEventListener("pointerdown", () => { if (revealed) { revealed = false; $("#dock").classList.add("away"); } });
+
+// bottom edge in an app: the window follows the finger; long or fast = home, short (B+) = dock
+$("#bandBottom").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const app = $("#app"), t = appTarget(), y0 = pt(e).y, t0 = performance.now();
+  let dy = 0, last = { y: y0, t: t0 }, v = 0;
+  const mv = ev => {
+    const p = pt(ev), now = performance.now();
+    v = (last.y - p.y) / Math.max(1, now - last.t); last = { y: p.y, t: now };
+    dy = Math.max(0, y0 - p.y);
+    const s = 1 - Math.min(dy / 1100, .42);
+    app.style.transition = "none";
+    app.style.transform = `translate(${t.w * (1 - s) / 2}px, ${-dy * .5}px) scale(${s})`;
+    app.style.borderRadius = Math.min(dy / 3, 28) + "px";
+  };
+  const up = () => {
+    removeEventListener("pointermove", mv); removeEventListener("pointerup", up); removeEventListener("pointercancel", up);
+    if (dy > 140 || (v > 1.2 && dy > 40)) goHome();
+    else {
+      setAppTransform(t, t, 0, 260);
+      if (mode === "B+" && dy > 18) revealDock();
+    }
+  };
+  addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
+});
+
+// ---------- pull-down centre
+// one frosted curtain, two contents: "nc" (left pull, notifications) and "cc" (right pull, controls)
+const cc = $("#cc"), frost = $("#cc .frost"), body = $("#cc .bodies"), edge = $("#cc .edge");
+let ccY = 0, ccAnim = 0, which = "nc";
+function setWhich(w) {
+  which = w;
+  $("#ncBody").classList.toggle("off", w !== "nc"); $("#ccBody").classList.toggle("off", w !== "cc");
+  document.body.classList.toggle("ccopen", ccY / H > .5 && which === "nc");
+}
+function setCC(y) {
+  ccY = Math.max(0, Math.min(H, y));
+  cc.classList.toggle("show", ccY > 0.5);
+  frost.style.clipPath = body.style.clipPath = `inset(0 0 ${H - ccY}px 0)`;
+  edge.style.top = (ccY - 1) + "px"; edge.style.opacity = ccY > 2 && ccY < H - 2 ? 1 : 0;
+  const p = ccY / H;
+  body.style.opacity = Math.min(1, p * 1.6);
+  body.style.transform = `translateY(${(p - 1) * 60}px)`;
+  document.body.classList.toggle("ccopen", p > .5 && which === "nc");
+}
+function animCC(to, dur = 260) {
+  cancelAnimationFrame(ccAnim);
+  const from = ccY, t0 = performance.now();
+  const ease = x => 1 - Math.pow(1 - x, 3);
+  const step = now => { const k = Math.min(1, (now - t0) / dur); setCC(from + (to - from) * ease(k)); if (k < 1) ccAnim = requestAnimationFrame(step); };
+  ccAnim = requestAnimationFrame(step);
+}
+function pullFrom(e, startOpen, w) {
+  e.preventDefault(); e.stopPropagation();
+  cancelAnimationFrame(ccAnim);
+  if (w) setWhich(w);
+  const p0 = pt(e), y0 = p0.y, base = ccY;
+  let last = { y: y0, t: performance.now() }, v = 0, moved = false, axis = null, dx = 0;
+  const mv = ev => {
+    const p = pt(ev), now = performance.now();
+    v = (p.y - last.y) / Math.max(1, now - last.t); last = { y: p.y, t: now };
+    dx = p.x - p0.x;
+    if (!axis && Math.hypot(dx, p.y - y0) > 8) axis = startOpen && Math.abs(dx) > Math.abs(p.y - y0) ? "x" : "y";
+    if (axis) moved = true;
+    if (axis === "y") setCC(startOpen ? Math.min(H, base + (p.y - y0)) : p.y);
+  };
+  const up = ev => {
+    removeEventListener("pointermove", mv); removeEventListener("pointerup", up); removeEventListener("pointercancel", up);
+    if (!moved) { if (startOpen && ev.type === "pointerup") animCC(0, 240); return; }
+    // open sheet, sideways swipe: swipe left shows controls, swipe right shows notifications
+    if (axis === "x") { if (Math.abs(dx) > 80) setWhich(dx < 0 ? "cc" : "nc"); return; }
+    if (startOpen) animCC((ccY < H - 40 || v < -.3) ? 0 : H, 240);
+    else animCC((v > .35 || (v > -.35 && ccY > H / 3)) ? H : 0, 280);
+  };
+  addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
+}
+$("#bandTopR").addEventListener("pointerdown", e => pullFrom(e, false, "cc"));
+$("#bandTopL").addEventListener("pointerdown", e => pullFrom(e, false, "nc"));
+// on the open sheet: blank space = tap to close or push up
+body.addEventListener("pointerdown", e => {
+  if (e.target.closest(".press, .ncard, .ctile, .tile, .pill, .seg, .titem, .mbtn, .media")) return;
+  pullFrom(e, true);
+});
+$("#cc .handle").addEventListener("pointerdown", e => pullFrom(e, true));
+
+// ---------- centre contents
+$('[data-k="batChip"]').innerHTML = `<span class="batt"><span class="cell"><span class="lvl" style="width:${19 * BAT / 100}px"></span></span></span>${BAT}%`;
+$('[data-k="settings"]').innerHTML = svg("gear", 20);
+pressable($('[data-k="settings"]'), () => toast("打开系统设置（收起下拉中心）"));
+pressable($('[data-k="batChip"]'), () => toast("电量：56%，预计还能用 6 小时（示意）"));
+
+const CONN = [
+  { k: "wifi", t: "Wi‑Fi", s: "HOME_6G", on: true }, { k: "bt", t: "蓝牙", s: "手柄", on: true },
+  { k: "ts", t: "Tailscale", s: "100.64.0.10", on: true }, { k: "bypass", t: "旁路供电", s: "关闭", on: false },
+];
+CONN.forEach(c => {
+  const d = document.createElement("div"); d.className = "ctile press" + (c.on ? " on" : "");
+  d.innerHTML = `<div class="disc">${svg(c.k, 22)}</div><div class="tx"><div class="t">${c.t}</div><div class="s">${c.s}</div></div>`;
+  pressable(d, () => d.classList.toggle("on"));
+  $("#conn").appendChild(d);
+});
+$("#media").innerHTML = `<div><div class="src">${img("google-chrome")}Chrome · 网页视频</div><div class="t">示例曲目</div><div class="a">示例艺人</div></div>
+  <div class="bar"><i></i></div><div class="ctl"><div class="mbtn press">${svg("prev", 20)}</div><div class="mbtn main press" id="pp">${svg("pause", 20)}</div><div class="mbtn press">${svg("next", 20)}</div></div>`;
+let playing = true; pressable($("#pp"), () => { playing = !playing; $("#pp").innerHTML = svg(playing ? "pause" : "play", 20); });
+$$("#media .mbtn").forEach(b => b.id || pressable(b, () => {}));
+
+$$(".pill").forEach(p => {
+  const set = v => { v = Math.max(0, Math.min(1, v)); p.dataset.v = v; p.querySelector(".fill").style.width = (v * 100) + "%";
+    p.querySelector(".fill").style.borderRadius = v > .97 ? "30px" : "30px 0 0 30px"; p.querySelector(".pct").textContent = Math.round(v * 100) + "%"; };
+  p.innerHTML = `<div class="fill"></div><div class="ico" style="color:#111">${svg(p.dataset.i, 24, 2)}</div><div class="pct"></div>`;
+  set(+p.dataset.v);
+  p.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    const r = rectIn(p), mv = ev => set((pt(ev).x - r.x) / r.w);
+    mv(e);
+    const up = () => { removeEventListener("pointermove", mv); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", mv); addEventListener("pointerup", up);
+  });
+});
+const TILES = [
+  { k: "rotate", t: "旋转锁定" }, { k: "torch", t: "手电筒" }, { glyph: "120", t: "刷新率" }, { k: "auto", t: "自动亮度", on: true },
+  { k: "moon", t: "勿扰" }, { k: "hud", t: "性能浮层" },
+  { k: "shot", t: "截图" }, { k: "rec", t: "录屏" }, { k: "clip", t: "剪贴板" }, { k: "kbd", t: "屏幕键盘" },
+  { k: "disp", t: "显示" }, { k: "bypass", t: "旁路供电" },
+];
+TILES[11] = { k: "ts", t: "U 盘" };
+TILES.forEach(c => {
+  const d = document.createElement("div"); d.className = "tile press" + (c.on ? " on" : "");
+  d.innerHTML = `<div class="disc">${c.glyph ? c.glyph : svg(c.k, 22)}</div><div class="t">${c.t}</div>`;
+  if (c.glyph) { const steps = [60, 90, 120, 164]; let i = 2; pressable(d, () => { i = (i + 1) % 4; d.querySelector(".disc").textContent = steps[i]; }); }
+  else if (["shot", "rec", "clip", "disp", "ts"].includes(c.k)) pressable(d, () => toast({ shot: "截图：收起下拉中心后截全屏", rec: "录屏：收起后开始录", clip: "剪贴板：切到剪贴板历史页（Klipper）", disp: "显示：分辨率 / 缩放 / 外接屏（原托盘里的 KScreen）", ts: "U 盘：插着的移动存储，打开 / 安全移除（原托盘里的设备通知）" }[c.k]));
+  else pressable(d, () => d.classList.toggle("on"));
+  $("#tiles").appendChild(d);
+});
+$$("#seg span").forEach(s => s.addEventListener("pointerdown", e => { e.stopPropagation(); $$("#seg span").forEach(x => x.classList.toggle("on", x === s)); }));
+$("#powerBtn").innerHTML = svg("power", 24);
+$("#androidBtn").innerHTML = svg("android", 22) + "切换到 Android";
+pressable($("#powerBtn"), () => toast("电源卡片：息屏 / 锁屏 / 重启 / 关机（同现在，重启关机要点两次）"));
+pressable($("#androidBtn"), () => toast("原地变成确认卡片（同现在）"));
+
+// tray (status notifier items)
+[["com.anthropic.Claude", "Claude"], ["chatgpt", "ChatGPT"], ["org.telegram.desktop", "Telegram"]].forEach(([id, n]) => {
+  const d = document.createElement("div"); d.className = "titem press"; d.innerHTML = img(id) + n;
+  pressable(d, () => toast(n + "：点 = 打开窗口，长按 = 它自己的托盘菜单"));
+  $("#tray").appendChild(d);
+});
+
+// notifications
+const NOTES = [
+  { id: "org.telegram.desktop", app: "Telegram", t: "示例群", b: "晚饭几点？", when: "刚刚" },
+  { id: "com.anthropic.Claude", app: "Claude", t: "任务完成", b: "示例任务已完成。", when: "3 分钟前" },
+  { id: "org.kde.dolphin", app: "设备", t: "已插入 U 盘「USB 64G」", b: "58.2 GB 可用", when: "12 分钟前", acts: ["打开", "安全移除"] },
+];
+function addNote(n, front) {
+  const d = document.createElement("div"); d.className = "ncard";
+  d.innerHTML = `${img(n.id)}<div class="top"><span>${n.app}</span><span>${n.when}</span></div><div class="t">${n.t}</div><div class="b">${n.b}</div>` +
+    (n.acts ? `<div class="acts">${n.acts.map(a => `<span class="press">${a}</span>`).join("")}</div>` : "");
+  // swipe sideways to dismiss
+  d.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    const x0 = pt(e).x; let dx = 0;
+    d.style.transition = "none";
+    const mv = ev => { dx = pt(ev).x - x0; d.style.transform = `translateX(${dx}px)`; d.style.opacity = 1 - Math.min(Math.abs(dx) / 400, .6); };
+    const up = () => {
+      removeEventListener("pointermove", mv); removeEventListener("pointerup", up);
+      d.style.transition = "";
+      if (Math.abs(dx) > 120) dismiss(d, dx > 0 ? 1 : -1); else { d.style.transform = ""; d.style.opacity = ""; if (Math.abs(dx) < 6) toast(n.app + "：打开对应的应用"); }
+    };
+    addEventListener("pointermove", mv); addEventListener("pointerup", up);
+  });
+  front ? $("#nlist").prepend(d) : $("#nlist").appendChild(d);
+  syncNotes();
+}
+function dismiss(d, dir) {
+  d.style.transform = `translateX(${dir * 560}px)`; d.style.opacity = 0;
+  setTimeout(() => { d.style.height = d.offsetHeight + "px"; requestAnimationFrame(() => { d.style.height = "0px"; d.style.paddingTop = d.style.paddingBottom = "0px"; d.style.marginTop = "-10px"; }); }, 200);
+  setTimeout(() => { d.remove(); syncNotes(); }, 460);
+}
+function syncNotes() {
+  const n = $$(".ncard").length;
+  $("#nempty").style.display = n ? "none" : "block";
+  $("#sbar .nics").innerHTML = [...new Set($$(".ncard img").map(i => i.getAttribute("src")))].slice(0, 3).map(s => `<span class="nic"><img src="${s}"></span>`).join("");
+}
+NOTES.forEach(n => addNote(n));
+pressable($("#clearAll"), () => $$(".ncard").forEach((d, i) => setTimeout(() => dismiss(d, 1), i * 50)));
+
+let bannerT;
+$("#fakeNotif").addEventListener("click", () => {
+  const n = { id: "org.telegram.desktop", app: "Telegram", t: "示例群", b: "我买了菜，七点开饭", when: "刚刚" };
+  const b = $("#banner"); b.querySelector("img").src = I[n.id]; b.querySelector(".t").textContent = n.app + " · " + n.t; b.querySelector(".b").textContent = n.b;
+  b.classList.add("show"); clearTimeout(bannerT); bannerT = setTimeout(() => b.classList.remove("show"), 4000);
+  addNote(n, true);
+});
+$("#banner").addEventListener("pointerdown", e => { e.stopPropagation(); $("#banner").classList.remove("show"); setWhich("nc"); animCC(H, 280); });
+const openSheet = w => { if (ccY > H / 2 && which === w) animCC(0, 240); else { setWhich(w); animCC(H, 280); } };
+$("#openNC").addEventListener("click", () => openSheet("nc"));
+$("#openCC").addEventListener("click", () => openSheet("cc"));
+
+// ---------- options
+let mode = "B+";
+$("#optBtn").addEventListener("click", () => $("#opts").classList.toggle("show"));
+$$('#opts [data-opt="mode"] button').forEach(b => b.addEventListener("click", () => {
+  mode = b.dataset.v; $$('#opts [data-opt="mode"] button').forEach(x => x.classList.toggle("on", x === b));
+  if (cur) { const id = cur; cur = null; $("#app").classList.remove("show"); openApp(id, null); }
+}));
+$$('#opts [data-opt="mat"] button').forEach(b => b.addEventListener("click", () => {
+  document.body.classList.toggle("os7", b.dataset.v === "os7"); $$('#opts [data-opt="mat"] button').forEach(x => x.classList.toggle("on", x === b));
+}));
+$$("#opts [data-tog]").forEach(b => b.addEventListener("click", () => { b.classList.toggle("on"); document.body.classList.toggle(b.dataset.tog, b.classList.contains("on")); }));
+// ?state=... for screenshots: app=<id>, nc=1 | cc=1, mode=A|B|B+, reveal=1
+const q = new URLSearchParams(location.search);
+if (q.get("mode")) { const b = $(`#opts [data-opt="mode"] button[data-v="${q.get("mode")}"]`); b && b.click(); }
+if (q.get("app")) setTimeout(() => openApp(q.get("app"), null), 50);
+if (q.get("reveal")) setTimeout(revealDock, 450);
+if (q.get("nc")) { setWhich("nc"); setCC(H * Math.min(1, +q.get("nc"))); }
+if (q.get("cc")) { setWhich("cc"); setCC(H * Math.min(1, +q.get("cc"))); }
+})();
+</script>
+</body>
+</html>

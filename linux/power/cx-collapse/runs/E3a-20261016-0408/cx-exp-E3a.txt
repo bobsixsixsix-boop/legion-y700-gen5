@@ -1,0 +1,27 @@
+=== 2026-10-16 03:27:20 cx-exp E3a 30 min on 7.3.0-rc4-tb323fu-t49-y10, battery Full 100 %, aco=N aso=N dl=off
+03:27:35 before: cluster[use=0 rej=108] cluster1[use=0 rej=78963] system[use=0 rej=0] apss=0/0ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+03:27:35 MARK E3a start 30min
+03:27:35 knobs: aco=Y aso=Y aoss_set=1
+E3a t+1m                      0.14 W (min -0.00 max 0.49, 13 distinct I in 75 s, Full) | backlight 1549 | panel 120:100% | cpu busy 1.0% idle[WFI=2% cpu-sleep-0=73% cpu-sleep-1=24%] | irq 706/s | gpu=160MHz ddr=667MHz llcc=307MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=94%/392x cxsd=0%/0x aosd=0%/0x
+03:29:51 t+2m: cluster[use=49 rej=108] cluster1[use=1726 rej=78963] system[use=0 rej=0] apss=0/0ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3a t+12m                     0.00 W (min -0.00 max -0.00, 1 distinct I in 75 s, Full) | backlight 1549 | panel 120:100% | cpu busy 0.8% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=25%] | irq 552/s | gpu=160MHz ddr=709MHz llcc=317MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=94%/373x cxsd=0%/0x aosd=0%/0x
+03:41:07 t+13m: cluster[use=390 rej=110] cluster1[use=10187 rej=78965] system[use=0 rej=0] apss=0/0ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3a t+23m                     0.38 W (min 0.33 max 0.44, 11 distinct I in 75 s, Discharging) | backlight 1549 | panel 120:100% | cpu busy 1.0% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=24%] | irq 660/s | gpu=160MHz ddr=708MHz llcc=315MHz | sleep adsp=91%/24x adsp_island=91%/1x cdsp=100%/0x soccp=97%/401x cxsd=0%/0x aosd=0%/0x
+03:52:23 t+25m: cluster[use=711 rej=110] cluster1[use=18924 rej=78966] system[use=0 rej=0] apss=0/0ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+03:57:38 done E3a 30 min without a reset
+03:57:41 after:  cluster[use=8176 rej=159] cluster1[use=25154 rej=79075] system[use=6047 rej=340] apss=5482/141638ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+03:57:41 MARK E3a end aco=N aso=N
+
+=== 2026-10-16 04:08:21 cx-exp E3a 30 min on 7.3.0-rc4-tb323fu-t49-y10, battery Discharging 99 %, aco=N aso=N dl=off
+04:08:36 before: cluster[use=8176 rej=22362] cluster1[use=25154 rej=94068] system[use=6047 rej=340] apss=5482/141638ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+04:08:36 MARK E3a start 30min
+04:08:36 knobs: aco=Y aso=Y aoss_set=1
+E3a t+1m                      0.36 W (min 0.13 max 0.51, 14 distinct I in 75 s, Discharging) | backlight 240 | panel 120:100% | cpu busy 0.7% idle[WFI=1% cpu-sleep-0=73% cpu-sleep-1=25%] | irq 354/s | gpu=160MHz ddr=653MHz llcc=305MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=97%/517x cxsd=0%/0x aosd=0%/0x
+04:10:52 t+2m: cluster[use=12071 rej=22362] cluster1[use=26984 rej=94068] system[use=9364 rej=508] apss=8356/228729ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3a t+12m                     0.26 W (min 0.13 max 0.32, 11 distinct I in 75 s, Discharging) | backlight 240 | panel 120:100% | cpu busy 0.8% idle[WFI=1% cpu-sleep-0=74% cpu-sleep-1=25%] | irq 386/s | gpu=160MHz ddr=653MHz llcc=305MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=97%/510x cxsd=0%/0x aosd=0%/0x
+04:22:09 t+13m: cluster[use=30269 rej=22373] cluster1[use=35631 rej=94071] system[use=24817 rej=1551] apss=22060/668202ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+E3a t+23m                     0.36 W (min -0.00 max 0.67, 14 distinct I in 75 s, Discharging) | backlight 240 | panel 120:100% | cpu busy 0.7% idle[WFI=1% cpu-sleep-0=74% cpu-sleep-1=24%] | irq 349/s | gpu=160MHz ddr=653MHz llcc=305MHz | sleep adsp=100%/0x adsp_island=100%/0x cdsp=100%/0x soccp=96%/519x cxsd=0%/0x aosd=0%/0x
+04:33:26 t+25m: cluster[use=48570 rej=22387] cluster1[use=44329 rej=94071] system[use=40498 rej=2387] apss=36088/1136041ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+04:38:36 done E3a 30 min without a reset
+04:38:38 after:  cluster[use=57000 rej=22444] cluster1[use=48263 rej=94134] system[use=47658 rej=2769] apss=42495/1352374ms cxsd=0/0ms aosd=0/0ms ddr=0/0ms 
+04:38:38 MARK E3a end aco=N aso=N

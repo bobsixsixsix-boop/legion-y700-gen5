@@ -1,0 +1,251 @@
+helper: poll less often while the panel is off ([poller] poll_s / poll_s_display_off)
+
+Out-of-tree patch for the y700 (TB323FU) running tb323fu-linux helper 0.4.1
+(upstream main 0c7c0c4, 2026-10-13). Not submitted upstream; the owner accepts
+out-of-tree patches. See y700/linux/power/WAKEUPS.md section 2.2.
+
+Why: with the screen off the tablet idles for hours without suspending
+(README "永不休眠"). tb323fu-helperd then still wakes a CPU every 5 s from two
+threads - the poll loop in main.rs (profile/thermal/panel/full-by ticks,
+PropertiesChanged snapshots of every object, which read the battery over
+glink) and the LED-ring thread (charge colour re-read every 5 s, another
+battery read). y700-whoawake measured 7 + 3 wakeups/s for the daemon with
+the screen off: a 5 s round costs about 50 context switches because every
+battery attribute is a glink round trip to the ADSP. The runtime CX-collapse
+work (cx-collapse/RESEARCH.md 1.4) needs the system-wide wakeup rate under
+50/s, so every periodic poller counts.
+
+What: a new [poller] section in /etc/tb323fu/helper.toml
+    poll_s = 5                 # as before while the display is on
+    poll_s_display_off = 30    # while every connected DSI panel is DPMS Off; 0 = poll_s
+read on every round by both the main loop and the LED thread, with the
+panel state taken from /sys/class/drm/card*-DSI-*/{status,dpms} (connected
+connectors only: the unplugged DP and the writeback connector report "On"
+forever - the same mistake the y700 autobright once made). Defaults keep the
+daemon's behaviour on screen; the owner can raise poll_s_display_off to 60.
+Missing keys mean defaults (serde default), so an old helper.toml loads
+unchanged, and the daemon writes the new section on its next save.
+
+Side effects while the panel is off: PropertiesChanged for a charger plugged
+in arrives up to poll_s_display_off later (the LED charge indicator too);
+wifi_tick's once-a-minute re-check becomes once per 12 rounds; the kernel
+auto-check cadence is time based and unaffected. With the display on nothing
+changes. Not changed: tb323fu-ctl (no new sub-command; edit the file and
+`tb323fu-ctl reload`), docs/helper-reference.md.
+
+Build on the tablet (no cargo on the Win11 side; helper/README.md):
+    sudo apt install cargo rustc            # Rust >= 1.80
+    cd /usr/local/src/tb323fu-linux && git apply ~/helperd-slow-poll.patch
+    cd helper && cargo build --release -p tb323fu-helperd
+    install -m755 target/release/tb323fu-helperd /usr/local/libexec/tb323fu-helperd
+    # the dpkg package tb323fu-helper 0.4.1 owns /usr/libexec/tb323fu-helperd and
+    # /usr/lib/systemd/system/tb323fu-helperd.service: point the unit at our binary
+    # with a drop-in instead of running install.sh (survives package upgrades;
+    # the helper's self-update refuses dpkg-owned installs anyway)
+    mkdir -p /etc/systemd/system/tb323fu-helperd.service.d
+    printf '[Service]
+ExecStart=
+ExecStart=/usr/local/libexec/tb323fu-helperd
+'         > /etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf
+    systemctl daemon-reload && systemctl restart tb323fu-helperd
+    tb323fu-ctl status      # still answers; grep poll_s /etc/tb323fu/helper.toml after the first save
+Verify: y700-wakeups 60 --off -> tb323fu-helperd under "wakeups/s by woken
+process" should show ~2 active seconds of 60 instead of 12.
+Undo: rm the drop-in, systemctl daemon-reload, restart; the [poller] keys
+are ignored by the stock daemon.
+
+Rebuild after a tb323fu-helper package upgrade (y700-checklist warns when
+the running binary is not ours or the package version changed).
+
+---
+diff --git a/helper/crates/tb323fu-helper-core/src/config.rs b/helper/crates/tb323fu-helper-core/src/config.rs
+--- a/helper/crates/tb323fu-helper-core/src/config.rs
++++ b/helper/crates/tb323fu-helper-core/src/config.rs
+@@ -28,6 +28,7 @@
+     pub haptics: Haptics,
+     pub usb: Usb,
+     pub kernel: Kernel,
++    pub poller: Poller,
+ }
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+@@ -216,6 +217,25 @@
+     }
+ }
+ 
++/// The daemon's poll loop (LED ring charge indicator, profile follow, the
++/// PropertiesChanged watch). Every round is a CPU wakeup plus a battery read
++/// over glink; with the panel off the tablet idles for hours, so poll less.
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
++#[serde(default)]
++pub struct Poller {
++    /// seconds between polls while the display is on
++    pub poll_s: u64,
++    /// seconds between polls while every connected DSI panel is off (DPMS);
++    /// 0 = same as poll_s
++    pub poll_s_display_off: u64,
++}
++
++impl Default for Poller {
++    fn default() -> Self {
++        Poller { poll_s: 5, poll_s_display_off: 30 }
++    }
++}
++
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+ #[serde(default)]
+ pub struct Usb {
+@@ -275,6 +295,7 @@
+             haptics: Haptics::default(),
+             usb: Usb::default(),
+             kernel: Kernel::default(),
++            poller: Poller::default(),
+         }
+     }
+ }
+diff --git a/helper/crates/tb323fu-helper-core/src/features.rs b/helper/crates/tb323fu-helper-core/src/features.rs
+--- a/helper/crates/tb323fu-helper-core/src/features.rs
++++ b/helper/crates/tb323fu-helper-core/src/features.rs
+@@ -444,6 +444,32 @@
+     None
+ }
+ 
++// ---------------------------------------------------------------- display power
++
++/// The built-in panel is off: every connected DSI connector reports DPMS
++/// "Off" (`/sys/class/drm/card*-DSI-*/{status,dpms}`). `None` when no DSI
++/// connector is connected (a fake tree, an external-only setup). Only the
++/// connected connectors count: a disconnected DP or writeback connector
++/// reports "On" forever.
++pub fn display_off() -> Option<bool> {
++    let drm = sys::path("/sys/class/drm");
++    let mut connected = false;
++    for name in sys::list_dir(&drm) {
++        if !name.contains("-DSI-") {
++            continue;
++        }
++        let d = drm.join(&name);
++        if sys::read_opt(&d.join("status")).as_deref() != Some("connected") {
++            continue;
++        }
++        connected = true;
++        if sys::read_opt(&d.join("dpms")).as_deref() != Some("Off") {
++            return Some(false);
++        }
++    }
++    connected.then_some(true)
++}
++
+ /// The full rate of the current display mode: the live rate scaled by how far the vertical
+ /// total is stretched (`hz * live / base` from `idle_refresh_state`).
+ pub fn refresh_mode_hz() -> Option<u32> {
+diff --git a/helper/crates/tb323fu-helperd/src/led.rs b/helper/crates/tb323fu-helperd/src/led.rs
+--- a/helper/crates/tb323fu-helperd/src/led.rs
++++ b/helper/crates/tb323fu-helperd/src/led.rs
+@@ -8,6 +8,7 @@
+ use crate::Shared;
+ use std::sync::{Arc, Condvar, Mutex};
+ use std::time::{Duration, Instant};
++use tb323fu_helper_core::config::Config;
+ use tb323fu_helper_core::features as f;
+ use tb323fu_helper_core::perf;
+ 
+@@ -24,7 +25,6 @@
+ }
+ 
+ const FRAME: Duration = Duration::from_millis(80);
+-const IDLE: Duration = Duration::from_secs(5);
+ const PULSE_ON: Duration = Duration::from_millis(250);
+ const PULSE_OFF: Duration = Duration::from_millis(250);
+ 
+@@ -46,6 +46,15 @@
+     std::thread::spawn(move || run(sh));
+ }
+ 
++/// The idle period between charge-color refreshes: `[poller] poll_s`, or
++/// `poll_s_display_off` while the panel is off (every refresh is a battery
++/// read over glink; nobody sees the ring change with the screen off).
++fn idle_wait(cfg: &Config) -> Duration {
++    let p = &cfg.poller;
++    let s = if p.poll_s_display_off > 0 && f::display_off() == Some(true) { p.poll_s_display_off } else { p.poll_s };
++    Duration::from_secs(s.max(1))
++}
++
+ fn run(sh: Arc<Shared>) {
+     let start = Instant::now();
+     // (color, brightness) last written; the charge color, re-read every 5 s
+@@ -62,6 +71,7 @@
+         };
+         let cfg = sh.cfg();
+         let c = &cfg.ledring;
++        let idle = idle_wait(&cfg);
+         if let Some((color, count)) = pulse {
+             for _ in 0..count.min(10) {
+                 let _ = f::ledring_apply(Some(color), c.brightness.max(1));
+@@ -72,7 +82,7 @@
+             last = None;
+             hw = None;
+         }
+-        if force || charge.0.is_none_or(|t| t.elapsed() >= IDLE) {
++        if force || charge.0.is_none_or(|t| t.elapsed() >= idle) {
+             charge = (Some(Instant::now()), f::battery_info().ok().and_then(|i| f::ledring_color(&i, c.low_percent, cfg.battery.bypass)));
+         }
+         let own = f::parse_color(&c.color).ok();
+@@ -94,7 +104,7 @@
+             if hw.is_some() {
+                 last = None;
+                 let g = sh.led.req.lock().unwrap();
+-                let _ = sh.led.cv.wait_timeout_while(g, IDLE, |r| !r.force && r.pulse.is_none());
++                let _ = sh.led.cv.wait_timeout_while(g, idle, |r| !r.force && r.pulse.is_none());
+                 continue;
+             }
+         } else if hw.take().is_some() {
+@@ -120,7 +130,7 @@
+             }
+             last = Some(want);
+         }
+-        let wait = if animate { FRAME } else { IDLE };
++        let wait = if animate { FRAME } else { idle };
+         let g = sh.led.req.lock().unwrap();
+         let _ = sh.led.cv.wait_timeout_while(g, wait, |r| !r.force && r.pulse.is_none());
+     }
+diff --git a/helper/crates/tb323fu-helperd/src/main.rs b/helper/crates/tb323fu-helperd/src/main.rs
+--- a/helper/crates/tb323fu-helperd/src/main.rs
++++ b/helper/crates/tb323fu-helperd/src/main.rs
+@@ -581,7 +581,9 @@
+ 
+     // Poller: LED ring and GPU follow, re-assert USB wake, and PropertiesChanged
+     // for objects whose values changed underneath (charger plugged, kernel knob
+-    // written by someone else, ...). 5 s is enough for all of these.
++    // written by someone else, ...). 5 s is enough for all of these; with the
++    // panel off, [poller] poll_s_display_off (30 s) - nobody is looking, and
++    // every round is a CPU wakeup plus a battery read over glink.
+     let mut last: HashMap<&'static str, String> = HashMap::new();
+     loop {
+         shared.profile_tick(&conn, false).await;
+@@ -623,7 +625,9 @@
+             kern.auto_tick();
+             watch::<kernel::Kernel>(&conn, kernel::P_KERNEL, &mut last).await;
+         }
+-        async_io::Timer::after(Duration::from_secs(5)).await;
++        let p = shared.cfg().poller;
++        let secs = if p.poll_s_display_off > 0 && f::display_off() == Some(true) { p.poll_s_display_off } else { p.poll_s };
++        async_io::Timer::after(Duration::from_secs(secs.max(1))).await;
+     }
+ }
+ 
+diff --git a/helper/data/helper.toml.example b/helper/data/helper.toml.example
+--- a/helper/data/helper.toml.example
++++ b/helper/data/helper.toml.example
+@@ -71,6 +71,11 @@
+ # dev_mode = true        # USB gadget network + serial console; omit to keep the boot state
+ # charger_wake = false   # plugging or unplugging a charger wakes the tablet; omit to keep the kernel's setting (on)
+ 
++[poller]                 # the daemon's poll loop (LED ring charge indicator, profile follow, PropertiesChanged)
++poll_s = 5               # seconds between polls while the display is on
++poll_s_display_off = 30  # while every connected DSI panel is off (DPMS); 0 = poll_s. Screen off, each poll is a
++                         # CPU wakeup plus a battery read over glink (y700 linux/power/WAKEUPS.md)
++
+ [kernel]                 # kernel updates (docs/helper.md "Kernel updates")
+ channel = "stable"       # "stable": the newest release; "testing": the newest release or pre-release
+                          # (a testing kernel is kept only when you press Keep)

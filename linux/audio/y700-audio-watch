@@ -1,0 +1,134 @@
+#!/bin/bash
+# y700-audio-watch [SECONDS] -- read-only log of who opens the built-in speakers, and whether the speaker
+# sink ever stays "idle" with its PCM open (linux/audio/SUSPEND.md section 6). NOT INSTALLED (2026-10-16).
+#
+# Prints, with timestamps, to stdout only:
+#   pcm:    the speaker PCM's state from /proc/asound/cardN/pcm0p/sub0/status (closed / PREPARED / RUNNING),
+#           read every POLL seconds with a shell builtin (no process per poll);
+#   sink:   PipeWire's state of alsa_output...HiFi__Speaker__sink (RUNNING / IDLE / SUSPENDED) on every sink
+#           event, and every POLL seconds while the PCM is open;
+#   stream: every new playback stream with the application that owns it (pactl subscribe), and on every
+#           closed -> open of the PCM the streams that are not corked at that moment;
+#   kernel: the aw882xx startup/shutdown/start lines, as journalctl prints them ("... kernel: [Awinic]...";
+#           journalctl -k, if this user may read it; with aw882xx-quiet-stream-log.DRAFT.patch applied only
+#           the start_pa outcome lines are left);
+#   STUCK:  the PCM has been open while the sink was IDLE (not RUNNING) for more than STUCK seconds,
+#           i.e. the stock WirePlumber suspend (5 s) did not happen.
+# Costs: one pactl subscribe client, one journalctl follower, a builtin file read every POLL s, and a pactl
+# call per sink event / per POLL while the PCM is open. Do not leave it running; do not run it during a
+# power measurement it is not part of.
+#
+# Run as the desktop user, or as root (pactl then runs as Y700_USER, default user), e.g.
+#   systemd-run --unit y700-audio-watch --collect /bin/sh -c \
+#     '/usr/local/libexec/y700-audio-watch 1800 > /var/log/y700-audio-watch-$(date +%m%d-%H%M).txt 2>&1'
+set -u
+DUR=${1:-1800}
+POLL=${POLL:-2}
+STUCK=${STUCK:-10}
+HW=alsa_output.platform-sound.HiFi__Speaker__sink
+export LC_ALL=C                      # pactl output is parsed below
+
+U=()
+if [ "$(id -u)" = 0 ]; then
+	user=${Y700_USER:-user}
+	# LC_ALL=C again behind sudo: the desktop user's locale translates pactl's headings and events
+	U=(sudo -u "$user" env LC_ALL=C XDG_RUNTIME_DIR="/run/user/$(id -u "$user")")
+fi
+pa() { "${U[@]}" pactl "$@"; }
+
+ASOUND=${Y700_ASOUND:-/proc/asound}     # overridable only for the stub test
+card=$(awk '/LENOVO|TB323FU/ {print $1; exit}' "$ASOUND/cards")
+ST=$ASOUND/card${card:-0}/pcm0p/sub0/status
+
+ts() { local t=$EPOCHREALTIME; printf '%(%T)T.%.3s' "${t%.*}" "${t#*.}"; }
+read_pcm() {                         # sets PCM without forking
+	local l=""
+	if ! { IFS= read -r l < "$ST"; } 2>/dev/null; then PCM="?"; return; fi
+	case $l in
+	closed) PCM=closed ;;
+	state:*) PCM=${l#state: } ;;
+	*) PCM=$l ;;
+	esac
+}
+read_hw() { HWST=$(pa list short sinks 2>/dev/null | awk -v n="$HW" '$2 == n {print $NF}'); HWST=${HWST:-absent}; }
+stream_info() {                      # $1 = sink-input index
+	pa list sink-inputs 2>/dev/null | awk -v id="#$1" '
+		/^Sink Input #/ { on = ($3 == id) }
+		on && /^[ \t]*(Sink|Corked):|application\.name =|application\.process\.binary =|media\.name =|media\.role =|node\.name =/ {
+			sub(/^[ \t]+/, ""); printf "%s; ", $0 }
+		END { print "" }'
+}
+uncorked() {
+	pa list sink-inputs 2>/dev/null | awk '
+		function flush() { if (id != "" && corked == "no") printf "#%s %s (%s); ", id, app, node }
+		/^Sink Input #/ { flush(); id = substr($3, 2); corked = ""; app = "?"; node = "?" }
+		/^[ \t]*Corked:/ { corked = $2 }
+		/application\.name =/ { app = $0; sub(/.*= /, "", app) }
+		/node\.name =/ { node = $0; sub(/.*= /, "", node) }
+		END { flush(); print "" }'
+}
+
+jpid=""; spid=""
+cleanup() { [ -n "$jpid" ] && kill "$jpid" 2>/dev/null; [ -n "$spid" ] && kill "$spid" 2>/dev/null; }
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+
+if journalctl -k -n 0 -q >/dev/null 2>&1; then
+	# journalctl itself is the background job (no pipeline), so $! is its pid and cleanup() stops it.
+	# Behind a pipe, $! was the last stage and a "journalctl -f" outlived the script until the next
+	# matching kernel line; a leaked follower wakes on every journal write.
+	journalctl -k -f -n 0 -q -o short-precise \
+		--grep 'aw882xx_(startup|shutdown|start_pa)|aw882xx_mute: mute state' 2>/dev/null &
+	jpid=$!
+	sleep 0.5
+	kill -0 "$jpid" 2>/dev/null || { echo "$(ts) (journalctl --grep did not start: no aw882xx lines)"; jpid=""; }
+else
+	echo "$(ts) (kernel log not readable as $(id -un): no aw882xx lines)"
+fi
+start_sub() { exec 3< <(exec "${U[@]}" pactl subscribe 2>/dev/null); spid=$!; }
+start_sub
+sub_note=-100                        # last "subscribe ended" message (at most one a minute)
+
+read_pcm; read_hw
+last_pcm=$PCM; last_hw=$HWST; idle_since=""; next_report=0
+echo "$(ts) start: pcm=$PCM sink=$HWST card=${card:-?} poll=${POLL}s stuck=${STUCK}s for ${DUR}s"
+end=$((SECONDS + DUR))
+while [ $SECONDS -lt $end ]; do
+	if IFS= read -r -t "$POLL" -u 3 line; then
+		case $line in
+		*"'new' on sink-input #"*)
+			id=${line##*#}; echo "$(ts) stream new #$id: $(stream_info "$id")" ;;
+		*"'remove' on sink-input #"*)
+			echo "$(ts) stream gone #${line##*#}" ;;
+		*" on sink #"*)
+			read_hw; [ "$HWST" != "$last_hw" ] && { echo "$(ts) sink: $last_hw -> $HWST"; last_hw=$HWST; } ;;
+		esac
+	else
+		if [ $? -le 128 ]; then      # EOF: pipewire-pulse went away; try again
+			[ $((SECONDS - sub_note)) -ge 60 ] && { echo "$(ts) pactl subscribe ended, restarting every 2 s"; sub_note=$SECONDS; }
+			sleep 2; start_sub
+		fi
+	fi
+	read_pcm
+	if [ "$PCM" != "$last_pcm" ]; then
+		echo "$(ts) pcm: $last_pcm -> $PCM"
+		[ "$last_pcm" = closed ] && echo "$(ts)   playing now: $(uncorked)"
+		last_pcm=$PCM
+	fi
+	if [ "$PCM" != closed ] && [ "$PCM" != "?" ]; then
+		read_hw
+		[ "$HWST" != "$last_hw" ] && { echo "$(ts) sink: $last_hw -> $HWST"; last_hw=$HWST; }
+		if [ "$HWST" = IDLE ]; then
+			[ -z "$idle_since" ] && { idle_since=$SECONDS; next_report=$((SECONDS + STUCK)); }
+			if [ $SECONDS -ge "$next_report" ]; then
+				echo "$(ts) STUCK: pcm $PCM while the sink has been IDLE for $((SECONDS - idle_since)) s"
+				next_report=$((SECONDS + 60))          # repeat at most once a minute
+			fi
+		else
+			idle_since=""
+		fi
+	else
+		idle_since=""
+	fi
+done
+echo "$(ts) done: pcm=$PCM sink=$last_hw"

@@ -1,0 +1,595 @@
+# MUST-KEEP (symbol  reason). Mechanically: each must be =y or =m after olddefconfig
+# (state shown = state in config-running; keep the same built-in/module state unless noted).
+# --- SoC core, clocks, power domains, interconnect (bound-drivers: platform ...) ---
+ARCH_QCOM y  platform
+PINCTRL_MSM y  pinctrl core for kaanapali-tlmm
+PINCTRL_KAANAPALI y  bound kaanapali-tlmm
+PINCTRL_QCOM_SPMI_PMIC y  bound qcom-spmi-gpio x8
+PINCTRL_LPASS_LPI y  core for the sm8650 LPI driver
+PINCTRL_SM8650_LPASS_LPI m  bound qcom-sm8650-lpass-lpi-pinctrl (lsmod pinctrl_sm8650_lpass_lpi)
+COMMON_CLK_QCOM y  clk core
+QCOM_GDSC y  GDSCs
+CLK_KAANAPALI_GCC y  bound gcc-kaanapali
+CLK_KAANAPALI_CAMCC y  bound camcc-kaanapali + cambistmclkcc-kaanapali
+CLK_KAANAPALI_DISPCC y  bound dispcc-kaanapali
+CLK_KAANAPALI_GPUCC y  bound gpucc-kaanapali + gxclkctl-kaanapali
+CLK_KAANAPALI_TCSRCC y  bound tcsr_cc-kaanapali
+CLK_KAANAPALI_VIDEOCC y  bound videocc-kaanapali
+QCOM_CLK_RPMH y  bound clk-rpmh
+INTERCONNECT_QCOM y  icc core
+INTERCONNECT_QCOM_RPMH y  icc-rpmh
+INTERCONNECT_QCOM_BCM_VOTER y  bound bcm_voter
+INTERCONNECT_QCOM_KAANAPALI y  bound qnoc-kaanapali x13
+QCOM_ICC_BWMON y  bound qcom-bwmon x2 (baldur.fragment: built in, held icc sync_state)
+QCOM_RPMH y  bound rpmh
+QCOM_RPMHPD y  bound qcom-rpmhpd
+QCOM_COMMAND_DB y  bound cmd-db
+QCOM_AOSS_QMP y  bound qcom_aoss_qmp
+QCOM_SMEM y  bound qcom-smem
+QCOM_SMEM_STATE y  smp2p state
+QCOM_SMP2P y  bound qcom_smp2p x3
+HWSPINLOCK_QCOM y  bound qcom_hwspinlock
+QCOM_IPCC y  bound qcom-ipcc
+QCOM_CPUCP_MBOX y  bound qcom_cpucp_mbox x2 (baldur.fragment: must be built in or SCMI/cpufreq never come up)
+QCOM_PDC y  bound qcom_pdc
+QCOM_SCM y  bound qcom_scm
+QCOM_TZMEM y  scm memory
+QCOM_TZMEM_MODE_SHMBRIDGE y  required by QCOMTEE
+QCOM_PAS y  remoteproc auth
+QCOM_SOCINFO y  bound qcom-socinfo
+QCOM_LLCC y  bound qcom-llcc
+EDAC_QCOM y  bound qcom_llcc_edac
+QCOM_RMTFS_MEM y  bound qcom_rmtfs_mem (modem masked, but driver bound to reserved memory)
+QCOM_GENI_SE y  bound geni_se_qup x4
+QCOM_GPI_DMA y  bound gpi x4
+QCOM_BAM_DMA y  bound bam-dma-engine
+QCOM_INLINE_CRYPTO_ENGINE y  bound qcom-ice (UFS inline crypto)
+QCOM_UBWC_CONFIG y  msm/iris UBWC
+QCOM_MDT_LOADER y  firmware loader
+QCOM_QMI_HELPERS y  QMI (pd-mapper, sysmon, ath12k)
+QCOM_PDR_HELPERS y  protection-domain restart (APR/GPR)
+QCOM_PDR_MSG y  pd mapper
+QCOM_PD_MAPPER m  bound qcom_pd_mapper x3 (lsmod)
+QCOM_STATS m  bound qcom_stats (debugfs qcom_stats used by our power tools)
+QCOM_PMIC_GLINK y  bound qcom_pmic_glink + rpmsg qcom_pmic_glink_rpmsg + pmic_glink_altmode
+BATTERY_QCOM_BATTMGR y  bound qcom_battmgr (our y1/y3 battmgr patches; must be built in)
+TYPEC y  USB-C
+TYPEC_UCSI y  ucsi
+UCSI_PMIC_GLINK y  bound ucsi_glink
+TYPEC_DP_ALTMODE y  DP alt-mode (keep: may be used)
+TYPEC_MUX_FSA4480 y  bound fsa4480 (USB-C audio/SBU switch)
+USB_ROLE_SWITCH y  a600000.usb-role-switch
+SPMI y  spmi bus
+SPMI_MSM_PMIC_ARB y  bound spmi_pmic_arb
+MFD_SPMI_PMIC y  bound pmic-spmi x8
+REGULATOR_QCOM_RPMH y  bound qcom-rpmh-regulator x7
+REGULATOR_FIXED_VOLTAGE y  generic, keep (not bound today; cheap)
+NVMEM_QCOM_QFPROM y  bound qcom,qfprom (GPU speed bin)
+NVMEM_SPMI_SDAM m  bound qcom,spmi-sdam (lsmod nvmem_qcom_spmi_sdam)
+POWER_RESET_QCOM_PON y  bound qcom-pon
+REBOOT_MODE y  reboot-mode via qcom-pon
+INPUT_PM8941_PWRKEY y  bound pm8941-pwrkey x2 (power, resin=volume)
+RTC_DRV_PM8XXX m  bound rtc-pm8xxx (lsmod)
+RTC_CLASS y  alarmtimer bound (s2idle RTC wake tests)
+QCOM_TSENS y  bound qcom-tsens x7
+QCOM_SPMI_TEMP_ALARM y  bound spmi-temp-alarm x7
+QCOM_SPMI_ADC5_GEN3 y  bound qcom-spmi-adc5-gen3 (board thermistors, patch 0039)
+QCOM_SPMI_ADC_TM5_GEN3 y  bound auxiliary qcom_spmi_adc_tm5_gen3
+QCOM_VADC_COMMON y  selected by ADC5_GEN3
+THERMAL y  thermal zones (78 zones in dmesg)
+THERMAL_OF y  DT thermal zones (patch 0108 skin throttling)
+CPU_THERMAL y  cpufreq cooling
+DEVFREQ_THERMAL y  GPU cooling (devfreq-3d00000.gpu cooling device in dmesg)
+THERMAL_GOV_STEP_WISE y  default governor (patch 0069)
+QCOM_WDT y  bound qcom_wdt; STABILITY: firmware leaves watchdog running (baldur.fragment)
+ARM_SMMU y  bound arm-smmu x2 (SMMUv2/MMU-500 per dmesg)
+ARM_SMMU_QCOM y  qcom smmu impl (patch 0029)
+IOMMU_IO_PGTABLE_LPAE y  smmu page tables
+ARM_ARCH_TIMER y  bound arch-timer-mmio + arch timer
+ARM_GIC_V3 y  GIC
+ARM_GIC_V3_ITS y  PCIe MSI (ITS in dmesg)
+ARM_PMUV3 y  bound armv8-pmu
+ARM_PSCI_FW y  PSCI
+ARM_PSCI_CPUIDLE y  bound psci-cpuidle
+ARM_PSCI_CPUIDLE_DOMAIN y  bound psci-cpuidle-domain; STABILITY: patch 0106/0118 allow_cluster_off=0 lives here
+ARM_SCMI_PROTOCOL y  bound arm-scmi x2
+ARM_SCMI_TRANSPORT_MAILBOX y  bound scmi_mailbox_transport x2
+ARM_SCMI_QUIRKS y  SCMI quirk framework (keep)
+ARM_SCMI_CPUFREQ y  bound scmi-cpufreq (the only cpufreq driver here)
+ARM_SCMI_PERF_DOMAIN y  bound scmi-perf-domain
+QCOM_SCMI_GENERIC_EXT y  memlat vendor protocol 0x80 (patches 0120-0122)
+SCMI_QCOM_MEMLAT_DEVFREQ y  bound scmi-qcom-devfreq-memlat (patch 0126)
+DEVFREQ_GOV_REMOTE y  memlat governor (patch 0125)
+PM_DEVFREQ y  GPU/memlat devfreq
+DEVFREQ_GOV_SIMPLE_ONDEMAND y  GPU devfreq governor
+CPU_FREQ y  cpufreq
+CPU_FREQ_GOV_SCHEDUTIL y  default governor
+ENERGY_MODEL y  EAS (patch 0117)
+MAILBOX y  mailbox core
+REMOTEPROC y  ADSP/CDSP/SoCCP
+REMOTEPROC_CDEV y  remoteproc char dev
+QCOM_Q6V5_PAS m  bound qcom_q6v5_pas x3 (lsmod)
+QCOM_Q6V5_COMMON m  lsmod qcom_q6v5
+QCOM_RPROC_COMMON m  lsmod qcom_common
+QCOM_SYSMON m  lsmod qcom_sysmon
+QCOM_PIL_INFO m  lsmod qcom_pil_info
+RPMSG y  rpmsg
+RPMSG_CHAR y  rpmsg char
+RPMSG_CTRL m  bound rpmsg_ctrl x3 (lsmod)
+RPMSG_NS y  rpmsg ns
+RPMSG_QCOM_GLINK y  bound qcom_glink_ssr x2
+RPMSG_QCOM_GLINK_SMEM y  glink transport to ADSP/CDSP/SoCCP
+QCOM_APR y  bound rpmsg qcom,apr (GPR for AudioReach)
+QCOM_FASTRPC m  bound qcom,fastrpc x2 + fastrpc-cb x15 (sensors via hexagonrpcd)
+QRTR y  QRTR (sensors, ath12k, pd-mapper)
+QRTR_SMD y  bound rpmsg qcom_smd_qrtr x3
+QRTR_MHI y  bound mhi qcom_mhi_qrtr (ath12k)
+MHI_BUS y  ath12k transport
+QCOMTEE m  bound qcomtee (lsmod)
+TEE y  TEE core for qcomtee
+HW_RANDOM y  hwrng core
+HW_RANDOM_QCOM m  bound qcom_rng (lsmod)
+HW_RANDOM_ARM_SMCCC_TRNG y  bound smccc_trng
+# --- display / GPU ---
+DRM y  DRM
+DRM_MSM y  bound adreno, msm-mdss, msm_dpu, msm_dsi x2, msm_dsi_phy x2, msm-dp-display
+DRM_MSM_KMS y  KMS
+DRM_MSM_MDSS y  MDSS
+DRM_MSM_DPU y  DPU
+DRM_MSM_DSI y  DSI
+DRM_MSM_DSI_7NM_PHY y  qcom,kaanapali-dsi-phy-3nm lives in dsi_phy_7nm.c
+DRM_MSM_DP y  bound msm-dp-display (DP alt-mode)
+DRM_MSM_GPU_STATE y  GPU crash state (GMU fault debugging, y4 0621)
+DRM_PANEL_NOVATEK_NT36523 y  bound panel-novatek-nt36523 (must be built in: baldur-display.fragment)
+BACKLIGHT_CLASS_DEVICE y  backlight
+BACKLIGHT_AW99706 y  bound aw99706 (must be built in)
+DRM_AUX_BRIDGE y  bound aux_bridge
+DRM_AUX_HPD_BRIDGE y  bound aux_hpd_bridge (DP HPD from pmic_glink_altmode)
+DRM_DISPLAY_DP_AUX_CEC y  CEC over DP-to-HDMI (keep, may be used)
+DRM_SIMPLEDRM y  boot console on splash buffer (baldur.fragment)
+DRM_FBDEV_EMULATION y  fbcon
+FRAMEBUFFER_CONSOLE y  panel console (console=tty1)
+FONT_TER16x32 y  fbcon font (cmdline fbcon=font:TER16x32)
+DMA_SHARED_BUFFER y  dma-buf
+DMABUF_HEAPS_SYSTEM y  dma-heap (libcamera, iris)
+DMABUF_HEAPS_CMA y  dma-heap reserved (libcamera, baldur.fragment CMA 256 MB)
+UDMABUF y  keep (libcamera DmaBufAllocator fallback; tiny)
+SYNC_FILE y  explicit sync
+# --- video decode / camera (all bound and working: README Linux section) ---
+MEDIA_SUPPORT m  media core (lsmod mc)
+MEDIA_CONTROLLER y  camss/iris
+VIDEO_DEV m  lsmod videodev
+V4L2_MEM2MEM_DEV m  lsmod v4l2_mem2mem (iris)
+V4L2_FWNODE m  lsmod v4l2_fwnode
+V4L2_ASYNC m  lsmod v4l2_async
+V4L2_CCI_I2C m  lsmod v4l2_cci
+VIDEOBUF2_DMA_CONTIG m  lsmod
+VIDEOBUF2_DMA_SG m  lsmod
+VIDEO_QCOM_IRIS m  bound qcom-iris (wiliwili / Chrome / Steam streaming HW decode, y6/y7 patches)
+VIDEO_QCOM_CAMSS m  bound qcom-camss (front/rear camera work: README)
+PHY_QCOM_MIPI_CSI2 m  bound qcom-mipi-csi2-phy x2
+I2C_QCOM_CCI m  bound i2c-qcom-cci x2
+VIDEO_S5KJNS m  bound s5kjns (rear camera)
+VIDEO_GC08A8 m  bound gc08a8 (front camera)
+VIDEO_DW9719 m  bound dw9719 (rear focus motor GT9764)
+USB_VIDEO_CLASS m  USB webcams (keep, may be plugged)
+# --- storage / filesystems ---
+SCSI y  UFS
+BLK_DEV_SD y  bound sd x6
+SCSI_UFSHCD y  bound ufs_device_wlun
+SCSI_UFSHCD_PLATFORM y  ufs platform
+SCSI_UFS_QCOM y  bound ufshcd-qcom
+SCSI_UFS_CRYPTO y  inline crypto
+PHY_QCOM_QMP y  QMP phys
+PHY_QCOM_QMP_UFS y  bound qcom-qmp-ufs-phy
+PHY_QCOM_QMP_PCIE y  bound qcom-qmp-pcie-phy
+PHY_QCOM_QMP_COMBO y  bound qcom-qmp-combo-phy (USB3 + DP)
+PHY_QCOM_EUSB2_REPEATER y  bound qcom-eusb2-repeater
+PHY_QCOM_M31_EUSB y  bound qcom-m31eusb2-phy
+MMC y  microSD
+MMC_BLOCK y  microSD
+MMC_SDHCI y  microSD
+MMC_SDHCI_PLTFM y  microSD
+MMC_SDHCI_MSM y  bound sdhci_msm
+MMC_CQHCI y  selected by sdhci-msm
+PWRSEQ_SIMPLE y  keep (generic, unsure)
+EXT4_FS y  root fs sda15
+BLK_DEV_LOOP y  initramfs mounts the modules squashfs via loop before any module loads; FEX guest rootfs
+SQUASHFS y  /usr/lib/modules squashfs + /usr/share/guestos/fex-mesa (mounts)
+SQUASHFS_XZ y  modules image is xz (initramfs/build.sh mksquashfs -comp xz)
+SQUASHFS_ZSTD y  FEX ArchLinux.sqsh (baldur.fragment)
+FUSE_FS m  lsmod fuse; flatpak portal fuse.portal mount, exfat-fuse fallback
+OVERLAY_FS m  y700-guestos-mount overlays Mesa.sqsh when present
+VFAT_FS y  USB sticks / SD
+FAT_DEFAULT_UTF8 y  vfat names
+NLS_CODEPAGE_437 y  vfat
+NLS_ISO8859_1 y  vfat
+NLS_UTF8 y  vfat/exfat
+EXFAT_FS m  USB/SD exFAT (kbuild-y7 check)
+NTFS3_FS m  USB NTFS
+BTRFS_FS m  keep (USB drives, cheap)
+EROFS_FS m  linux/osk-design/lp-mount.sh mounts Android erofs partitions
+CIFS m  keep (SMB shares, cheap)
+ISO9660_FS m  keep (loop-mounting ISO files)
+UDF_FS m  keep (ISO/UDF images)
+QUOTA y  keep: an ext4 root with the quota feature cannot be mounted rw without it (root fs features not inventoried)
+AUTOFS_FS y  systemd binfmt_misc automount (mounts)
+BINFMT_MISC m  lsmod binfmt_misc (mounted)
+CONFIGFS_FS y  USB gadget configfs
+TMPFS y  tmpfs
+HUGETLBFS y  mounted /dev/hugepages
+PSTORE y  crash diagnostics
+PSTORE_RAM y  bound ramoops
+PSTORE_CONSOLE y  crash console in pstore
+PSTORE_PMSG y  keep (part of ramoops layout)
+PSTORE_COMPRESS y  pstore compression
+ZRAM m  zram swap (lsmod zram)
+ZRAM_BACKEND_ZSTD y  kbuild-y7 check
+ZRAM_BACKEND_LZ4 y  zram lz4
+ZSMALLOC y  zram allocator
+LRU_GEN y  MGLRU
+LRU_GEN_ENABLED y  kbuild-y7 check
+CMA y  camera buffers (CMA_SIZE_MBYTES=256)
+# --- USB ---
+USB y  host
+USB_XHCI_HCD y  dwc3 host
+USB_XHCI_PLATFORM y  dwc3 host
+USB_DWC3 y  bound dwc3
+USB_DWC3_QCOM y  bound dwc3-qcom
+USB_DWC3_DUAL_ROLE y  OTG + gadget
+USB_OTG y  OTG
+USB_STORAGE y  USB sticks (built in today)
+USB_UAS m  USB SSDs
+USB_GADGET y  gadget
+USB_LIBCOMPOSITE y  bound configfs-gadget.baldur
+USB_CONFIGFS y  initramfs builds acm+ncm gadget
+USB_CONFIGFS_ACM y  ttyGS0 (initramfs gadget)
+USB_CONFIGFS_NCM y  usb0 / 192.168.7.2 ssh over USB
+U_SERIAL_CONSOLE y  initramfs shell on ttyGS0 (tb323fu.usbshell=1)
+USB_XHCI_SIDEBAND y  keep (USB audio offload path, cheap)
+USB_HID m  USB keyboards/mice/controllers
+USB_HIDDEV y  keep
+USB_ACM m  USB serial/modem class devices (cheap)
+USB_SERIAL m  USB-serial adapters (keep)
+SND_USB_AUDIO m  USB-C headphones / DACs
+USB_NET_DRIVERS y  USB Ethernet adapters
+USB_USBNET m  USB Ethernet
+USB_RTL8152 m  USB Ethernet (RTL815x)
+USB_LAN78XX m  USB Ethernet
+USB_NET_AX8817X m  USB Ethernet
+USB_NET_AX88179_178A m  USB Ethernet
+USB_NET_CDCETHER m  USB Ethernet / phones
+USB_NET_CDC_NCM m  USB Ethernet / phones
+USB_NET_RNDIS_HOST m  Android phone tethering
+USB_RTL8153_ECM m  USB Ethernet
+PHYLIB y  needed by USB NICs (r8152/ax88179 select it)
+REALTEK_PHY m  keep (USB 2.5G dongles; unsure)
+# --- input / haptics / LEDs ---
+INPUT_EVDEV y  input
+INPUT_UINPUT m  lsmod uinput (fcitx5-osk-key-helper, our OSK tests)
+INPUT_JOYDEV m  lsmod joydev (games)
+INPUT_FF_MEMLESS m  lsmod ff_memless (aw86927)
+INPUT_AW86927 m  bound aw86927-haptics x2
+KEYBOARD_GPIO y  bound gpio-keys (volume keys; emergency chord)
+TOUCHSCREEN_NT36536_SPI m  bound NVT-ts-spi (touch + pen)
+SPI_QCOM_GENI y  bound geni_spi (touch bus)
+I2C_QCOM_GENI y  bound geni_i2c x4
+I2C_CHARDEV y  i2c-dev class (tools)
+SERIAL_QCOM_GENI y  bound qcom_geni_serial (Bluetooth UART)
+SERIAL_DEV_BUS y  serdev for hci_uart
+SERIAL_DEV_CTRL_TTYPORT y  serdev bridge on serial ports
+HID y  HID
+HIDRAW y  HID raw (Steam controllers)
+UHID m  BLE HID (bluez HoG)
+HID_GENERIC m  HID
+HID_MICROSOFT m  Xbox controllers over BT
+HID_PLAYSTATION m  game controllers
+HID_SONY m  game controllers
+HID_NINTENDO m  game controllers
+HID_STEAM m  game controllers
+HID_MULTITOUCH m  touchpads
+JOYSTICK_XPAD m  Xbox controllers over USB
+LEDS_CLASS y  LEDs
+LEDS_CLASS_FLASH y  flash LED
+LEDS_QCOM_FLASH y  bound leds-qcom-flash (torch)
+LEDS_CLASS_MULTICOLOR m  lsmod led_class_multicolor
+LEDS_AW22127 m  bound leds-aw22127 (LED ring)
+LEDS_TRIGGER_PATTERN y  LED ring breathing (baldur.fragment)
+# --- audio ---
+SOUND m  lsmod soundcore
+SND m  lsmod snd
+SND_TIMER m  lsmod
+SND_PCM m  lsmod
+SND_COMPRESS_OFFLOAD m  lsmod snd_compress
+SND_SEQUENCER m  lsmod snd_seq (baldur.fragment: distro modprobe expects it)
+SND_SOC m  lsmod snd_soc_core
+SND_SOC_QCOM m  qcom ASoC
+SND_SOC_SC8280XP m  bound snd-sc8280xp (qcom,kaanapali-sndcard)
+SND_SOC_QDSP6 m  AudioReach (selected by SC8280XP)
+SND_SOC_QDSP6_APM m  bound qcom-apm
+SND_SOC_QDSP6_APM_DAI m  bound q6apm-dai
+SND_SOC_QDSP6_APM_LPASS_DAI m  bound q6apm-lpass-dais
+SND_SOC_QDSP6_PRM m  bound qcom-prm
+SND_SOC_QDSP6_PRM_LPASS_CLOCKS m  bound q6prm-lpass-clock
+SND_SOC_QDSP6_COMMON m  lsmod snd_q6dsp_common
+SND_SOC_QCOM_COMMON m  lsmod
+SND_SOC_QCOM_SDW m  lsmod
+SND_SOC_LPASS_MACRO_COMMON m  lsmod
+SND_SOC_LPASS_RX_MACRO m  bound rx_macro
+SND_SOC_LPASS_TX_MACRO m  bound tx_macro (microphones, patch 0035)
+SND_SOC_LPASS_VA_MACRO m  bound va_macro
+SND_SOC_LPASS_WSA_MACRO m  bound wsa_macro x2
+SND_SOC_WCD939X m  bound wcd939x_codec (headset)
+SND_SOC_WCD939X_SDW m  bound wcd9390-codec x2
+SND_SOC_WCD_CLASSH m  lsmod
+SND_SOC_WCD_COMMON m  lsmod
+SND_SOC_WCD_MBHC m  lsmod (headset jack)
+SND_SOC_HDMI_CODEC m  bound hdmi-audio-codec (DP audio)
+SOUNDWIRE m  lsmod soundwire_bus
+SOUNDWIRE_QCOM m  bound qcom-soundwire x2
+REGMAP_SOUNDWIRE m  lsmod regmap_sdw
+# --- Wi-Fi / Bluetooth / network ---
+PCI y  WCN7860 on PCIe
+PCIEPORTBUS y  bound pcieport
+PCIEAER y  bound aer
+PCIE_PME y  bound pcie_pme
+PCIEASPM y  link power management
+PCI_MSI y  MSI
+PCIE_DW_HOST y  DWC PCIe
+PCIE_QCOM y  bound qcom-pcie
+PCI_PWRCTRL_PWRSEQ m  bound pci-pwrctrl-pwrseq
+POWER_SEQUENCING y  pwrseq core
+POWER_SEQUENCING_QCOM_WCN y  bound pwrseq-qcom_wcn (WCN7860 power)
+CFG80211 y  Wi-Fi
+CFG80211_CERTIFICATION_ONUS y  user regdomain hints reach WCN7860 (baldur.fragment, iw reg set JP for 6 GHz)
+ATH_REG_DYNAMIC_USER_REG_HINTS y  same (does not depend on ATH11K/ATH_COMMON: drivers/net/wireless/ath/Kconfig)
+MAC80211 y  Wi-Fi
+ATH12K m  bound ath12k_wifi7_pci (lsmod ath12k, ath12k_wifi7)
+RFKILL y  rfkill0/1
+BT y  Bluetooth
+BT_BREDR y  A2DP headphones
+BT_LE y  BLE controllers
+BT_RFCOMM m  lsmod rfcomm
+BT_BNEP m  lsmod bnep
+BT_HIDP m  BT keyboards/controllers
+BT_HCIUART y  bound hci_uart_qca
+BT_HCIUART_SERDEV y  serdev hci
+BT_HCIUART_QCA y  WCN7860 BT (patches 0030, 0130)
+BT_HCIUART_H4 y  selected by HCIUART_QCA
+BT_QCA y  btqca
+BT_HCIBTUSB m  keep (USB BT dongles, cheap)
+NET y  network
+INET y  IPv4
+IPV6 y  IPv6
+UNIX y  sockets
+PACKET y  packet sockets (dhcp, NM)
+TUN y  tailscale0 (class net)
+NETFILTER y  Tailscale firewall rules
+NETFILTER_ADVANCED y  needed by xt matches
+NF_TABLES m  lsmod nf_tables
+NF_TABLES_INET y  nft inet
+NF_TABLES_IPV4 y  nft ip
+NF_TABLES_IPV6 y  nft ip6
+NFT_COMPAT m  lsmod nft_compat (iptables-nft from tailscaled)
+NFT_NAT m  lsmod nft_chain_nat
+NFT_CT m  nft ct
+NFT_MASQ m  nft masq
+NF_CONNTRACK m  lsmod
+NF_CONNTRACK_MARK y  connmark (lsmod xt_connmark)
+NF_NAT m  lsmod
+NF_DEFRAG_IPV4 m  lsmod
+NF_DEFRAG_IPV6 m  lsmod
+NETFILTER_XTABLES m  lsmod x_tables/xt_tcpudp
+NETFILTER_XT_MARK m  lsmod xt_mark
+NETFILTER_XT_CONNMARK m  lsmod xt_connmark
+NETFILTER_XT_MATCH_CONNMARK m  connmark match
+NETFILTER_XT_MATCH_CONNTRACK m  lsmod xt_conntrack
+NETFILTER_XT_TARGET_MASQUERADE m  lsmod xt_MASQUERADE
+NETFILTER_XT_MATCH_COMMENT m  tailscale rules use comments (cheap)
+IP_NF_IPTABLES m  iptables-nft
+IP6_NF_IPTABLES m  ip6tables-nft
+NET_SCH_FQ_CODEL m  lsmod sch_fq_codel (default qdisc)
+WIREGUARD m  keep (cheap; tailscaled uses userspace wireguard-go, not needed today)
+CRYPTO_USER_API_HASH m  lsmod algif_hash (bluez)
+CRYPTO_USER_API_SKCIPHER m  lsmod algif_skcipher (bluez)
+CRYPTO_ZSTD m  lsmod zstd
+LZ4_COMPRESS m  lsmod lz4_compress (zram lz4)
+# --- sandboxing for flatpak / Steam pressure-vessel / Chrome / Electron ---
+NAMESPACES y  bwrap
+USER_NS y  bwrap / pressure-vessel / Chrome sandbox
+PID_NS y  bwrap
+NET_NS y  bwrap --unshare-net
+IPC_NS y  bwrap
+UTS_NS y  bwrap
+CGROUPS y  systemd
+MEMCG y  systemd
+CGROUP_PIDS y  systemd
+CGROUP_BPF y  systemd
+SECCOMP y  Chrome/flatpak
+SECCOMP_FILTER y  Chrome/flatpak
+BPF_SYSCALL y  systemd, sched_ext, our tracing
+SECURITY_LANDLOCK y  CONFIG_LSM
+SECURITY_YAMA y  CONFIG_LSM
+FANOTIFY y  desktop
+INOTIFY_USER y  desktop
+NTSYNC m  Proton/Wine (kbuild-y7 check)
+FUTEX y  Wine/FEX
+IO_URING y  apps
+USERFAULTFD y  keep
+CHECKPOINT_RESTORE y  keep
+# --- power management / suspend / crash diagnostics (STABILITY, keep as is) ---
+SUSPEND y  s2idle
+PM_SLEEP y  s2idle
+PM_DEBUG y  baldur.fragment: pm_test etc.
+PM_SLEEP_DEBUG y  baldur.fragment
+DPM_WATCHDOG y  STABILITY: hung suspend callback -> panic -> pstore (baldur.fragment)
+SOFTLOCKUP_DETECTOR y  STABILITY: soft lockup -> panic -> dump (baldur.fragment)
+BOOTPARAM_SOFTLOCKUP_PANIC y  STABILITY (value 1)
+DETECT_HUNG_TASK y  STABILITY: hung task -> panic (baldur.fragment)
+BOOTPARAM_HUNG_TASK_PANIC y  STABILITY (value 1)
+CPU_IDLE y  cpuidle
+CPU_IDLE_GOV_MENU y  current governor
+PM_GENERIC_DOMAINS y  genpd (debugfs pm_genpd used by our tools)
+PM_OPP y  OPP
+MAGIC_SYSRQ y  emergency
+DEV_COREDUMP y  GPU/remoteproc dumps
+# --- boot plumbing (built-in DTB, forced cmdline, initramfs) ---
+ARM64_BUILTIN_FDT y  patch 0021, bootloader DTB ignored
+CMDLINE_FORCE y  carries allow_cluster_off=0 etc.
+BLK_DEV_INITRD y  built-in initramfs (trial/rollback logic, android-boot.sha256)
+RD_GZIP y  initramfs is .cpio.gz
+BOOT_MARKS y  patch 0022 boot progress marks (debug, free)
+DEVTMPFS y  initramfs
+DYNAMIC_DEBUG y  initramfs SD debug (baldur.fragment)
+ARM64_BTI_KERNEL y  modules must carry BTI landing pads (clang 18 requirement, Oops-BTI history)
+DEBUG_FS y  qcom_stats, interconnect_summary, pm_genpd, dri, /sys/kernel/debug/gpio (initramfs)
+KPROBES y  driver debugging (iris 1032/1033 found with kprobes)
+KPROBE_EVENTS y  same
+FTRACE y  tracefs (steamos-manager mounts it; baldur.fragment)
+FUNCTION_TRACER y  kept from t49 extra fragment
+DEBUG_INFO_BTF y  kbuild-y7 check (must stay; DEBUG_INFO_BTF_MODULES must stay n)
+IKCONFIG_PROC y  /proc/config.gz (we compare configs)
+MODULES y  everything else
+# --- added 2026-10-15 (final review): things the trim fragment must not take away ---
+# USB OTG peripherals the owner may plug in (lsusb empty today, so none is bound; all cheap modules)
+USB_NET_DRIVERS y  USB Ethernet menu (drivers/net/usb, independent of ETHERNET=n)
+USB_NET_DM9601 m  USB Ethernet
+USB_NET_SR9800 m  USB Ethernet
+USB_NET_SMSC75XX m  USB Ethernet
+USB_NET_SMSC95XX m  USB Ethernet (selects SMSC_PHY)
+USB_NET_NET1080 m  USB Ethernet
+USB_NET_MCS7830 m  USB Ethernet
+USB_NET_CDC_SUBSET m  USB Ethernet
+USB_NET_ZAURUS m  USB Ethernet
+USB_PEGASUS m  USB Ethernet
+USB_RTL8150 m  USB Ethernet
+AX88796B_PHY m  selected by USB_NET_AX8817X (asix internal PHY)
+SMSC_PHY m  selected by USB_NET_SMSC95XX
+MICROCHIP_PHY m  selected by USB_LAN78XX
+MII m  selected by the USB NICs
+PHYLINK m  selected by USB_LAN78XX
+USB_SERIAL_CH341 m  USB-serial adapters
+USB_SERIAL_CP210X m  USB-serial adapters
+USB_SERIAL_FTDI_SIO m  USB-serial adapters
+USB_SERIAL_PL2303 m  USB-serial adapters
+USB_UAS m  USB SSD enclosures
+HID_APPLE m  USB/BT keyboards
+HID_LOGITECH m  USB/BT mice/keyboards
+HID_LOGITECH_DJ m  Logitech unifying receivers
+HID_LOGITECH_HIDPP m  Logitech
+HID_WACOM m  USB pen tablets
+HID_BATTERY_STRENGTH y  BT controller/mouse battery
+JOYSTICK_XPAD_FF y  Xbox controller rumble
+JOYSTICK_XPAD_LEDS y  Xbox controller LEDs
+INPUT_JOYSTICK y  joystick menu
+I2C_HID y  menu only (I2C_HID_OF/_ELAN are trimmed: no DT I2C-HID device)
+BT_HCIBTUSB_BCM y  USB BT dongles
+BT_HCIBTUSB_RTL y  USB BT dongles
+BT_HCIBTUSB_MTK y  USB BT dongles
+BT_INTEL m  USB BT dongles
+BT_RTL m  USB BT dongles
+BT_MTK m  USB BT dongles
+BT_BCM y  selected by BT_HCIBTUSB_BCM (becomes m)
+BT_LEDS y  hci LED trigger
+BT_RFCOMM_TTY y  rfcomm tty
+SND_RAWMIDI m  USB MIDI (selected by SND_USB_AUDIO)
+SND_HWDEP m  selected by SND_USB_AUDIO
+SND_SEQ_MIDI m  MIDI sequencer
+# Wi-Fi regulatory (baldur.fragment): WLAN_VENDOR_ATH is the menu that holds ATH_REG_DYNAMIC_USER_REG_HINTS and ath12k
+WLAN_VENDOR_ATH y  menu for ath12k + ATH_REG_DYNAMIC_USER_REG_HINTS
+WLAN y  wireless menu
+MAC80211_RC_MINSTREL y  rate control
+CFG80211_CRDA_SUPPORT y  regdb
+# audio bits that stay with the card (hidden selects of SND_SOC_QDSP6 / SND_USB_AUDIO)
+SND_SOC_QDSP6 m  selected by SND_SOC_SC8280XP (pulls the legacy q6afe/q6adm/q6asm modules too; they stay unloaded)
+SND_SOC_TOPOLOGY y  selected by QDSP6
+SND_SOC_USB m  USB audio offload glue (unsure if ever used; cheap, keep)
+SND_SOC_QDSP6_USB m  same
+SND_USB_AUDIO_QMI m  same
+SND_JACK y  headset jack (input8)
+SND_PCM_ELD y  DP audio ELD
+SND_PCM_IEC958 y  DP audio
+SND_DYNAMIC_MINORS y  many PCM devices
+SND_PROC_FS y  /proc/asound (tb323fu-audio.service, alsa-ucm)
+# platform bits found bound/needed on a second pass
+QCOM_PAS_TEE m  PAS over TEE: not loaded today (lsmod), but remoteproc authentication is critical -> keep (unsure)
+GPIO_SHARED_PROXY m  shared-GPIO proxy (HAVE_SHARED_GPIOS from ARCH_QCOM); not loaded today, keep
+PCI_PWRCTRL y  pwrctrl core (pci-pwrctrl-pwrseq bound)
+PCI_PWRCTRL_GENERIC y  not bound, but PCIe power sequencing is the Wi-Fi resume path (patch 0049/0024) -> keep
+PCI_HOST_COMMON y  selected by PCIE_DW_HOST (pci_host_common_d3cold_possible, patch 0049)
+PCIEASPM_DEFAULT y  ASPM policy
+ARM_SMMU_MMU_500_CPRE_ERRATA y  the board SMMUs are MMU-500 (dmesg)
+ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT y  security default
+IOMMU_DMA y  camss depends on it
+IOMMU_IO_PGTABLE y  smmu
+IOMMU_DEFAULT_DMA_STRICT y  current policy (dmesg)
+DRM_DISPLAY_DP_AUX_CHARDEV y  /dev/drm_dp_aux* for DP debugging (class drm_dp_aux_dev exists)
+DRM_DISPLAY_DP_AUX_BUS y  selected by DRM_MSM_DP
+DRM_BRIDGE_CONNECTOR y  msm DP connector
+FRAMEBUFFER_CONSOLE_ROTATION y  tablet console orientation
+VT y  tty1 console
+VT_CONSOLE y  console=tty1
+FONT_8x16 y  baldur.fragment keeps it next to TER16x32
+FB_DEVICE y  /dev/fb0 for fbcon
+I2C_CHARDEV y  i2c-dev (tools)
+SPI_SPIDEV m  spidev (tools)
+GPIO_CDEV y  libgpiod
+GPIO_SYSFS y  /sys/class/gpio (initramfs debugging)
+HWMON y  thermal/battery hwmon
+POWER_SUPPLY_HWMON y  battery temperature in hwmon
+THERMAL_EMULATION y  emul_temp knob (debug, cheap)
+THERMAL_STATISTICS y  thermal zone stats
+DEVFREQ_GOV_USERSPACE y  manual devfreq (tools)
+CPU_FREQ_GOV_PERFORMANCE y  governors the control center / ppd may switch to
+CPU_FREQ_GOV_POWERSAVE y  same
+CPU_FREQ_GOV_USERSPACE y  same
+CPU_FREQ_GOV_ONDEMAND y  same
+CPU_FREQ_STAT y  cpufreq stats (powerbench)
+SCHED_CLASS_EXT y  t49 feature (sched_ext)
+BPF_JIT y  bpf
+BPF_LSM y  systemd bpf-restrict-fs ("LSM BPF program attached" in dmesg)
+SECURITY y  LSM framework
+SECURITYFS y  /sys/kernel/security (mounted)
+SECURITY_NETWORK y  LSM hooks
+PERF_EVENTS y  perf, BPF
+HW_PERF_EVENTS y  armv8-pmu
+UPROBES y  tracing
+IKCONFIG y  /proc/config.gz
+DEVMEM y  /dev/mem (tools)
+CROSS_MEMORY_ATTACH y  process_vm_readv (debuggers, FEX)
+MEMCG y  systemd
+CGROUP_SCHED y  systemd
+CGROUP_FREEZER y  powerbench froze app units with it
+CGROUP_DEVICE y  systemd
+CGROUP_CPUACCT y  systemd
+BLK_CGROUP y  systemd io
+CPUSETS y  systemd
+PSI y  pressure stats
+SWAP y  zram swap
+ZSMALLOC y  zram
+LZ4_DECOMPRESS y  squashfs lz4 / zram
+ZSTD_COMPRESS y  zram zstd / squashfs
+XZ_DEC y  modules squashfs is xz (initramfs/build.sh)
+REED_SOLOMON y  ramoops ECC
+TRANSPARENT_HUGEPAGE y  mm
+PER_VMA_LOCK y  mm
+RPMSG_NS y  keep (tiny; only virtio rpmsg needs it, unsure)
+NLS_UCS2_UTILS m  cifs
+NETFS_SUPPORT m  cifs
+SMBFS m  cifs
+QUOTACTL y  quota
+FS_ENCRYPTION y  ext4/f2fs encryption (harmless, keep)
+FS_VERITY y  harmless, keep
+MSDOS_PARTITION y  partition tables
+EFI_PARTITION y  GPT on UFS and USB sticks
+IP_SET m  firewall (cheap)
+NFT_FIB_INET m  firewalld style rules
+NF_CT_NETLINK m  conntrack(8)
+TLS m  kTLS (cheap)
+NET_SCH_CAKE m  qdisc
+NET_SCH_FQ m  qdisc
+NET_CLS_CGROUP m  systemd
+CGROUP_NET_CLASSID y  systemd
+CGROUP_NET_PRIO y  systemd
+TCP_CONG_BBR m  t49 feature (BBR)
+DUMMY m  dummy netdev (cheap)

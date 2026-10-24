@@ -1,0 +1,6 @@
+# 视频类应用：自动档从 165 降到 60，其他档位保持原样。格式见 make_config.py
+com.ss.android.ugc.aweme   2-2-2-7-7   # 抖音（原 7-2-2-7-7）
+tv.danmaku.bilibilihd      2-1-2-7-7   # 哔哩哔哩HD（原 7-1-2-7-7）
+com.kylin.read             2-2-2-7-7   # 红果免费短剧（原表里没有，新增）
+com.heytap.yoli            2-1-2-7-7   # OPPO 视频（原 7-1-2-7-7）
+com.baidu.netdisk          2-2-2-7-7   # 百度网盘（原 7-2-2-7-7）

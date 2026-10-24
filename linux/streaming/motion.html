@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" translate="no"><head><meta charset="utf-8"><meta name="google" content="notranslate"><title>stream motion test</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script>
+// Reproducible streaming load for the Y700 Moonlight tests (host side, Windows).
+//   ?mode=dynamic (default)  a detailed texture pans diagonally at a fixed speed in
+//                            px/s (time based, so 60 and 120 fps show the same motion),
+//                            40 sprites move across it, a frame counter in the corner:
+//                            roughly "game camera panning" for the encoder.
+//   ?mode=static             the same picture standing still; only a small clock
+//                            changes twice a second (desktop-like, sparse traffic).
+// Deterministic: the texture comes from a fixed-seed PRNG.
+const mode = new URLSearchParams(location.search).get('mode') || 'dynamic';
+const c = document.getElementById('c'), g = c.getContext('2d', {alpha: false});
+let W, H;
+function resize() { W = c.width = Math.round(innerWidth * devicePixelRatio); H = c.height = Math.round(innerHeight * devicePixelRatio); }
+addEventListener('resize', resize); resize();
+let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296;
+const T = 2048, tex = document.createElement('canvas'); tex.width = tex.height = T;
+const t = tex.getContext('2d');
+t.fillStyle = '#203040'; t.fillRect(0, 0, T, T);
+for (let i = 0; i < 2600; i++) {               // mid-size shapes with gradients
+  const x = rnd() * T, y = rnd() * T, r = 6 + rnd() * 60, h = Math.floor(rnd() * 360);
+  const gr = t.createRadialGradient(x, y, 0, x, y, r);
+  gr.addColorStop(0, `hsl(${h},80%,70%)`); gr.addColorStop(1, `hsla(${(h + 60) % 360},70%,30%,0.2)`);
+  t.fillStyle = gr; t.beginPath();
+  if (rnd() < 0.5) t.arc(x, y, r, 0, 7); else t.rect(x - r, y - r / 2, 2 * r, r);
+  t.fill();
+}
+t.font = '20px monospace';                       // fine detail: text grid
+for (let y = 24; y < T; y += 48) for (let x = 0; x < T; x += 220) {
+  t.fillStyle = `hsl(${Math.floor(rnd() * 360)},40%,85%)`; t.fillText('Y700 ' + Math.floor(rnd() * 1e6), x, y);
+}
+const sprites = Array.from({length: 40}, () => ({x: rnd(), y: rnd(), vx: (rnd() - .5) * .5, vy: (rnd() - .5) * .5, r: 20 + rnd() * 50, h: Math.floor(rnd() * 360)}));
+let frames = 0; const t0 = performance.now();
+function draw(now) {
+  const s = (now - t0) / 1000;
+  const ox = mode === 'dynamic' ? (s * 600) % T : 0, oy = mode === 'dynamic' ? (s * 340) % T : 0;
+  const sc = devicePixelRatio;
+  for (let y = -oy; y < H; y += T) for (let x = -ox; x < W; x += T) g.drawImage(tex, x, y);
+  if (mode === 'dynamic') for (const p of sprites) {
+    const x = ((p.x + p.vx * s) % 1 + 1) % 1 * W, y = ((p.y + p.vy * s) % 1 + 1) % 1 * H;
+    g.fillStyle = `hsl(${p.h},90%,60%)`; g.beginPath(); g.arc(x, y, p.r * sc, 0, 7); g.fill();
+  }
+  frames++;
+  g.fillStyle = '#000'; g.fillRect(0, 0, 420 * sc, 60 * sc);
+  g.fillStyle = '#fff'; g.font = `${32 * sc}px monospace`;
+  g.fillText(mode === 'dynamic' ? `${mode} f${frames}` : `${mode} ${Math.floor(s * 2) / 2}s`, 12 * sc, 44 * sc);
+  if (mode === 'dynamic') requestAnimationFrame(draw);
+}
+// Once a second tell host-run.py (127.0.0.1:47311, if it listens) how many frames the
+// page drew and its longest gap between them, to separate page stalls from capture stalls.
+let lastF = 0, lastT = performance.now(), maxGap = 0;
+const tick = now => { maxGap = Math.max(maxGap, now - lastT); lastT = now; if (mode === 'dynamic') requestAnimationFrame(tick); };
+setInterval(() => {
+  const body = `${frames - lastF},${maxGap.toFixed(1)},${Math.round(1000 / Math.max(1, maxGap))}`;
+  lastF = frames; maxGap = 0;
+  fetch('http://127.0.0.1:47311/', {method: 'POST', mode: 'no-cors', body}).catch(() => {});
+}, 1000);
+if (mode === 'dynamic') { requestAnimationFrame(draw); requestAnimationFrame(tick); }
+else { draw(performance.now()); setInterval(() => draw(performance.now()), 500); }
+</script></body></html>

@@ -1,0 +1,193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 01:40:00 +0000
+Subject: [PATCH] userspace/platform: keyhold: wait in ppoll() instead of
+ waking five times a second
+
+keyhold reads the key state with EVIOCGKEY and then sleeps in
+usleep(200000), in a loop that never ends while the emergency service is
+running -- also while nobody touches the keys. On a TB323FU that stays up
+for days with the display off (not suspended) that makes it one of the
+periodic wakers: on 2026-10-16 (tb323fu-platform 0.4.2, kernel
+7.3.0-rc4-tb323fu-t49-y10) /usr/libexec/tb323fu/keyhold, started by
+tb323fu-emergency-key.service, sat in hrtimer_nanosleep and made 50
+voluntary context switches per 10 s: 5 CPU wakeups a second, against
+about 300-500 idle exits a second for the whole system with the display
+off.
+
+Wait for the devices instead. They are opened O_NONBLOCK and all of them
+go into one ppoll(); after every wakeup the queued events are drained
+(read until EAGAIN, otherwise ppoll() returns at once again) and the state
+is read with EVIOCGKEY exactly as before. While a key is up ppoll() has no
+timeout, so an untouched keyhold costs no wakeups at all; while every key
+is down the timeout is the time left until "done".
+
+The state still comes only from EVIOCGKEY, so it is right when keyhold
+starts (keys already held give "hold" at once, as before) and after a
+SYN_DROPPED, and nothing has to follow individual events.
+
+Unchanged: the arguments, the output lines ("hold", "release", "done"),
+the exit codes (0 after "done", 1 for a device missing at start, 2 for
+bad arguments), MAXKEYS, the event0..63 scan, and what happens when a
+device goes away later: its key counts as up ("release" if the chord was
+held), "hold" never comes again, and keyhold does not exit. It now also
+stops looking at the dead fd (POLLHUP/POLLERR or ENODEV from read() take
+it out of the poll set) instead of asking it five times a second.
+keyhold never looked for new devices; restarting it is the wrappers' job
+(the root service after 1 s, the initramfs after 2 s), and so it stays.
+
+Differences that can be seen:
+- "hold" is printed when the last key goes down, not up to 200 ms later;
+  "done" SECONDS after that plus poll slack (about 10 ms for 10 s) instead
+  of up to 200 ms late; a release or press shorter than 200 ms is no
+  longer missed.
+- If some other process holds an EVIOCGRAB on one of the devices, keyhold
+  gets no events from it, where the old loop did not care: EVIOCGKEY
+  reads the device's key bitmap whether or not it is grabbed. The chord
+  is then still seen when the other device's key goes down last, but not
+  when the grabbed key goes down last, and a release and re-press of the
+  grabbed key during the hold goes unnoticed. Nothing in this repository
+  grabs pmic_resin or gpio-keys; libinput 1.31.1 grabs only in its debug
+  tools (debug-events --grab), and neither KWin 6.6's libinput backend
+  nor gamescope 3.16.20 grabs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+Notes (below the --- line, not part of the commit message):
+- Against tag helper-v0.4.2 (userspace/platform/src/keyhold.c blob
+  8c69ccc); upstream main was the tag itself (43ee432) on 2026-10-16.
+  Not compiled yet when written: the machine it was written on has no C
+  compiler. Build and test on the tablet before sending (see y700
+  linux/power/KEYHOLD.md section 6; the state machine is exercised by
+  linux/power/keyhold-model-test.py, a Python model, not the C code).
+- Before submitting upstream: add your own Signed-off-by (CONTRIBUTING.md,
+  DCO; `git commit -s`). kernel/initramfs/init line 102 says "keyhold
+  polls both keys" -- left alone here (a comment, but it is part of the
+  boot image); the maintainer may want it reworded.
+
+ userspace/platform/src/keyhold.c | 66 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 60 insertions(+), 6 deletions(-)
+
+diff --git a/userspace/platform/src/keyhold.c b/userspace/platform/src/keyhold.c
+index 8c69ccc..7927c44 100644
+--- a/userspace/platform/src/keyhold.c
++++ b/userspace/platform/src/keyhold.c
+@@ -7,15 +7,23 @@
+  *   keyhold SECONDS NAME:CODE [NAME:CODE ...]
+  *   keyhold 10 pmic_resin:114 gpio-keys:115
+  *
+- * NAME is the input device name (EVIOCGNAME), CODE the key code. Polls the
+- * key state (EVIOCGKEY) five times a second and prints one line per change:
++ * NAME is the input device name (EVIOCGNAME), CODE the key code. Reads the
++ * key state (EVIOCGKEY) at start and whenever one of the devices has events,
++ * and prints one line per change:
+  * "hold" when every key is down, "release" when one comes up before the time,
+  * "done" after SECONDS held (then exits 0). Exits 1 if a device is missing.
++ * While a key is up it sleeps in ppoll() without a timeout, so an idle
++ * keyhold costs no wakeups; only while every key is down does ppoll() get
++ * one: the time left until "done". A device that goes away later counts as
++ * released from then on, as it did when this polled five times a second.
+  *
+  * Build: aarch64-linux-gnu-gcc -static -O2 -o keyhold keyhold.c
+  */
++#define _GNU_SOURCE		/* ppoll */
++#include <errno.h>
+ #include <fcntl.h>
+ #include <linux/input.h>
++#include <poll.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -32,7 +40,8 @@ static int open_by_name(const char *name)
+ 
+ 	for (i = 0; i < 64; i++) {
+ 		snprintf(path, sizeof(path), "/dev/input/event%d", i);
+-		fd = open(path, O_RDONLY | O_CLOEXEC);
++		/* non-blocking: the event queue is only ever drained, see drain() */
++		fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+ 		if (fd < 0)
+ 			continue;
+ 		if (ioctl(fd, EVIOCGNAME(sizeof(n)), n) > 0 && !strcmp(n, name))
+@@ -50,10 +59,29 @@ static long now_ms(void)
+ 	return t.tv_sec * 1000 + t.tv_nsec / 1000000;
+ }
+ 
++/*
++ * Empty the event queue of fd. The events themselves are not used -- the
++ * key state comes from EVIOCGKEY, which is right even after a SYN_DROPPED
++ * (queue overflow) -- but ppoll() reports the fd readable until the queue
++ * is empty. Returns -1 when the device is gone (ENODEV), else 0.
++ */
++static int drain(int fd)
++{
++	struct input_event ev[16];
++	ssize_t r;
++
++	do {
++		r = read(fd, ev, sizeof(ev));
++	} while (r > 0 || (r < 0 && errno == EINTR));
++	return r < 0 && errno != EAGAIN ? -1 : 0;
++}
++
+ int main(int argc, char **argv)
+ {
++	struct pollfd pfd[MAXKEYS];
++	struct timespec ts = { 0, 0 }, *tp;
+ 	int fd[MAXKEYS], code[MAXKEYS], n = 0, i, all;
+-	long need, since = -1;
++	long need, since = -1, left;
+ 	unsigned char k[KEY_MAX / 8 + 1];
+ 
+ 	if (argc < 3) {
+@@ -73,13 +101,16 @@ int main(int argc, char **argv)
+ 			fprintf(stderr, "keyhold: no input device '%s'\n", argv[i]);
+ 			return 1;
+ 		}
++		pfd[n].fd = fd[n];
++		pfd[n].events = POLLIN;
+ 	}
+ 	setvbuf(stdout, NULL, _IOLBF, 0);
+ 	for (;;) {
+ 		all = 1;
+ 		for (i = 0; i < n; i++) {
+ 			memset(k, 0, sizeof(k));
+-			if (ioctl(fd[i], EVIOCGKEY(sizeof(k)), k) < 0 ||
++			if (pfd[i].fd < 0 ||	/* device gone */
++			    ioctl(fd[i], EVIOCGKEY(sizeof(k)), k) < 0 ||
+ 			    !(k[code[i] / 8] & (1 << (code[i] % 8))))
+ 				all = 0;
+ 		}
+@@ -93,6 +124,29 @@ int main(int argc, char **argv)
+ 			since = -1;
+ 			puts("release");
+ 		}
+-		usleep(200000);
++		/*
++		 * A key is up: sleep until one of the devices has events, with
++		 * no timer at all. Every key down: also wake when the time is up.
++		 */
++		tp = NULL;
++		if (all) {
++			left = need - (now_ms() - since);
++			if (left < 0)
++				left = 0;
++			ts.tv_sec = left / 1000;
++			ts.tv_nsec = left % 1000 * 1000000;
++			tp = &ts;
++		}
++		if (ppoll(pfd, n, tp, NULL) < 0) {
++			/* EINTR: just look again; ENOMEM: never spin on it */
++			if (errno != EINTR)
++				usleep(200000);
++			continue;
++		}
++		for (i = 0; i < n; i++)
++			if (pfd[i].fd >= 0 && pfd[i].revents &&
++			    ((pfd[i].revents & (POLLERR | POLLHUP | POLLNVAL)) ||
++			     drain(fd[i]) < 0))
++				pfd[i].fd = -1;	/* gone: released, not polled again */
+ 	}
+ }
+-- 
+2.55.0
+

@@ -1,0 +1,216 @@
+diff -ruN a/wiliwili/include/utils/y700_video_state.hpp b/wiliwili/include/utils/y700_video_state.hpp
+--- a/wiliwili/include/utils/y700_video_state.hpp
++++ b/wiliwili/include/utils/y700_video_state.hpp
+@@ -0,0 +1,109 @@
++//
++// y700 (2026-10-16, v2): publish wiliwili's playback state for y700-refresh-auto, which matches the panel's refresh
++// rate to the video (KWin 30 / 60 Hz mode while a 30 / 60 fps video plays fullscreen with no OSD, base 120 Hz otherwise).
++// One small file, $XDG_RUNTIME_DIR/y700-video/wiliwili, rewritten atomically (tmp + rename) only when a field changes -
++// never per frame:
++//   pid=1234
++//   playing=0|1     not paused, not stopped, not at EOF (one formula, recomputed on every input to it)
++//   fullscreen=0|1  the drawn video view fills the app (VideoView::isFullscreen)
++//   osd=0|1         the player OSD is drawn, or another activity (a translucent settings / speed panel) is on top
++//   danmaku=0|1     danmaku are being drawn (the daemon then keeps >= 60 Hz: they move every refresh)
++//   fps=29.970      EFFECTIVE fps = container-fps (else one rounded estimated-vf-fps sample) x playback speed; 0 = unknown
++//   speed=1.000     raw_fps=29.970
++// All calls come from the UI thread (mpv events are dispatched there with brls::sync, VideoView::draw runs there).
++// No-op where XDG_RUNTIME_DIR is unset or not Linux.
++//
++#pragma once
++
++#if defined(__linux__)
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <sys/stat.h>
++#include <unistd.h>
++
++namespace y700 {
++
++struct VideoState {
++    int playing = -1, fullscreen = -1, osd = -1, danmaku = -1;
++    double fps = -1, speed = 1;
++};
++
++inline VideoState &videoState() {
++    static VideoState s;
++    return s;
++}
++
++inline void publishVideoState() {
++    static std::string path, tmp;
++    if (path.empty()) {
++        const char *rt = getenv("XDG_RUNTIME_DIR");
++        if (!rt || !*rt) return;
++        std::string dir = std::string(rt) + "/y700-video";
++        mkdir(dir.c_str(), 0700);
++        path = dir + "/wiliwili";
++        tmp  = path + ".tmp";
++    }
++    const VideoState &s = videoState();
++    double raw          = s.fps > 0 ? s.fps : 0.0;
++    FILE *f             = fopen(tmp.c_str(), "w");
++    if (!f) return;
++    fprintf(f, "pid=%d\nplaying=%d\nfullscreen=%d\nosd=%d\ndanmaku=%d\nfps=%.3f\nspeed=%.3f\nraw_fps=%.3f\n", (int)getpid(),
++            s.playing > 0, s.fullscreen > 0, s.osd > 0, s.danmaku > 0, raw * s.speed, s.speed, raw);
++    fclose(f);
++    rename(tmp.c_str(), path.c_str());
++}
++
++inline void setVideoPlaying(bool v) {
++    VideoState &s = videoState();
++    if (s.playing != (int)v) {
++        s.playing = v;
++        publishVideoState();
++    }
++}
++
++inline double knownFps() { return videoState().fps; }
++
++// allowUnknown: a new file may have no fps (resets to unknown); a seek / restart never clears a known fps
++inline void setVideoFps(double v, bool allowUnknown) {
++    VideoState &s = videoState();
++    if (!(v > 0) || v > 1000) {
++        if (!allowUnknown) return;
++        v = 0;
++    }
++    if (std::fabs(s.fps - v) > 0.01) {
++        s.fps = v;
++        publishVideoState();
++    }
++}
++
++inline void setVideoSpeed(double v) {
++    VideoState &s = videoState();
++    if (!(v > 0) || v > 100) v = 1;
++    if (std::fabs(s.speed - v) > 0.001) {
++        s.speed = v;
++        if (s.fps > 0) publishVideoState();
++    }
++}
++
++inline void setVideoView(bool fullscreen, bool osd, bool danmaku) {
++    VideoState &s = videoState();
++    if (s.fullscreen != (int)fullscreen || s.osd != (int)osd || s.danmaku != (int)danmaku) {
++        s.fullscreen = fullscreen;
++        s.osd        = osd;
++        s.danmaku    = danmaku;
++        publishVideoState();
++    }
++}
++
++}  // namespace y700
++#else
++namespace y700 {
++inline void setVideoPlaying(bool) {}
++inline double knownFps() { return 0; }
++inline void setVideoFps(double, bool) {}
++inline void setVideoSpeed(double) {}
++inline void setVideoView(bool, bool, bool) {}
++}  // namespace y700
++#endif
+diff -ruN a/wiliwili/source/view/mpv_core.cpp b/wiliwili/source/view/mpv_core.cpp
+--- a/wiliwili/source/view/mpv_core.cpp
++++ b/wiliwili/source/view/mpv_core.cpp
+@@ -5,6 +5,7 @@
+ #include <cstdlib>
+ #include <clocale>
+ #include <cmath>
++#include "utils/y700_video_state.hpp"  // y700: playback state for y700-refresh-auto
+ #include <pystring.h>
+ #include <borealis/core/thread.hpp>
+ #include <borealis/core/application.hpp>
+@@ -949,6 +950,8 @@
+                 mpvCoreEvent.fire(MpvEventEnum::UPDATE_PROGRESS);
+                 // 移除其他备用链接
+                 command_async("playlist-clear");
++                y700::setVideoFps(getDouble("container-fps"), true);
++                y700::setVideoPlaying(AUTO_PLAY);
+ 
+                 if (AUTO_PLAY) {
+                     mpvCoreEvent.fire(MpvEventEnum::MPV_RESUME);
+@@ -971,6 +974,18 @@
+                 // event 21: 开始播放文件（一般是播放或调整进度结束之后触发）
+                 brls::Logger::info("========> MPV_EVENT_PLAYBACK_RESTART");
+                 video_stopped = false;
++                {
++                    double f = getDouble("container-fps");
++                    if (f > 0) {
++                        y700::setVideoFps(f, false);
++                    } else if (!(y700::knownFps() > 0)) {
++                        brls::delay(1500, [this]() {
++                            double e = getDouble("estimated-vf-fps");
++                            if (e > 0 && !(y700::knownFps() > 0)) y700::setVideoFps(std::round(e), false);
++                        });
++                    }
++                }
++                y700::setVideoPlaying(!video_paused && !video_stopped && !video_eof);
+                 mpvCoreEvent.fire(MpvEventEnum::LOADING_END);
+                 break;
+             case MPV_EVENT_END_FILE: {
+@@ -978,6 +993,7 @@
+                 brls::Logger::info("========> MPV_STOP");
+                 mpvCoreEvent.fire(MpvEventEnum::MPV_STOP);
+                 video_stopped = true;
++                y700::setVideoPlaying(!video_paused && !video_stopped && !video_eof);
+                 auto node     = (mpv_event_end_file *)event->data;
+                 if (node->reason == MPV_END_FILE_REASON_ERROR) {
+                     mpv_error_code = node->error;
+@@ -1009,6 +1025,7 @@
+                         break;
+                     case 2:
+                         if (data) video_eof = *(int *)data;
++                        y700::setVideoPlaying(!video_paused && !video_stopped && !video_eof);
+                         // 当视频播放自然结束时会先触发一次 EOF，如果这时 stop 或者设置了新的播放文件，会触发 STOP 然后再触发一次 EOF
+                         // 避免多次触发 EOF，将第二种情况排除在外
+                         if (video_eof && !video_stopped) {
+@@ -1099,6 +1116,7 @@
+                         // 倍速信息
+                         if (data) {
+                             video_speed = *(double *)data;
++                            y700::setVideoSpeed(video_speed);
+                             mpvCoreEvent.fire(VIDEO_SPEED_CHANGE);
+                         }
+                         break;
+@@ -1116,6 +1134,7 @@
+                         break;
+                     case 12:
+                         if (data) video_paused = *(int *)data;
++                        y700::setVideoPlaying(!video_paused && !video_stopped && !video_eof);
+                         if (video_paused) {
+                             brls::Logger::info("========> PAUSE");
+                             mpvCoreEvent.fire(MpvEventEnum::MPV_PAUSE);
+@@ -1126,6 +1145,7 @@
+                         break;
+                     case 13:
+                         if (data) video_stopped = *(int *)data;
++                        y700::setVideoPlaying(!video_paused && !video_stopped && !video_eof);
+ 
+                         break;
+                     case 14:
+diff -ruN a/wiliwili/source/view/video_view.cpp b/wiliwili/source/view/video_view.cpp
+--- a/wiliwili/source/view/video_view.cpp
++++ b/wiliwili/source/view/video_view.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <limits>
+ #include <cmath>
++#include "utils/y700_video_state.hpp"  // y700: playback state for y700-refresh-auto
+ 
+ #include <borealis/views/label.hpp>
+ #include <borealis/views/progress_spinner.hpp>
+@@ -629,6 +630,12 @@
+     float alpha        = this->getAlpha();
+     brls::Time current = brls::getCPUTimeUsec();
+     bool drawOSD       = this->osd_state == OSDState::ALWAYS_ON || current < this->osdLastShowTime;
++    {   // y700: view state for y700-refresh-auto (written only when it changes). Another activity on top (a
++        // translucent settings / speed panel over the fullscreen video) counts as OSD: the UI is in use.
++        auto stack   = brls::Application::getActivitiesStack();
++        bool covered = !stack.empty() && stack.back() != this->getParentActivity();
++        y700::setVideoView(this->isFullscreen(), drawOSD || covered, this->enableDanmaku && DanmakuCore::DANMAKU_ON);
++    }
+ 
+     // draw video
+     mpvCore->draw(brls::Rect(x, y, width, height), alpha);

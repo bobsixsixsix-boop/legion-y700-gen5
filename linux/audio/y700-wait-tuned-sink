@@ -1,0 +1,35 @@
+#!/bin/sh
+# y700-wait-tuned-sink: ExecStartPre of plasma-kded6.service and plasma-plasmashell.service (user units).
+# The volume keys are plasma-pa's audioshortcutsservice, a kded6 module (2026-10-17: the 10-16 version of this
+# comment blamed plasmashell; the wait was only on plasmashell, and the bug came back a third time). A kded6 that
+# starts while the default sink is still the boot-time "Speakers" stage and sees it switch to our Lenovo tuning
+# sink while that sink is being created keeps the volume keys on the fixed-100 % stage: they move it, the guard
+# pins it back to 100 %, the real user volume never moves ("I lower it and it jumps back to full"; 10-16 03:17
+# boot: "very quiet although at max"). Wait until the tuning sink exists and is the configured default
+# (y700-speaker-guard puts it there), at most 12 s. If the owner picked another output (headphones, Bluetooth,
+# "Speakers" for comparison), only the sink's existence is waited for. Then the unit starts either way.
+# At boot one pw-metadata read can print the key more than once (10-22 10:02 and 10-23 02:36: the same name two and
+# three times); taken as one string that matched none of the names below and fell into "the owner's choice", so a
+# read that still held the boot-time "Speakers" next to the tuned sink would have ended the wait early. Duplicates
+# are dropped; two different names in one read mean the default is still moving: look again.
+TUNED=effect_input.y700_lenovo
+NL='
+'
+i=0
+while [ $i -lt 48 ]; do
+	if pactl list sinks short 2>/dev/null | awk -v s=$TUNED '$2 == s {f = 1} END {exit !f}'; then
+		cfg=$(pw-metadata 0 default.configured.audio.sink 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sort -u)
+		case "$cfg" in
+		*"$NL"*) ;;                               # still moving (see the header)
+		"$TUNED") echo "tuned sink is the default after $((i / 4)).$((i % 4 * 25)) s"; exit 0 ;;
+		"" | effect_input.speakers | *HiFi__Speaker__sink) ;;      # boot dance: the guard is about to fix it
+		bluez_output.* | alsa_output.usb-*)       # headphones chosen last time: kept if connected, else the guard
+			pactl list sinks short 2>/dev/null | awk -v s="$cfg" '$2 == s {f = 1} END {exit !f}' &&
+				{ echo "owner's headphones '$cfg' kept"; exit 0; } ;;      # puts the tuned sink back: wait for it
+		*) echo "owner's default '$cfg' kept; tuned sink present after $((i / 4)).$((i % 4 * 25)) s"; exit 0 ;;
+		esac
+	fi
+	sleep 0.25; i=$((i + 1))
+done
+echo "tuned sink not the default after 12 s - starting plasmashell anyway"
+exit 0

@@ -1,0 +1,13 @@
+[Unit]
+Description=y700: Adreno devfreq thresholds (upthreshold 80: no jumps to 1200 MHz on light loads)
+# no ordering beyond the default: the script waits up to 60 s for the GPU devfreq itself (a path condition would be
+# evaluated before the GPU binds and skip the unit)
+
+[Service]
+# exec, not oneshot: the script may wait for the GPU, and a oneshot would hold multi-user.target (and so graphical.target) for that time
+Type=exec
+ExecStart=/usr/local/sbin/y700-gpu-dvfs
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

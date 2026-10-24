@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 04:45:00 +0000
+Subject: [PATCH] media: iris: send the decoder the bitstream resolution the firmware reported
+
+Same failure as the colour info (1032), for HEVC: the bitstream resolution is
+rebuilt from the OUTPUT format and aligned to 32, so a 1280x720 stream goes out
+as 1280x736 (0x050002e0) while the firmware reported 0x050002d0, and 1080p as
+1088. Restarting the bitstream port after the first source change then raised
+it again for every HEVC stream (kprobes on y6, SM8850; H.264 aligns to 16 and
+was not affected). Keep the value the firmware reported and send it back.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
+@@ -25,6 +25,8 @@
+  * @dst_subcr_params: subscription params to fw on output port
+  * @fw_color_info: colour info the firmware last reported for the bitstream
+  * @fw_color_info_valid: @fw_color_info holds a firmware report
++ * @fw_bitstream_resolution: bitstream resolution the firmware last reported
++ * @fw_bitstream_resolution_valid: @fw_bitstream_resolution holds a firmware report
+  */
+ struct iris_inst_hfi_gen2 {
+ 	struct iris_inst		inst;
+@@ -36,6 +38,8 @@
+ 	struct hfi_subscription_params	dst_subcr_params;
+ 	u32				fw_color_info;
+ 	bool				fw_color_info_valid;
++	u32				fw_bitstream_resolution;
++	bool				fw_bitstream_resolution_valid;
+ };
+ 
+ void iris_hfi_gen2_sys_ops_init(struct iris_core *core);
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -536,6 +536,8 @@
+ 	subsc_params = inst_hfi_gen2->src_subcr_params;
+ 	inst_hfi_gen2->fw_color_info = subsc_params.color_info;
+ 	inst_hfi_gen2->fw_color_info_valid = true;
++	inst_hfi_gen2->fw_bitstream_resolution = subsc_params.bitstream_resolution;
++	inst_hfi_gen2->fw_bitstream_resolution_valid = true;
+ 	width = (subsc_params.bitstream_resolution &
+ 		HFI_BITMASK_BITSTREAM_WIDTH) >> 16;
+ 	height = subsc_params.bitstream_resolution &
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -200,6 +200,14 @@
+ 		width = inst->fmt_src->fmt.pix_mp.width;
+ 		height = inst->fmt_src->fmt.pix_mp.height;
+ 		resolution = iris_hfi_get_aligned_resolution(inst, width, height);
++		/*
++		 * As with the colour info: once the firmware has reported the stream's
++		 * resolution, send that back. HEVC aligns to 32 here (1280x720 goes out as
++		 * 1280x736, 1920x1080 as 1920x1088), which differs from what the firmware
++		 * parsed and raises the source change again on every bitstream port restart.
++		 */
++		if (inst_hfi_gen2->fw_bitstream_resolution_valid)
++			resolution = inst_hfi_gen2->fw_bitstream_resolution;
+ 		inst_hfi_gen2->src_subcr_params.bitstream_resolution = resolution;
+ 		payload_type = HFI_PAYLOAD_U32;
+ 	} else {
+-- 
+2.43.0

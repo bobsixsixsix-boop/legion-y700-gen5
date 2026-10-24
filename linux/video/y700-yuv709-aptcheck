@@ -1,0 +1,72 @@
+#!/bin/bash
+# y700-yuv709-aptcheck: after every dpkg run (apt's DPkg::Post-Invoke, /etc/apt/apt.conf.d/99y700-yuv709, installed by
+# install-yuv709-shim.sh): when Mesa's libgallium (package mesa-libgallium) or the turnip under /var/lib/tb323fu/mesa
+# changed, rerun install-yuv709-shim.sh. Its shim tests ARE the check the README asks for after a Mesa upgrade
+# ("视频硬解", Chrome BT.601: 「Mesa 升级后」); they pass = the shim is rebuilt and reinstalled as before. (2026-10-23)
+#
+# Why it matters: the shim rewrites the 2nd stacked argument of libgallium's dri2_from_dma_bufs, a position calibrated
+# on 26.0.8. It only does so for libgallium-26.0.*; any other version it passes through by itself (Chrome's colours go
+# back to BT.601, nothing breaks). Within 26.0.x a patch release that moved the argument would have it rewrite the wrong
+# one in Chrome's GPU process - that is the case this guards.
+#
+# Outcomes (journalctl -t y700-yuv709):
+#   - the shim is not in /etc/ld.so.preload: nothing at stake, versions recorded.
+#   - libgallium is no longer 26.0.x: logged and the owner notified (colours are BT.601 again until the layout is
+#     re-checked, README); nothing run, nothing changed.
+#   - 26.0.x, tests pass: reinstalled, logged.
+#   - 26.0.x, the "not Chrome" test passes (nv12m works, pass-through is fine) but a Chrome one fails: the shim does not
+#     do what it should on this Mesa, so its line is taken out of /etc/ld.so.preload (install-yuv709-shim.sh
+#     --uninstall; new Chrome processes start without it, BT.601), owner notified. Undo: fix, rerun the installer.
+#   - anything else (nv12m itself does not work, gcc missing, ...): cannot tell, nothing changed, owner notified.
+# Cheap when nothing changed (one dpkg-query and a readlink against a stamp). Never fails the apt run: always exits 0.
+# --force checks even if the stamp matches; --stamp only records the current versions (the installer, after its tests).
+# For tests: Y700_YUV_DRYRUN=1 (no uninstall, no notification, no stamp), Y700_YUV_INSTALLER / Y700_YUV_STAMP /
+# Y700_YUV_GALLIUM_DIR / Y700_YUV_PRELOAD override the installer, the stamp file, where libgallium-*.so is looked for
+# and the preload file.
+INSTALLER=${Y700_YUV_INSTALLER:-/root/yuv709/install-yuv709-shim.sh}
+STAMP=${Y700_YUV_STAMP:-/usr/local/share/y700-video/yuv709.mesa}
+GALLIUM_DIR=${Y700_YUV_GALLIUM_DIR:-/usr/lib/aarch64-linux-gnu}
+PRE=${Y700_YUV_PRELOAD:-/etc/ld.so.preload}
+SO=/usr/local/lib/y700-yuv709.so
+DRY=${Y700_YUV_DRYRUN:-}
+U=$(id -nu 1000 2>/dev/null)
+log() { logger -t y700-yuv709 "$*" 2>/dev/null; echo "y700-yuv709: $*"; }
+notify() {
+	if [ -n "$DRY" ]; then echo "DRYRUN notify: $1 / $2"; return; fi
+	[ -n "$U" ] && sudo -u "$U" env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+		notify-send -a Y700 -u critical -i dialog-warning "$1" "$2" >/dev/null 2>&1 || true
+}
+stamp() {
+	if [ -n "$DRY" ]; then echo "DRYRUN stamp: $vers"; return; fi
+	mkdir -p "$(dirname "$STAMP")" && echo "$vers" > "$STAMP"
+}
+
+vers="$(dpkg-query -W -f '${Package}=${Version}' mesa-libgallium 2>/dev/null) turnip=$(readlink /var/lib/tb323fu/mesa/current 2>/dev/null | sed 's|.*/||')"
+[ "${1:-}" = --stamp ] && { stamp; exit 0; }
+[ "$(cat "$STAMP" 2>/dev/null)" = "$vers" ] && [ "${1:-}" != --force ] && exit 0
+if ! grep -qxF "$SO" "$PRE" 2>/dev/null; then stamp; exit 0; fi
+gal=$(ls "$GALLIUM_DIR"/libgallium-*.so 2>/dev/null | sed 's|.*/||' | tr '\n' ' '); gal=${gal% }
+case "$gal" in
+libgallium-26.0.*) ;;
+*)
+	log "Mesa now: $vers ($gal): not 26.0.x, the shim passes through (Chrome's hardware video is BT.601 again); re-check the argument layout before allowing this version (README 视频硬解, 「Mesa 升级后」)"
+	notify "Chrome 视频颜色退回 BT.601" "Mesa 升到 ${gal:-?}，颜色垫片只认 26.0.x，已自动透传（不会坏，只是偏色）。要重新核对参数布局，见 README「Mesa 升级后」。"
+	stamp; exit 0 ;;
+esac
+log "Mesa now: $vers ($gal): rerunning $INSTALLER (its tests are the check)"
+out=$(bash "$INSTALLER" 2>&1); rc=$?
+echo "$out" | grep -E '^(ok|FAIL) ' | while IFS= read -r l; do log "  $l"; done
+if [ $rc -eq 0 ]; then
+	log "tests pass on this Mesa, shim reinstalled: $(echo "$out" | grep -m 1 INSTALL_OK)"
+	stamp; exit 0
+fi
+if [ $rc -eq 5 ] && echo "$out" | grep -q '^ok   not Chrome'; then
+	if [ -n "$DRY" ]; then echo "DRYRUN uninstall: bash $INSTALLER --uninstall"
+	else bash "$INSTALLER" --uninstall 2>&1 | while IFS= read -r l; do log "  $l"; done; fi
+	log "the shim does not behave on this Mesa (nv12m itself works): taken out of $PRE, Chrome processes started from now on run without it (BT.601). Re-check the layout (README), fix yuv709-shim.c, rerun the installer"
+	notify "Chrome 视频颜色垫片已摘掉" "新版 Mesa 下垫片自测不过，为免改错参数已从 ld.so.preload 摘掉（之后启动的 Chrome 回到 BT.601）。journalctl -t y700-yuv709 看详情。"
+	stamp; exit 0
+fi
+log "installer exit $rc, cannot tell whether the shim still fits (nothing changed): $(echo "$out" | tail -n 3 | tr '\n' ' ')"
+notify "Chrome 视频颜色垫片：新版 Mesa 下没法验证" "Mesa 换了，但垫片自测没跑起来（退出码 $rc），已装的那份没动。journalctl -t y700-yuv709 看详情，手动重跑 install-yuv709-shim.sh。"
+stamp; exit 0

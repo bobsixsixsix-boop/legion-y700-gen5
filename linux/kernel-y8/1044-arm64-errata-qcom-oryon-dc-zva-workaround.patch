@@ -1,0 +1,506 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 05:00:00 +0000
+Subject: [PATCH 1044] arm64: errata: work around the Qualcomm Oryon DC ZVA
+ erratum: trap and emulate it at EL0, never execute it in the kernel
+
+Why
+---
+Snapdragon X Elite machines (Qualcomm Oryon, MIDR part 0x001) hang and then
+hard-reset the whole SoC when a DC ZVA (zero one DCZID_EL0.BS block by VA)
+is executed around a CPU cluster entering its power-collapse idle state
+(hamoa "cluster_cl5"). The public evidence, in order of strength:
+
+ - icecream95/x1e-crash (crash.c, 2026-05..08): a single-threaded, unpinned
+   user-space loop "dc civac two lines -> dc zva one line -> dependent
+   read-back through the other line, usleep(10 ms) every 60 rounds so the
+   cluster reaches CL5" resets four X1E/X1P laptops within seconds to
+   minutes. Its README: removing SCTLR_EL1_DZE from INIT_SCTLR_EL1_MMU_ON
+   is a mitigation; Windows keeps DZE on and is not affected (its
+   mitigation is unknown).
+ - Jens Glathe, "[PATCH RFC] arm64: dts: qcom: hamoa: Drop cluster_cl5
+   idle state from CPU clusters", 2026-06-04, linux-arm-msm
+   (20260604-dc_zva_mitigation, read through the ratatoskr.run mirror):
+   "The cluster_cl5 idle state triggers DC ZVA misbehavior that resets X1
+   SoCs"; dropping CL5 made a T14s G6, a ThinkBook 16 G7 and two IdeaPads
+   stable; the Dev Kit (platform-coordinated firmware, no OSI) still
+   crashes and needs cpuidle.off=1; "a proper fix would be a Qualcomm
+   firmware update or a kernel erratum that disables DZE on these SoCs".
+ - Marc Zyngier's out-of-tree erratum (arm-platforms.git commit
+   7d6ed4b78a0c: clear SCTLR_EL1.DZE, emulate the trapped EL0 DC ZVA) and
+   justririll/x1e-sleep kernel/experimental/x1-dc-zva-erratum-and-cl5.patch,
+   which carries that erratum as WORKAROUND_QCOM_ORYON_DC_ZVA, extends it
+   to the kernel's own DC ZVA users (clear_page, memset, MTE) and turns CL5
+   back on for all three hamoa clusters. git.kernel.org sits behind an
+   anti-bot page for us, so Marc's original was not read; the x1e-sleep
+   copy was, and this patch follows it.
+ - Mainline v7.3-rc4/rc5 still has CL5 in hamoa.dtsi and no DC ZVA
+   workaround in cpu_errata.c (checked against the raw v7.3-rc4 and
+   current master cpu_errata.c/cputype.h/cpucaps).
+
+This tablet (Lenovo TB323FU, Y700 Gen5, SM8850 "kaanapali") has the same
+Oryon family, one generation on: MIDR 0x512f0021 = implementer 0x51, part
+0x002, r2p1 (dmesg "Booting Linux on physical CPU 0x0000000000
+[0x512f0021]"), which upstream cputype.h does not name yet. Its cluster
+state "cluster_cl5" 0x01000054 (entry 2150 us, exit 1983 us, min residency
+9144 us) is refused in runtime idle by patch 0118 (allow_cluster_off=0)
+because the upstream author saw silent resets "line up with cluster0 being
+turned off and on". linux/power/cx-collapse/RESEARCH.md 2.4 ranks the
+DC ZVA x CL5 interaction as hypothesis H2: the only hypothesis with an
+independent public reproducer, but with two hard counter-arguments
+(Android runs cl5 on the same firmware while bionic's memset uses DC ZVA;
+kaanapali's cl5 is named "ret-pll-off", which may keep L2, unlike X1's CL5
+that flushes it). PROTOCOL.md E2 therefore first runs the x1e-crash
+sequence with allow_cluster_off=1; this patch is the kernel for the
+decisive A/B after a positive E2 (y11: with it, allow_cluster_off=1 must
+stop resetting; with qcom_oryon_dc_zva=off it must reset again). It is a
+local, unverified port: no X1E reproducer has been run here and nothing in
+it has been compiled.
+
+What it changes (all on top of v7.3-rc4; none of these files is touched by
+tb323fu-linux 0001-0130 except arch/arm64/Kconfig, where 0021/0022 add
+ARM64_BUILTIN_FDT/BOOT_MARKS at the end of "Kernel Features", far from the
+errata menu edited here; drivers/cpuidle/cpuidle-psci-domain.c is not
+touched, so 0106/0118/1043 are unaffected)
+--------------------------------------------------------------------------
+ - arch/arm64/include/asm/cputype.h: QCOM_CPU_PART_ORYON_V3 0x002 and
+   MIDR_QCOM_ORYON_V3. The name is ours (Qualcomm calls this core 3rd gen
+   Oryon); whether the Snapdragon 8 Elite's Oryon v2 shares part 0x002 is
+   not known, the comment says so.
+ - arch/arm64/tools/cpucaps: WORKAROUND_QCOM_ORYON_DC_ZVA (same name as
+   x1e-sleep/Marc), sorted after WORKAROUND_QCOM_ORYON_CNTVOFF.
+ - arch/arm64/Kconfig: QCOM_ORYON_ERRATUM_DC_ZVA, default y, in the
+   "ARM errata workarounds via the alternatives framework" menu next to
+   the Falkor entries. Documentation/arch/arm64/silicon-errata.rst gets
+   the row.
+ - arch/arm64/kernel/cpu_errata.c: a LOCAL_CPU_ERRATUM entry "Qualcomm
+   Oryon DC ZVA erratum" matching MIDR_QCOM_ORYON_X1 and _V3 (all
+   variants). Its cpu_enable() clears SCTLR_EL1.DZE (sysreg_clear_set, no
+   explicit isb: the eret back to EL0 is the context sync, as the sibling
+   UCI/UCT cache-trap errata rely on) on every CPU: for the boot CPU in setup_system_capabilities(),
+   for the others through stop_machine() there or
+   verify_local_cpu_capabilities() when they come up later, including
+   after hotplug. cpu_do_resume() restores the saved SCTLR_EL1 and our
+   idle states keep EL1 context in firmware, so the bit stays clear
+   across idle and s2idle. early_param "qcom_oryon_dc_zva": "off" makes
+   matches() return false, so the capability is never set: DZE stays 1,
+   no alternative is patched, no debugfs file appears, one pr_warn says
+   the workaround was disabled. parse_early_param() runs in setup_arch(),
+   before smp_prepare_boot_cpu() detects the boot CPU's errata.
+ - arch/arm64/include/asm/esr.h + arch/arm64/kernel/traps.c: with DZE=0
+   an EL0 DC ZVA traps with EC 0x18 and op0=1 op1=3 op2=1 crn=7 crm=4 (QEMU
+   target/arm/helper.c aa64_zva_access/DC_ZVA agree), which the existing
+   EL0_CACHE_OP hook already matches (its mask ignores CRm). Add
+   ESR_ELx_SYS64_ISS_CRM_DC_ZVA = 4 and a case in
+   user_cache_maint_handler(): emulate_dc_zva() reads DCZID_EL0.BS, aligns
+   the untagged address down to the block and clear_user()s it. Faults
+   behave like the store they are: SIGSEGV through arm64_notify_segfault()
+   with the original (tagged) address, exactly like the other emulated
+   cache ops (a read-only page gives SEGV_ACCERR; an unmapped hole gets
+   SEGV_MAPERR only when it lies above the last VMA, because that helper
+   uses find_vma() -- pre-existing upstream behaviour). A per-boot
+   counter of emulated instructions is exported as
+   /sys/kernel/debug/qcom_oryon_dc_zva_emulated (0444, created by a
+   late_initcall only when the capability is on, so the file doubles as
+   the "workaround active" indicator).
+ - arch/arm64/lib/clear_page.S, memset.S, mte.S: the kernel runs at EL1,
+   where DZE does not apply and DCZID_EL0 keeps reading DZP=0, so the
+   kernel's own fast paths would keep executing DC ZVA / DC GZVA. Each
+   "tbnz dczid, #4, no_zva" test gets an alternative_if
+   ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA / b no_zva in front of it (a NOP
+   until the capability is set at setup_system_capabilities();
+   alternatives relocate branches that leave the block). x1e-sleep does
+   the same with an unconditional branch; keying it on the capability
+   keeps other CPUs, and the =off boot, on the original code. On this
+   tablet FEAT_MOPS is not detected (no "Memory Copy and Memory Set
+   instructions" in dmesg), so __pi_memset_generic and the DC ZVA loop of
+   __pi_clear_page are the live paths; the MOPS SET* paths are untouched.
+   Before alternatives are applied the kernel still executes DC ZVA
+   (early memset/clear_page): harmless, the cluster states are not
+   reachable before cpuidle-psci registers (OSI firmware, the OS requests
+   them). KVM nVHE is not built (VIRTUALIZATION off), KASAN_HW_TAGS is off
+   (mte-kasan.h's dc gva/gzva are not compiled), MTE is not detected on
+   this SoC (mte.S is patched for completeness).
+
+What user space sees
+--------------------
+DCZID_EL0.DZP reads as 1 at EL0 while SCTLR_EL1.DZE is 0: that is
+architectural (the kernel cannot and need not trap the DCZID_EL0 read), so
+glibc, bionic, musl-free Go, OpenJDK and FEX check the bit and fall back
+to store loops without ever trapping. Code that ignores DZP (hand-written
+JITs) traps once per block, about a microsecond each, and shows up in the
+debugfs counter; the result is still correct. DC GVA/GZVA from EL0 (MTE,
+not present here) also trap but are not emulated: they reach
+do_el0_undef() -> SIGILL, which is what a DZP-ignoring MTE program
+deserves. Tag-checked user memory with a non-zero tag would make the
+emulation (an untagged kernel store) fault where the hardware instruction
+might not; irrelevant without MTE.
+
+Cost
+----
+Not measured (nothing built here). Expected: EL0 none for DZP-aware
+libraries; kernel clear_page()/memset() lose the ZVA fast path and zero
+with stnp/stp pairs (clear_page: 4 x stnp per 64 bytes); page-fault-heavy
+workloads may lose a few percent. The y11 verify script prints the
+measured trap cost (ns per emulated DC ZVA) from the EL0 self-test.
+
+How to switch
+-------------
+ - Build time: CONFIG_QCOM_ORYON_ERRATUM_DC_ZVA (kbuild-y11.sh forces =y
+   and asserts it).
+ - Boot time: qcom_oryon_dc_zva=off on the kernel command line disables
+   the workaround on affected CPUs (no other value is recognised). Our
+   kernels use CONFIG_CMDLINE_FORCE, so kbuild-y11.sh also builds the twin
+   image Image-t49-y11-dczva-off (same kernel, same modules, only that
+   parameter appended) for the A/B.
+ - No run-time switch: SCTLR_EL1 could be re-set on all CPUs but patched
+   alternatives cannot be undone, so none is offered.
+
+How to verify it booted
+-----------------------
+  dmesg | grep 'CPU features: detected: Qualcomm Oryon DC ZVA erratum'
+  ls -l /sys/kernel/debug/qcom_oryon_dc_zva_emulated      (0444, a count)
+  dczva-selftest (linux/kernel-y8/dczva-selftest.c, EL0, no root needed
+  except for the counter): DCZID_EL0.DZP=1; a dc zva on a 0xA5-filled page
+  leaves exactly one zeroed block (also through a tagged pointer); dc zva
+  on a read-only page -> SIGSEGV/SEGV_ACCERR, on an unmapped page ->
+  SIGSEGV; the debugfs counter grows by the number of dc zva executed; it
+  prints ns per emulated instruction.
+  With qcom_oryon_dc_zva=off: dmesg has "Qualcomm Oryon DC ZVA workaround
+  disabled on the command line" and no "detected:" line, the debugfs file
+  is absent, the self-test (--expect-dze) sees DZP=0 and native speed.
+  y11-verify.sh runs all of this; y11-selfcheck.sh greps the source tree
+  and the patch file for every hunk before the build.
+
+Unverified / honest limits
+--------------------------
+ - Not compiled, not booted, no X1E reproducer run; the port was checked
+   hunk by hunk against the raw v7.3-rc4 files and applies cleanly to
+   them (plus 0021/0022 for Kconfig) with git apply --check.
+ - Whether kaanapali's cl5 ("ret-pll-off") shares X1's mechanism is
+   unknown; the patch is the test article, not a conclusion.
+ - Whether FEAT_MOPS SET* instructions (absent here) would be affected is
+   unknown.
+ - The part-0x002 naming (ORYON_V3) and the X1 entry in the MIDR list
+   follow x1e-sleep; Qualcomm has published neither an erratum number nor
+   a statement.
+
+Sources: https://github.com/icecream95/x1e-crash (crash.c, README);
+https://github.com/justririll/x1e-sleep
+(kernel/experimental/x1-dc-zva-erratum-and-cl5.patch, README);
+https://ratatoskr.run/b4-sent/2026/06/17090238 (Glathe RFC);
+https://raw.githubusercontent.com/torvalds/linux/v7.3-rc4/{arch/arm64/kernel/traps.c,
+arch/arm64/kernel/cpu_errata.c, arch/arm64/kernel/cpufeature.c,
+arch/arm64/kernel/alternative.c, arch/arm64/kernel/setup.c,
+arch/arm64/kernel/smp.c, arch/arm64/tools/cpucaps, arch/arm64/tools/sysreg,
+arch/arm64/tools/gen-cpucaps.awk, arch/arm64/tools/gen-sysreg.awk,
+arch/arm64/include/asm/{cputype,esr,sysreg,uaccess,cpufeature,alternative-macros,mte-kasan}.h,
+arch/arm64/lib/{clear_page,memset,mte}.S, arch/arm64/Kconfig,
+Documentation/arch/arm64/silicon-errata.rst};
+https://raw.githubusercontent.com/qemu/qemu/master/target/arm/helper.c
+(DCZID_EL0.DZP and DC ZVA trap semantics).
+
+Originally from: justririll/x1e-sleep
+  kernel/experimental/x1-dc-zva-erratum-and-cl5.patch, which carries Marc
+  Zyngier's out-of-tree erratum workaround (arm-platforms.git 7d6ed4b78a0c);
+  extended here to SM8850 (part 0x002)
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Documentation/arch/arm64/silicon-errata.rst |  2 +
+ arch/arm64/Kconfig                          | 21 +++++++++++
+ arch/arm64/include/asm/cputype.h            |  7 ++++
+ arch/arm64/include/asm/esr.h                |  7 ++++
+ arch/arm64/kernel/cpu_errata.c              | 57 +++++++++++++++++++++++++++++
+ arch/arm64/kernel/traps.c                   | 34 +++++++++++++++++
+ arch/arm64/lib/clear_page.S                 |  3 ++
+ arch/arm64/lib/memset.S                     |  3 ++
+ arch/arm64/lib/mte.S                        |  3 ++
+ arch/arm64/tools/cpucaps                    |  1 +
+ 10 files changed, 138 insertions(+)
+
+diff --git a/Documentation/arch/arm64/silicon-errata.rst b/Documentation/arch/arm64/silicon-errata.rst
+index ac3248b..e7e4a85 100644
+--- a/Documentation/arch/arm64/silicon-errata.rst
++++ b/Documentation/arch/arm64/silicon-errata.rst
+@@ -364,6 +364,8 @@ stable kernels.
+ +----------------+-----------------+-----------------+-----------------------------+
+ | Qualcomm Tech. | Kryo4xx Gold    | N/A             | ARM64_ERRATUM_1286807       |
+ +----------------+-----------------+-----------------+-----------------------------+
++| Qualcomm Tech. | Oryon           | N/A             | QCOM_ORYON_ERRATUM_DC_ZVA   |
+++----------------+-----------------+-----------------+-----------------------------+
+ | Renesas        | S4/V4H/V4M      | N/A             | RENESAS_ERRATUM_GEN4GICITS1 |
+ +----------------+-----------------+-----------------+-----------------------------+
+ | Rockchip       | RK3588          | #3588001        | ROCKCHIP_ERRATUM_3588001    |
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index c4829f8..3f0a22b 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -1391,6 +1391,27 @@ config QCOM_FALKOR_ERRATUM_E1041
+ 
+ 	  If unsure, say Y.
+ 
++config QCOM_ORYON_ERRATUM_DC_ZVA
++	bool "Oryon: DC ZVA can hang and reset the SoC around cluster power collapse"
++	default y
++	help
++	  Qualcomm Oryon cores (Snapdragon X Elite, and the Oryon of the SM8850
++	  "kaanapali" that identifies as MIDR part 0x002) have been seen to hang
++	  and reset the whole SoC when a DC ZVA (zero a cache-line-sized block by
++	  VA) executes while a CPU cluster enters a power-collapse idle state.
++	  No Qualcomm erratum number is public; the X Elite reproducer is
++	  icecream95/x1e-crash.
++
++	  The workaround never executes DC ZVA: SCTLR_EL1.DZE is cleared, so
++	  the instruction traps from EL0 and is emulated with ordinary stores
++	  (DCZID_EL0.DZP then reads as 1 in user space, so glibc, bionic, Go
++	  and the JVM stop using it by themselves), and the kernel's own
++	  clear_page()/memset()/MTE page-clearing ZVA fast paths are patched
++	  out by the alternatives framework. Boot with qcom_oryon_dc_zva=off to
++	  leave DC ZVA enabled on an affected CPU.
++
++	  If unsure, say Y.
++
+ config ARM64_WORKAROUND_DISABLE_CNP
+ 	bool
+ 
+diff --git a/arch/arm64/include/asm/cputype.h b/arch/arm64/include/asm/cputype.h
+index 1fa2961..425967d 100644
+--- a/arch/arm64/include/asm/cputype.h
++++ b/arch/arm64/include/asm/cputype.h
+@@ -132,6 +132,12 @@
+ #define QCOM_CPU_PART_KRYO_4XX_GOLD	0x804
+ #define QCOM_CPU_PART_KRYO_4XX_SILVER	0x805
+ #define QCOM_CPU_PART_ORYON_X1		0x001
++/*
++ * Oryon in the Snapdragon 8 Elite Gen 5 (SM8850 "kaanapali"): MIDR 0x512f0021
++ * = implementer 0x51, part 0x002, r2p1. Which other Oryon generations share
++ * part 0x002 is not known; the X Elite laptop core is part 0x001.
++ */
++#define QCOM_CPU_PART_ORYON_V3		0x002
+ 
+ #define NVIDIA_CPU_PART_DENVER		0x003
+ #define NVIDIA_CPU_PART_CARMEL		0x004
+@@ -221,6 +227,7 @@
+ #define MIDR_QCOM_KRYO_4XX_GOLD MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, QCOM_CPU_PART_KRYO_4XX_GOLD)
+ #define MIDR_QCOM_KRYO_4XX_SILVER MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, QCOM_CPU_PART_KRYO_4XX_SILVER)
+ #define MIDR_QCOM_ORYON_X1 MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, QCOM_CPU_PART_ORYON_X1)
++#define MIDR_QCOM_ORYON_V3 MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, QCOM_CPU_PART_ORYON_V3)
+ 
+ /*
+  * NOTES:
+diff --git a/arch/arm64/include/asm/esr.h b/arch/arm64/include/asm/esr.h
+index f816f5d..31c5cb9 100644
+--- a/arch/arm64/include/asm/esr.h
++++ b/arch/arm64/include/asm/esr.h
+@@ -256,6 +256,13 @@
+ #define ESR_ELx_SYS64_ISS_CRM_DC_CVAU	11
+ #define ESR_ELx_SYS64_ISS_CRM_DC_CVAC	10
+ #define ESR_ELx_SYS64_ISS_CRM_IC_IVAU	5
++/*
++ * DC ZVA (op0=1, op1=3, crn=7, crm=4, op2=1) is not a cache maintenance
++ * operation, but when SCTLR_EL1.DZE is clear it traps from EL0 with the same
++ * op0/op1/op2/crn as the operations above and lands in the EL0_CACHE_OP hook
++ * (ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA emulates it there).
++ */
++#define ESR_ELx_SYS64_ISS_CRM_DC_ZVA	4
+ 
+ #define ESR_ELx_SYS64_ISS_EL0_CACHE_OP_MASK	(ESR_ELx_SYS64_ISS_OP0_MASK | \
+ 						 ESR_ELx_SYS64_ISS_OP1_MASK | \
+diff --git a/arch/arm64/kernel/cpu_errata.c b/arch/arm64/kernel/cpu_errata.c
+index b33dccf..eb1040d 100644
+--- a/arch/arm64/kernel/cpu_errata.c
++++ b/arch/arm64/kernel/cpu_errata.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include <linux/arm-smccc.h>
++#include <linux/init.h>
+ #include <linux/types.h>
+ #include <linux/cpu.h>
+ #include <asm/cpu.h>
+@@ -657,6 +658,52 @@ static const struct midr_range cnp_erratum_cpus[] = {
+ };
+ #endif
+ 
++#ifdef CONFIG_QCOM_ORYON_ERRATUM_DC_ZVA
++/*
++ * Qualcomm Oryon: a DC ZVA executed while a CPU cluster enters (or sits in)
++ * a power-collapse idle state can hang and reset the whole SoC. No public
++ * erratum number; reproducer for the X Elite: icecream95/x1e-crash. The
++ * workaround is to never execute DC ZVA at all: EL0 traps and is emulated
++ * (traps.c, SCTLR_EL1.DZE=0; DCZID_EL0.DZP then reads as 1 from EL0 so a
++ * well-behaved libc stops using it by itself) and the kernel's own ZVA fast
++ * paths (clear_page, memset, MTE page clearing) are patched out through the
++ * alternatives keyed on ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA.
++ * qcom_oryon_dc_zva=off on the command line leaves DC ZVA enabled.
++ */
++static const struct midr_range qcom_oryon_dc_zva_cpus[] = {
++	MIDR_ALL_VERSIONS(MIDR_QCOM_ORYON_X1),
++	MIDR_ALL_VERSIONS(MIDR_QCOM_ORYON_V3),
++	{},
++};
++
++static bool qcom_oryon_dc_zva_workaround_off;
++
++static int __init parse_qcom_oryon_dc_zva(char *str)
++{
++	if (str && !strcmp(str, "off")) {
++		qcom_oryon_dc_zva_workaround_off = true;
++		pr_warn("Qualcomm Oryon DC ZVA workaround disabled on the command line\n");
++	}
++	return 0;
++}
++early_param("qcom_oryon_dc_zva", parse_qcom_oryon_dc_zva);
++
++static bool
++has_qcom_oryon_dc_zva_erratum(const struct arm64_cpu_capabilities *entry, int scope)
++{
++	if (qcom_oryon_dc_zva_workaround_off)
++		return false;
++	return is_affected_midr_range_list(entry, scope);
++}
++
++static void
++cpu_enable_qcom_oryon_dc_zva_trap(const struct arm64_cpu_capabilities *__unused)
++{
++	/* EL0 DC ZVA traps to EL1 (ESR EC 0x18) and EL0 reads DCZID_EL0.DZP=1 */
++	sysreg_clear_set(sctlr_el1, SCTLR_EL1_DZE, 0);
++}
++#endif
++
+ const struct arm64_cpu_capabilities arm64_errata[] = {
+ #ifdef CONFIG_ARM64_WORKAROUND_CLEAN_CACHE
+ 	{
+@@ -1017,6 +1064,16 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
+ 					{}
+ 				})),
+ 	},
++#ifdef CONFIG_QCOM_ORYON_ERRATUM_DC_ZVA
++	{
++		.desc = "Qualcomm Oryon DC ZVA erratum",
++		.capability = ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA,
++		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
++		.matches = has_qcom_oryon_dc_zva_erratum,
++		.midr_range_list = qcom_oryon_dc_zva_cpus,
++		.cpu_enable = cpu_enable_qcom_oryon_dc_zva_trap,
++	},
++#endif
+ 	{
+ 		.desc = "Apple IMPDEF PMUv3 Traps",
+ 		.capability = ARM64_WORKAROUND_PMUV3_IMPDEF_TRAPS,
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+index 9142820..56d5796 100644
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -29,6 +29,7 @@
+ #include <linux/kasan.h>
+ #include <linux/ubsan.h>
+ #include <linux/cfi.h>
++#include <linux/debugfs.h>
+ 
+ #include <asm/atomic.h>
+ #include <asm/bug.h>
+@@ -558,6 +559,36 @@ void do_el1_mops(struct pt_regs *regs, unsigned long esr)
+ 		uaccess_ttbr0_disable();			\
+ 	}
+ 
++/*
++ * ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA clears SCTLR_EL1.DZE, so an EL0 DC ZVA
++ * traps here (and EL0 reads DCZID_EL0.DZP as 1, which keeps glibc, bionic, Go
++ * and the JVM off the instruction by themselves). Emulate it: zero the
++ * DCZID_EL0.BS block that contains the address with ordinary stores, faulting
++ * where a store would (SIGSEGV through arm64_notify_segfault(), as DC CVAU etc.).
++ * The counter at /sys/kernel/debug/qcom_oryon_dc_zva_emulated says how often
++ * user space still runs into the trap.
++ */
++static atomic_t qcom_oryon_dc_zva_emulated = ATOMIC_INIT(0);
++
++static int emulate_dc_zva(unsigned long address)
++{
++	/* DCZID_EL0.BS (bits 3:0) = log2 of the block size in 4-byte words */
++	unsigned long bs = 4UL << (read_sysreg(dczid_el0) & 0xf);
++	void __user *va = (void __user *)(address & ~(bs - 1));
++
++	atomic_inc(&qcom_oryon_dc_zva_emulated);
++	return clear_user(va, bs) ? -EFAULT : 0;
++}
++
++static int __init qcom_oryon_dc_zva_debugfs_init(void)
++{
++	if (cpus_have_final_cap(ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA))
++		debugfs_create_atomic_t("qcom_oryon_dc_zva_emulated", 0444, NULL,
++					&qcom_oryon_dc_zva_emulated);
++	return 0;
++}
++late_initcall(qcom_oryon_dc_zva_debugfs_init);
++
+ static void user_cache_maint_handler(unsigned long esr, struct pt_regs *regs)
+ {
+ 	unsigned long tagged_address, address;
+@@ -587,6 +618,9 @@ static void user_cache_maint_handler(unsigned long esr, struct pt_regs *regs)
+ 	case ESR_ELx_SYS64_ISS_CRM_IC_IVAU:	/* IC IVAU */
+ 		__user_cache_maint("ic ivau", address, ret);
+ 		break;
++	case ESR_ELx_SYS64_ISS_CRM_DC_ZVA:	/* DC ZVA, trapped by SCTLR_EL1.DZE=0 */
++		ret = emulate_dc_zva(address);
++		break;
+ 	default:
+ 		force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
+ 		return;
+diff --git a/arch/arm64/lib/clear_page.S b/arch/arm64/lib/clear_page.S
+index bd6f7d5..195033c 100644
+--- a/arch/arm64/lib/clear_page.S
++++ b/arch/arm64/lib/clear_page.S
+@@ -29,6 +29,9 @@ alternative_else_nop_endif
+ .Lno_mops:
+ #endif
+ 	mrs	x1, dczid_el0
++alternative_if ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA
++	b	2f		/* Oryon erratum: never execute DC ZVA */
++alternative_else_nop_endif
+ 	tbnz	x1, #4, 2f	/* Branch if DC ZVA is prohibited */
+ 	and	w1, w1, #0xf
+ 	mov	x2, #4
+diff --git a/arch/arm64/lib/memset.S b/arch/arm64/lib/memset.S
+index 97157da..3cfc654 100644
+--- a/arch/arm64/lib/memset.S
++++ b/arch/arm64/lib/memset.S
+@@ -147,6 +147,9 @@ SYM_FUNC_START_LOCAL(__pi_memset_generic)
+ 	b.lt	.Lnot_short /*count is at least  128 bytes*/
+ 
+ 	mrs	tmp1, dczid_el0
++alternative_if ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA
++	b	.Lnot_short	/* Oryon erratum: never execute DC ZVA */
++alternative_else_nop_endif
+ 	tbnz	tmp1, #4, .Lnot_short
+ 	mov	tmp3w, #4
+ 	and	zva_len, tmp1w, #15	/* Safety: other bits reserved.  */
+diff --git a/arch/arm64/lib/mte.S b/arch/arm64/lib/mte.S
+index 5018ac0..fb76de4 100644
+--- a/arch/arm64/lib/mte.S
++++ b/arch/arm64/lib/mte.S
+@@ -45,6 +45,9 @@ SYM_FUNC_END(mte_clear_page_tags)
+ SYM_FUNC_START(mte_zero_clear_page_tags)
+ 	and	x0, x0, #(1 << MTE_TAG_SHIFT) - 1	// clear the tag
+ 	mrs	x1, dczid_el0
++alternative_if ARM64_WORKAROUND_QCOM_ORYON_DC_ZVA
++	b	2f		// Oryon erratum: never execute DC GZVA
++alternative_else_nop_endif
+ 	tbnz	x1, #4, 2f	// Branch if DC GZVA is prohibited
+ 	and	w1, w1, #0xf
+ 	mov	x2, #4
+diff --git a/arch/arm64/tools/cpucaps b/arch/arm64/tools/cpucaps
+index 2775ba3..6af5b67 100644
+--- a/arch/arm64/tools/cpucaps
++++ b/arch/arm64/tools/cpucaps
+@@ -128,6 +128,7 @@ WORKAROUND_NVIDIA_OLYMPUS_1027
+ WORKAROUND_PMUV3_IMPDEF_TRAPS
+ WORKAROUND_QCOM_FALKOR_E1003
+ WORKAROUND_QCOM_ORYON_CNTVOFF
++WORKAROUND_QCOM_ORYON_DC_ZVA
+ WORKAROUND_REPEAT_TLBI_SYNC
+ WORKAROUND_SPECULATIVE_AT
+ WORKAROUND_SPECULATIVE_SSBS
+-- 
+2.43.0
+

@@ -1,0 +1,10 @@
+{
+  "policies": {
+    "Preferences": {
+      "media.hardware-video-decoding.enabled": { "Value": true, "Status": "locked" },
+      "media.hardware-video-decoding.force-enabled": { "Value": true, "Status": "locked" },
+      "intl.locale.requested": { "Value": "zh-CN", "Status": "locked" },
+      "intl.accept_languages": { "Value": "zh-CN,zh,en-US,en", "Status": "locked" }
+    }
+  }
+}

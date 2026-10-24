@@ -1,0 +1,22 @@
+# /etc/systemd/system/y700-diag-pack.service -- the night diagnostics pack (linux/power/PLAN-deep-powersave.md M-5),
+# 2026-10-19. Script: linux/power/y700-diag-pack.sh (installed as /usr/local/libexec/y700-diag-pack.sh). The unit is
+# y700-diag-pack, never y700-cx-* (y700-cx-auto would disarm E3a for the whole pack, cx-auto/src/main.rs:127-135).
+# No timer and no [Install]: it is started for one night at a time, either
+#   systemd-run --unit y700-diag-pack-at --collect --on-calendar='2026-10-21 02:30' \
+#       systemctl start --no-block y700-diag-pack.service
+# or as a DIAG: step of /etc/y700/night-plan (M-4 / TL-1), where cx-when-idle.sh calls the script's --run itself.
+# ExecCondition = `--check`: dpms Off, battery Discharging, no y700-cx-*/y700-scn-rec* unit, and no touch / key
+# interrupt for 10 min (sampled, slept, re-sampled inside the check: the condition takes 10 min). Exit 1 there means
+# "skipped", not failed. ExecStart = `--run`: always-on-check.sh --rtc 90 --no-clk, y700-whoawake 60,
+# MHI_SECS=0 y700-l1ss-probe.sh, live-ro3.sh --no-user, into /var/log/y700-diag/<YYYYMMDD-HHMM>-pack/, between two
+# flight-recorder MARK lines (DIAG:pack start / end).
+[Unit]
+Description=y700: night diagnostics pack (always-on-check, whoawake, l1ss-probe, live-ro3) once idle, dark and on battery
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/local/libexec/y700-diag-pack.sh --check
+ExecStart=/usr/local/libexec/y700-diag-pack.sh --run
+# a oneshot's start timeout defaults to infinity; bound it: 10 min of --check plus about 10 min of pack
+TimeoutStartSec=40min
+KillMode=mixed

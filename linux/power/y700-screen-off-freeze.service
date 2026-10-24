@@ -1,0 +1,21 @@
+# /etc/systemd/user/y700-screen-off-freeze.service -- see y700-screen-off-freeze (the script) and
+# linux/power/WAKEUPS.md 2.3. Freezes Claude desktop / Chrome (cgroup freezer on their app-* user units) once the
+# panel has been off for a minute, thaws them when it comes back or when this service stops. Measured power
+# saving 0.01 W (noise); the point is the wakeup budget of the runtime CX-collapse work. Never Telegram, never a
+# unit with an MPRIS player that is Playing. A frozen Claude desktop freezes the agent sessions inside it.
+# Opt-in: install-wakeups.sh --freeze; undo: systemctl --user disable --now y700-screen-off-freeze.service
+[Unit]
+Description=y700: freeze Claude desktop / Chrome while the panel is off (wakeup budget, not power)
+PartOf=graphical-session.target
+After=graphical-session.target plasma-kwin_wayland.service
+
+[Service]
+ExecStart=/usr/local/libexec/y700-screen-off-freeze
+# a stopped or crashed service must never leave an app frozen
+ExecStopPost=/usr/local/libexec/y700-screen-off-freeze --thaw
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

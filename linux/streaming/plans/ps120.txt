@@ -1,0 +1,7 @@
+# 10-minute control groups at 120 fps, HEVC 2560x1600 60 Mbps (the screening pick):
+# Wi-Fi power save on/off x dynamic/static content.  Tablet in its normal place, battery.
+# label codec WxH fps kbps secs ps content
+l120-dyn-pson    HEVC 2560x1600 120 60000 600 on  dynamic
+l120-dyn-psoff   HEVC 2560x1600 120 60000 600 off dynamic
+l120-sta-pson    HEVC 2560x1600 120 60000 600 on  static
+l120-sta-psoff   HEVC 2560x1600 120 60000 600 off static

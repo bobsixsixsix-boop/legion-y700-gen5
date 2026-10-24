@@ -1,0 +1,814 @@
+diff --git a/arch/arm64/kernel/signal.c b/arch/arm64/kernel/signal.c
+index 38e6fa204..ce4a9aead 100644
+--- a/arch/arm64/kernel/signal.c
++++ b/arch/arm64/kernel/signal.c
+@@ -22,6 +22,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/pkeys.h>
+ 
++#include <asm/cputype.h>
+ #include <asm/daifflags.h>
+ #include <asm/debug-monitors.h>
+ #include <asm/elf.h>
+@@ -34,6 +35,7 @@
+ #include <asm/ptrace.h>
+ #include <asm/syscall.h>
+ #include <asm/signal32.h>
++#include <asm/spectre.h>
+ #include <asm/traps.h>
+ #include <asm/vdso.h>
+ 
+@@ -1010,6 +1012,35 @@ static int parse_user_sigframe(struct user_ctxs *user,
+ 	return -EINVAL;
+ }
+ 
++/* Wine returns through signal frames that lack PSTATE.SSBS. */
++static int ssbd_sigreturn __ro_after_init = -1;
++
++static int __init parse_ssbd_sigreturn(char *str)
++{
++	bool val;
++
++	if (kstrtobool(str, &val))
++		return -EINVAL;
++	ssbd_sigreturn = val;
++	return 0;
++}
++early_param("ssbd_sigreturn", parse_ssbd_sigreturn);
++
++static int __init ssbd_sigreturn_init(void)
++{
++	static const struct midr_range oryon[] = {
++		MIDR_ALL_VERSIONS(MIDR_QCOM_ORYON_X1),
++		/* y700: SM8850 (TB323FU) Oryon reports implementer 0x51 part 0x002 */
++		MIDR_ALL_VERSIONS(MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, 0x002)),
++		{}
++	};
++
++	if (ssbd_sigreturn < 0)
++		ssbd_sigreturn = is_midr_in_range_list(oryon);
++	return 0;
++}
++arch_initcall(ssbd_sigreturn_init);
++
+ static int restore_sigframe(struct pt_regs *regs,
+ 			    struct rt_sigframe __user *sf,
+ 			    struct user_access_state *ua_state)
+@@ -1037,6 +1068,8 @@ static int restore_sigframe(struct pt_regs *regs,
+ 	fpsimd_save_and_flush_current_state();
+ 
+ 	err |= !valid_user_regs(&regs->user_regs, current);
++	if (err == 0 && ssbd_sigreturn > 0)
++		spectre_v4_enable_task_mitigation(current);
+ 	if (err == 0)
+ 		err = parse_user_sigframe(&user, sf);
+ 
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 6d49c51df..85c892a13 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -64,7 +64,13 @@ static irqreturn_t a6xx_hfi_irq(int irq, void *data)
+ 	struct a6xx_gmu *gmu = data;
+ 	u32 status;
+ 
+-	status = gmu_read(gmu, REG_A6XX_GMU_GMU2HOST_INTR_INFO);
++	/*
++	 * Only clear what this handler deals with: the HFI response (MSGQ) and
++	 * OOB ack bits are polled for, and clearing them here loses the GMU's
++	 * answer to whoever is waiting for it.
++	 */
++	status = gmu_read(gmu, REG_A6XX_GMU_GMU2HOST_INTR_INFO) &
++		 A6XX_GMU_GMU2HOST_INTR_INFO_CM3_FAULT;
+ 	gmu_write(gmu, REG_A6XX_GMU_GMU2HOST_INTR_CLR, status);
+ 
+ 	if (status & A6XX_GMU_GMU2HOST_INTR_INFO_CM3_FAULT) {
+@@ -437,9 +443,13 @@ int a6xx_gmu_set_oob(struct a6xx_gmu *gmu, enum a6xx_gmu_oob_state state)
+ 
+ 		/* We may timeout because the GMU is temporarily wedged from
+ 		 * pending faults from the GPU and we are taking a devcoredump.
+-		 * Wait until the MMU is resumed and try again.
++		 * Wait until the MMU is resumed and try again, but not for
++		 * ever: the devcoredump takes gpu->lock, which our caller may
++		 * hold (recover_worker), and both would wait on each other.
+ 		 */
+-		wait_for_completion(&a6xx_gpu->base.fault_coredump_done);
++		if (!wait_for_completion_timeout(&a6xx_gpu->base.fault_coredump_done,
++						 msecs_to_jiffies(2000)))
++			break;
+ 	} while (true);
+ 
+ 	if (ret)
+@@ -1341,6 +1351,9 @@ int a6xx_gmu_resume(struct a6xx_gpu *a6xx_gpu)
+ 	/* Set the bus quota to a reasonable value for boot */
+ 	a6xx_gmu_set_initial_bw(gpu, gmu);
+ 
++	/* The mask resets to 0 with the GMU: keep HFI replies off the irq line */
++	gmu_write(gmu, REG_A6XX_GMU_GMU2HOST_INTR_MASK, ~0);
++
+ 	/* Enable the GMU interrupt */
+ 	gmu_write(gmu, REG_A6XX_GMU_AO_HOST_INTERRUPT_CLR, ~0);
+ 	gmu_write(gmu, REG_A6XX_GMU_AO_HOST_INTERRUPT_MASK, ~A6XX_GMU_IRQ_MASK);
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+index 186a73c0b..2c07b3b0f 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+@@ -127,9 +127,13 @@ static int a6xx_hfi_wait_for_msg_interrupt(struct a6xx_gmu *gmu, u32 id, u32 seq
+ 
+ 		/* We may timeout because the GMU is temporarily wedged from
+ 		 * pending faults from the GPU and we are taking a devcoredump.
+-		 * Wait until the MMU is resumed and try again.
++		 * Wait until the MMU is resumed and try again, but not for
++		 * ever: the devcoredump takes gpu->lock, which our caller may
++		 * hold (recover_worker), and both would wait on each other.
+ 		 */
+-		wait_for_completion(&a6xx_gpu->base.fault_coredump_done);
++		if (!wait_for_completion_timeout(&a6xx_gpu->base.fault_coredump_done,
++						 msecs_to_jiffies(2000)))
++			break;
+ 	} while (true);
+ 
+ 	if (ret) {
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index 5916dffc2..5950dc049 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -54,6 +54,18 @@ static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
+ 		return GOP_SIZE;
+ 	case V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE:
+ 		return ENTROPY_MODE;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_MODE:
++		return DEBLOCK_MODE_H264;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_ALPHA:
++		return DEBLOCK_ALPHA_H264;
++	case V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_BETA:
++		return DEBLOCK_BETA_H264;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE:
++		return DEBLOCK_MODE_HEVC;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LF_TC_OFFSET_DIV2:
++		return DEBLOCK_TC_HEVC;
++	case V4L2_CID_MPEG_VIDEO_HEVC_LF_BETA_OFFSET_DIV2:
++		return DEBLOCK_BETA_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_H264_MIN_QP:
+ 		return MIN_FRAME_QP_H264;
+ 	case V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP:
+@@ -156,6 +168,10 @@ static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
+ 		return LAYER5_BITRATE_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
+ 		return REQUEST_SYNC_FRAME;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE:
++		return DISPLAY_DELAY_ENABLE;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY:
++		return DISPLAY_DELAY;
+ 	default:
+ 		return INST_FW_CAP_MAX;
+ 	}
+@@ -199,6 +215,18 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
+ 		return V4L2_CID_MPEG_VIDEO_GOP_SIZE;
+ 	case ENTROPY_MODE:
+ 		return V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE;
++	case DEBLOCK_MODE_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_MODE;
++	case DEBLOCK_ALPHA_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_ALPHA;
++	case DEBLOCK_BETA_H264:
++		return V4L2_CID_MPEG_VIDEO_H264_LOOP_FILTER_BETA;
++	case DEBLOCK_MODE_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE;
++	case DEBLOCK_TC_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LF_TC_OFFSET_DIV2;
++	case DEBLOCK_BETA_HEVC:
++		return V4L2_CID_MPEG_VIDEO_HEVC_LF_BETA_OFFSET_DIV2;
+ 	case MIN_FRAME_QP_H264:
+ 		return V4L2_CID_MPEG_VIDEO_H264_MIN_QP;
+ 	case MIN_FRAME_QP_HEVC:
+@@ -301,6 +329,10 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR;
+ 	case REQUEST_SYNC_FRAME:
+ 		return V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME;
++	case DISPLAY_DELAY_ENABLE:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE;
++	case DISPLAY_DELAY:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY;
+ 	default:
+ 		return 0;
+ 	}
+@@ -859,6 +891,67 @@ int iris_set_entropy_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap
+ 				     &entropy_mode, sizeof(u32));
+ }
+ 
++int iris_set_deblock_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
++{
++	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
++	u32 hfi_id = inst->fw_caps[cap_id].hfi_id;
++	u32 mode = inst->fw_caps[cap_id].value;
++	u32 alpha_tc, beta, hfi_value;
++
++	if (inst->codec == V4L2_PIX_FMT_H264) {
++		if (cap_id != DEBLOCK_MODE_H264)
++			return 0;
++
++		switch (mode) {
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED:
++			mode = HFI_DEBLOCK_ALL_BOUNDARY;
++			break;
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED:
++			mode = HFI_DEBLOCK_DISABLE;
++			break;
++		case V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY:
++			mode = HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY;
++			break;
++		default:
++			return -EINVAL;
++		}
++
++		alpha_tc = inst->fw_caps[DEBLOCK_ALPHA_H264].value + 6;
++		beta = inst->fw_caps[DEBLOCK_BETA_H264].value + 6;
++	} else if (inst->codec == V4L2_PIX_FMT_HEVC) {
++		if (cap_id != DEBLOCK_MODE_HEVC)
++			return 0;
++
++		switch (mode) {
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED:
++			mode = HFI_DEBLOCK_ALL_BOUNDARY;
++			break;
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED:
++			mode = HFI_DEBLOCK_DISABLE;
++			break;
++		case V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY:
++			mode = HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY;
++			break;
++		default:
++			return -EINVAL;
++		}
++
++		alpha_tc = inst->fw_caps[DEBLOCK_TC_HEVC].value + 6;
++		beta = inst->fw_caps[DEBLOCK_BETA_HEVC].value + 6;
++	} else {
++		return 0;
++	}
++
++	/* Firmware expects offsets biased by 6, with alpha or HEVC tc in bits 23:16. */
++	hfi_value = alpha_tc << 16 | beta << 8 | mode;
++
++	return hfi_ops->session_set_property(inst, hfi_id,
++					     HFI_HOST_FLAGS_NONE,
++					     iris_get_port_info(inst, cap_id),
++					     HFI_PAYLOAD_32_PACKED,
++					     &hfi_value, sizeof(hfi_value));
++}
++
+ int iris_set_min_qp(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
+ {
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.h b/drivers/media/platform/qcom/iris/iris_ctrls.h
+index 5180d53d3..c2b090309 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.h
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.h
+@@ -29,6 +29,7 @@ int iris_set_bitrate_mode_gen1(struct iris_inst *inst, enum platform_inst_fw_cap
+ int iris_set_bitrate_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_entropy_mode_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_entropy_mode_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
++int iris_set_deblock_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_min_qp(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_max_qp(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_frame_qp(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+index 3b8fbefb8..f81c3c8c9 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+@@ -353,6 +353,64 @@ static const struct platform_inst_fw_cap inst_fw_cap_milos_enc[] = {
+ 		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+ 		.set = iris_set_entropy_mode_gen2,
+ 	},
++	{
++		.cap_id = DEBLOCK_MODE_H264,
++		.min = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.max = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_ALPHA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_MODE_HEVC,
++		.min = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED,
++		.max = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_TC_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
+ 	{
+ 		.cap_id = MIN_FRAME_QP_H264,
+ 		.min = MIN_QP_8BIT,
+@@ -838,6 +896,22 @@ static const struct platform_inst_fw_cap inst_fw_cap_milos_enc[] = {
+ };
+ 
+ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_dec[] = {
++	{
++		.cap_id = DISPLAY_DELAY_ENABLE,
++		.min = 0,
++		.max = 1,
++		.step_or_mask = 1,
++		.value = 0,
++		.hfi_id = HFI_PROP_DECODE_ORDER_OUTPUT,
++		.flags = CAP_FLAG_INPUT_PORT,
++	},
++	{
++		.cap_id = DISPLAY_DELAY,
++		.min = 0,
++		.max = 0,
++		.step_or_mask = 1,
++		.value = 0,
++	},
+ 	{
+ 		.cap_id = PROFILE_H264,
+ 		.min = V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE,
+@@ -1003,7 +1077,6 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_dec[] = {
+ 		.value = 0,
+ 		.hfi_id = HFI_PROP_TIER,
+ 		.flags = CAP_FLAG_INPUT_PORT,
+-		.set = iris_set_u32,
+ 	},
+ 	{
+ 		.cap_id = DRAP,
+@@ -1761,6 +1834,64 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ 			CAP_FLAG_DYNAMIC_ALLOWED,
+ 		.set = iris_set_layer_bitrate,
+ 	},
++	{
++		.cap_id = DEBLOCK_MODE_H264,
++		.min = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.max = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_H264_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_ALPHA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_H264,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_MODE_HEVC,
++		.min = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED,
++		.max = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY,
++		.step_or_mask =
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED) |
++			BIT(V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_DISABLED_AT_SLICE_BOUNDARY),
++		.value = V4L2_MPEG_VIDEO_HEVC_LOOP_FILTER_MODE_ENABLED,
++		.hfi_id = HFI_PROP_DEBLOCKING_MODE,
++		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
++		.set = iris_set_deblock_gen2,
++	},
++	{
++		.cap_id = DEBLOCK_TC_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
++	{
++		.cap_id = DEBLOCK_BETA_HEVC,
++		.min = -6,
++		.max = 6,
++		.step_or_mask = 1,
++		.value = 0,
++		.flags = CAP_FLAG_OUTPUT_PORT,
++	},
+ 	{
+ 		.cap_id = LAYER5_BITRATE_HEVC,
+ 		.min = 1,
+@@ -1785,6 +1916,7 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_params_default[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -1797,6 +1929,7 @@ static const u32 sm8550_vdec_input_config_params_default[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_hevc[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -1808,6 +1941,7 @@ static const u32 sm8550_vdec_input_config_param_hevc[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_vp9[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+@@ -1817,6 +1951,7 @@ static const u32 sm8550_vdec_input_config_param_vp9[] = {
+ };
+ 
+ static const u32 sm8550_vdec_input_config_param_av1[] = {
++	HFI_PROP_DECODE_ORDER_OUTPUT,
+ 	HFI_PROP_BITSTREAM_RESOLUTION,
+ 	HFI_PROP_CROP_OFFSETS,
+ 	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
+index 21ab58e0a..f30f96dd3 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.h
+@@ -23,6 +23,8 @@ struct iris_core;
+  * @hfi_frame_info: structure of frame info
+  * @src_subcr_params: subscription params to fw on input port
+  * @dst_subcr_params: subscription params to fw on output port
++ * @fw_color_info: colour info the firmware last reported for the bitstream
++ * @fw_color_info_valid: @fw_color_info holds a firmware report
+  */
+ struct iris_inst_hfi_gen2 {
+ 	struct iris_inst		inst;
+@@ -32,6 +34,8 @@ struct iris_inst_hfi_gen2 {
+ 	struct iris_hfi_frame_info	hfi_frame_info;
+ 	struct hfi_subscription_params	src_subcr_params;
+ 	struct hfi_subscription_params	dst_subcr_params;
++	u32				fw_color_info;
++	bool				fw_color_info_valid;
+ };
+ 
+ void iris_hfi_gen2_sys_ops_init(struct iris_core *core);
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index 388a36ff2..d50ae3b4d 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -339,7 +339,7 @@ static int iris_hfi_gen2_set_picture_order_count(struct iris_inst *inst, u32 pla
+ {
+ 	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
+ 	u32 port = iris_hfi_gen2_get_port(inst, plane);
+-	u32 poc = 0;
++	u32 poc = inst->fw_caps[POC].value;
+ 
+ 	inst_hfi_gen2->src_subcr_params.pic_order_cnt = poc;
+ 
+@@ -383,6 +383,15 @@ static int iris_hfi_gen2_set_colorspace(struct iris_inst *inst, u32 plane)
+ 	color_info = iris_hfi_gen2_get_color_info(matrix_coeff, transfer_char, primaries,
+ 						  colour_description_present_flag, full_range,
+ 						  video_format, video_signal_type_present_flag);
++	/*
++	 * Once the firmware has reported the stream's colour info, a decoder sends that
++	 * value back unchanged. Rebuilding it from the V4L2 colorimetry does not round-trip
++	 * (an "unspecified" primaries/transfer becomes reserved, video_format is lost), and
++	 * any difference raises the same source change again every time the bitstream
++	 * port is restarted.
++	 */
++	if (inst->domain == DECODER && inst_hfi_gen2->fw_color_info_valid)
++		color_info = inst_hfi_gen2->fw_color_info;
+ 
+ 	inst_hfi_gen2->src_subcr_params.color_info = color_info;
+ 
+@@ -665,6 +674,23 @@ static int iris_hfi_gen2_set_super_block(struct iris_inst *inst, u32 plane)
+ 						  sizeof(u32));
+ }
+ 
++static int iris_hfi_gen2_set_decode_order_output(struct iris_inst *inst, u32 plane)
++{
++	struct platform_inst_fw_cap *cap = &inst->fw_caps[DISPLAY_DELAY_ENABLE];
++	u32 decode_order = cap->value;
++
++	/* Leave the firmware default unchanged unless userspace sets the control. */
++	if (!(cap->flags & CAP_FLAG_CLIENT_SET))
++		return 0;
++
++	return iris_hfi_gen2_session_set_property(inst,
++						  HFI_PROP_DECODE_ORDER_OUTPUT,
++						  HFI_HOST_FLAGS_NONE,
++						  HFI_PORT_BITSTREAM,
++						  HFI_PAYLOAD_U32,
++						  &decode_order, sizeof(decode_order));
++}
++
+ static int iris_hfi_gen2_session_set_config_params(struct iris_inst *inst, u32 plane)
+ {
+ 	const struct iris_firmware_data *fdata = inst->core->iris_firmware_data;
+@@ -691,6 +717,7 @@ static int iris_hfi_gen2_session_set_config_params(struct iris_inst *inst, u32 p
+ 		{HFI_PROP_FRAME_RATE,                 iris_hfi_gen2_set_frame_rate             },
+ 		{HFI_PROP_AV1_FILM_GRAIN_PRESENT,     iris_hfi_gen2_set_film_grain             },
+ 		{HFI_PROP_AV1_SUPER_BLOCK_ENABLED,    iris_hfi_gen2_set_super_block            },
++		{HFI_PROP_DECODE_ORDER_OUTPUT,        iris_hfi_gen2_set_decode_order_output    },
+ 	};
+ 
+ 	if (inst->domain == DECODER) {
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+index f43aea100..9edd575bd 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+@@ -57,6 +57,14 @@
+ #define HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT	0x03000124
+ #define HFI_PROP_PIC_ORDER_CNT_TYPE		0x03000128
+ 
++enum hfi_deblock_mode {
++	HFI_DEBLOCK_ALL_BOUNDARY			= 0x0,
++	HFI_DEBLOCK_DISABLE			= 0x1,
++	HFI_DEBLOCK_DISABLE_AT_SLICE_BOUNDARY	= 0x2,
++};
++
++#define HFI_PROP_DEBLOCKING_MODE			0x03000129
++
+ enum hfi_rate_control {
+ 	HFI_RC_VBR_CFR		= 0x00000000,
+ 	HFI_RC_CBR_CFR		= 0x00000001,
+@@ -128,6 +136,7 @@ enum hfi_flip {
+ 
+ #define HFI_PROP_FLIP				0x0300014c
+ #define HFI_PROP_SIGNAL_COLOR_INFO		0x03000155
++#define HFI_PROP_DECODE_ORDER_OUTPUT		0x0300015b
+ #define HFI_PROP_PICTURE_TYPE			0x03000162
+ #define HFI_PROP_DEC_DEFAULT_HEADER		0x03000168
+ #define HFI_PROP_DEC_START_FROM_RAP_FRAME	0x03000169
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+index 69f45d0b4..024b2bf12 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -534,6 +534,8 @@ static void iris_hfi_gen2_read_input_subcr_params(struct iris_inst *inst)
+ 	struct v4l2_ctrl *ctrl;
+ 
+ 	subsc_params = inst_hfi_gen2->src_subcr_params;
++	inst_hfi_gen2->fw_color_info = subsc_params.color_info;
++	inst_hfi_gen2->fw_color_info_valid = true;
+ 	width = (subsc_params.bitstream_resolution &
+ 		HFI_BITMASK_BITSTREAM_WIDTH) >> 16;
+ 	height = subsc_params.bitstream_resolution &
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_common.h b/drivers/media/platform/qcom/iris/iris_platform_common.h
+index 0506b8ae0..ad07fbb9e 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -137,6 +137,12 @@ enum platform_inst_fw_cap_type {
+ 	FRAME_RC_ENABLE,
+ 	GOP_SIZE,
+ 	ENTROPY_MODE,
++	DEBLOCK_MODE_H264,
++	DEBLOCK_ALPHA_H264,
++	DEBLOCK_BETA_H264,
++	DEBLOCK_MODE_HEVC,
++	DEBLOCK_TC_HEVC,
++	DEBLOCK_BETA_HEVC,
+ 	MIN_FRAME_QP_H264,
+ 	MIN_FRAME_QP_HEVC,
+ 	MAX_FRAME_QP_H264,
+@@ -187,6 +193,8 @@ enum platform_inst_fw_cap_type {
+ 	LAYER5_BITRATE_HEVC,
+ 	REQUEST_SYNC_FRAME,
+ 	TIME_DELTA_BASED_RC,
++	DISPLAY_DELAY_ENABLE,
++	DISPLAY_DELAY,
+ 	INST_FW_CAP_MAX,
+ };
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index d39ac71a2..0a8de2fca 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -122,6 +122,9 @@ iris_m2m_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_
+ 	dst_vq->drv_priv = inst;
+ 	dst_vq->buf_struct_size = sizeof(struct iris_buffer);
+ 	dst_vq->min_reqbufs_allocation = MIN_BUFFERS;
++	if (inst->domain == DECODER &&
++	    inst->core->iris_firmware_data == &iris_hfi_gen2_data)
++		dst_vq->max_num_buffers = DEFAULT_MAX_HOST_BUF_COUNT;
+ 	dst_vq->dev = inst->core->dev;
+ 	dst_vq->lock = &inst->ctx_q_lock;
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 262a20453..b97185b4e 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -2168,6 +2168,15 @@ static int ath12k_core_hw_group_create(struct ath12k_hw_group *ag)
+ 	return ret;
+ }
+ 
++/* y700 (TB323FU): WCN7860 with the Android GNG firmware completes ML association with an
++ * MLO AP but its EAPOL 2/4 over the MLO link is never acked (4WAY_HANDSHAKE_TIMEOUT), so
++ * 5/6 GHz MLO SSIDs never connect. Unless wcn7860_mlo=1, do not advertise MLO for this chip:
++ * the station then associates single-link (non-ML) and the handshake goes through.
++ */
++static bool ath12k_wcn7860_mlo;
++module_param_named(wcn7860_mlo, ath12k_wcn7860_mlo, bool, 0444);
++MODULE_PARM_DESC(wcn7860_mlo, "Advertise MLO on WCN7860 (default: off)");
++
+ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ {
+ 	struct ath12k_base *ab;
+@@ -2180,6 +2189,11 @@ void ath12k_core_hw_group_set_mlo_capable(struct ath12k_hw_group *ag)
+ 
+ 	if (ag->num_devices == 1) {
+ 		ab = ag->ab[0];
++		if (ab->hw_rev == ATH12K_HW_WCN7860_HW20 && !ath12k_wcn7860_mlo) {
++			ath12k_info(ab, "MLO disabled on WCN7860 (wcn7860_mlo=0)\n");
++			ag->mlo_capable = false;
++			return;
++		}
+ 		/* QCN9274 firmware uses firmware IE for MLO advertisement */
+ 		if (ab->fw.fw_features_valid) {
+ 			ag->mlo_capable =
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 99bf5cf79..755bc4a06 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -1982,7 +1982,18 @@ void ath12k_mac_handle_beacon_miss(struct ath12k *ar,
+ 	 * doesn't make sense to continue operation. Queue connection loss work
+ 	 * which can be cancelled when beacon is received.
+ 	 */
+-	ieee80211_queue_delayed_work(hw, &arvif->connection_loss_work,
++	/*
++	 * y700 (TB323FU, WCN7860): on 5 GHz the firmware stops forwarding beacons
++	 * over WMI a few seconds after association ("beacon rx" stays at 1), so
++	 * this backup timer, which only a WMI beacon cancels, tore the link down
++	 * (reason 4, locally generated) every ~20 s although data still flowed.
++	 * mac80211 already probes the AP after ieee80211_beacon_loss() and
++	 * disconnects on a real loss; mt76/rtw89 rely on that alone, and the
++	 * Aug-2026 "improve MLO station stability" series drops the timer for
++	 * MLO for the same reason. Keep it off for every station link here.
++	 */
++	if (0)
++		ieee80211_queue_delayed_work(hw, &arvif->connection_loss_work,
+ 				     ATH12K_CONNECTION_LOSS_HZ);
+ }
+ 
+@@ -9056,6 +9067,34 @@ static int ath12k_mac_copy_sband_iftype_data(struct ath12k *ar,
+ 	return idx;
+ }
+ 
++/* y700 (TB323FU): WCN7860 with the Android GNG firmware loses beacons and stops
++ * transmitting some seconds after joining a 5 GHz BSS at 160 MHz (36-64, the upper
++ * half DFS). wcn7860_5g_160=0 drops the 160 MHz capability on 5 GHz only (VHT and
++ * HE), so such BSSs are joined at 80 MHz. 2.4 and 6 GHz are untouched.
++ */
++static bool ath12k_wcn7860_5g_160 = true;
++module_param_named(wcn7860_5g_160, ath12k_wcn7860_5g_160, bool, 0444);
++MODULE_PARM_DESC(wcn7860_5g_160, "Allow 160 MHz on 5 GHz on WCN7860 (default: on)");
++
++static void ath12k_mac_wcn7860_limit_5g(struct ath12k *ar)
++{
++	struct ieee80211_supported_band *sband = &ar->mac.sbands[NL80211_BAND_5GHZ];
++	int i;
++
++	if (ath12k_wcn7860_5g_160 || ar->ab->hw_rev != ATH12K_HW_WCN7860_HW20 ||
++	    !sband->n_channels)
++		return;
++
++	sband->vht_cap.cap &= ~(IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK |
++				IEEE80211_VHT_CAP_SHORT_GI_160 |
++				IEEE80211_VHT_CAP_EXT_NSS_BW_MASK);
++	for (i = 0; i < NUM_NL80211_IFTYPES; i++)
++		ar->mac.iftype[NL80211_BAND_5GHZ][i].he_cap.he_cap_elem.phy_cap_info[0] &=
++			~(IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_160MHZ_IN_5G |
++			  IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_80PLUS80_MHZ_IN_5G);
++	ath12k_info(ar->ab, "5 GHz limited to 80 MHz (wcn7860_5g_160=0)\n");
++}
++
+ static void ath12k_mac_setup_sband_iftype_data(struct ath12k *ar,
+ 					       struct ath12k_pdev_cap *cap)
+ {
+@@ -9093,6 +9132,8 @@ static void ath12k_mac_setup_sband_iftype_data(struct ath12k *ar,
+ 		_ieee80211_set_sband_iftype_data(sband, ar->mac.iftype[band],
+ 						 count);
+ 	}
++
++	ath12k_mac_wcn7860_limit_5g(ar);
+ }
+ 
+ static int __ath12k_set_antenna(struct ath12k *ar, u32 tx_ant, u32 rx_ant)
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 98187638a..d1e42a458 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -6,6 +6,7 @@
+  */
+ #include <linux/auxiliary_bus.h>
+ #include <linux/devm-helpers.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+@@ -454,6 +455,12 @@ static const u8 sm8350_bat_prop_map[] = {
+ 	[POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD] = BATT_CHG_CTRL_END_THR,
+ };
+ 
++static bool qcom_battmgr_is_sm8350_family(struct qcom_battmgr *battmgr)
++{
++	return battmgr->variant == QCOM_BATTMGR_SM8350 ||
++	       battmgr->variant == QCOM_BATTMGR_SM8550;
++}
++
+ static int qcom_battmgr_bat_sm8350_update(struct qcom_battmgr *battmgr,
+ 					  enum power_supply_property psp)
+ {
+@@ -533,6 +540,19 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		val->intval = battmgr->status.status;
++		/*
++		 * y700 (TB323FU): the firmware keeps reporting "Charging" while
++		 * external power is in but the battery is held (charge limit
++		 * reached, bypass) or is drained by the load. Tell those apart by
++		 * the battery current (positive = into the battery here).
++		 */
++		if (qcom_battmgr_is_sm8350_family(battmgr) &&
++		    val->intval == POWER_SUPPLY_STATUS_CHARGING &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    battmgr->status.current_now <= 0)
++			val->intval = battmgr->status.current_now < 0 ?
++				      POWER_SUPPLY_STATUS_DISCHARGING :
++				      POWER_SUPPLY_STATUS_NOT_CHARGING;
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_TYPE:
+ 		val->intval = battmgr->info.charge_type;
+@@ -566,6 +586,18 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 		break;
+ 	case POWER_SUPPLY_PROP_POWER_NOW:
+ 		val->intval = battmgr->status.power_now;
++		/*
++		 * y700: BATT_POWER_NOW is unusable on this firmware: it reads 0 at
++		 * first, and after a boot with a full battery it reported a
++		 * constant bogus 100121690 (uW) for the whole session. Always
++		 * derive it from the current and voltage (uA * uV / 10^6 = uW),
++		 * signed like current_now, as upower does.
++		 */
++		if (qcom_battmgr_is_sm8350_family(battmgr) &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_VOLTAGE_NOW) >= 0)
++			val->intval = (int)div_s64((s64)battmgr->status.current_now *
++						   battmgr->status.voltage_now, 1000000);
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+ 		if (unit != QCOM_BATTMGR_UNIT_mAh)
+@@ -1699,6 +1731,15 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 	battmgr->current_inverted = device_is_compatible(dev->parent,
+ 							 "qcom,kaanapali-pmic-glink");
+ 
++	/*
++	 * y700: only the SC8280XP battery-info message sets the unit. The
++	 * SM8350/SM8550 firmware answers BATT_CHG_FULL and BATT_CHG_FULL_DESIGN
++	 * in uAh (like BATT_CHG_COUNTER), so without this charge_full and
++	 * charge_full_design always read ENODATA and UPower shows 0 Wh.
++	 */
++	if (qcom_battmgr_is_sm8350_family(battmgr))
++		battmgr->unit = QCOM_BATTMGR_UNIT_mAh;
++
+ 	ret = qcom_battmgr_charge_control_thresholds_init(battmgr);
+ 	if (ret < 0)
+ 		return dev_err_probe(dev, ret,

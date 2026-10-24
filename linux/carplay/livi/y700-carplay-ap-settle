@@ -1,0 +1,89 @@
+#!/bin/bash
+# y700-carplay-ap-settle [IFACE] [MAX_S] — get IFACE ready for LIVI's hostapd: wait until NetworkManager's
+# wpa_supplicant has really let go of it, then restart the Wi-Fi firmware (reload ath12k).
+#
+# 1. wpa_supplicant (problem one in linux/carplay/README.md, step 10): `nmcli device set IFACE managed no` returns at
+#    once; wpa_supplicant then removes p2p-dev-IFACE and runs its nl80211 deinit on IFACE 100-350 ms later. That
+#    deinit puts the interface back into station mode: when it lands after hostapd's START_AP, the kernel stops the
+#    AP again (`iw event`: "stop ap" ~20 ms after "start ap") while hostapd keeps saying ENABLED, and nothing can see
+#    or join it. Seen in 2 of 4 offline sessions on 2.4 GHz (10-17 19:17). Waits at most MAX_S.
+# 2. Firmware restart (problem two): after the station has been on 6 GHz, the WCN7860 firmware is left, at random,
+#    in a state where it does not find the client's peer for the access point's EAPOL: every M1 is dropped, the
+#    iPhone associates and never gets a key - across hostapd restarts, for minutes. Nothing on the host side differs.
+#    A fresh firmware load clears it (apjoin.sh RELOAD=pair, 10-17 22:25). modprobe -r/modprobe takes ~1.5 s.
+#    LIVI's claim has put IFACE in NetworkManager's unmanaged list (99-livi-ap-unmanaged.conf in /etc - NM did not
+#    honour the same line from /run/NetworkManager/conf.d), so NM leaves the new interface alone. Without that file
+#    NM takes the new interface and starts wpa_supplicant on it, P2P device included, and the AP's vdev cannot be
+#    created next to it (10-17 22:52: "failed to vdev 1 create peer for AP: -22"); so the interface is set unmanaged
+#    again and part 1 runs again in any case. LIVI's --wifi-ap (ExecStart) sets the interface up afterwards, and its
+#    own hostapd restarts do not come back here. Y700_AP_FW_RESET=0 in the environment skips this part.
+# Runs as an ExecStartPre of livi-wifi-ap.service, after LIVI's own --wifi-ap-claim. Never fails the unit: whatever
+# goes wrong is said in the journal and LIVI goes on.
+LIVI_NM_CONF=${Y700_AP_NM_CONF:-/etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf}
+NET=${Y700_AP_SYSNET:-/sys/class/net}     # both overridable for test-ap-settle.sh only
+IF=${1:-$(sed -n 's/.*interface-name:\([^,;[:space:]]*\).*/\1/p' $LIVI_NM_CONF 2>/dev/null | head -1)}
+IF=${IF:-wlp1s0}; MAX=${2:-10}
+ms() { echo $(( ($(date +%s%N) - $1) / 1000000 )); }
+
+held() {
+    [ -e "/run/wpa_supplicant/$IF" ] && return 0
+    [ -e "/run/wpa_supplicant/p2p-dev-$IF" ] && return 0
+    iw dev 2>/dev/null | grep -q 'type P2P-device' && return 0
+    local p
+    for p in $(busctl get-property fi.w1.wpa_supplicant1 /fi/w1/wpa_supplicant1 fi.w1.wpa_supplicant1 Interfaces 2>/dev/null |
+        grep -o '"[^"]*"' | tr -d '"'); do
+        busctl get-property fi.w1.wpa_supplicant1 "$p" fi.w1.wpa_supplicant1.Interface Ifname 2>/dev/null |
+            grep -q "\"$IF\"" && return 0
+    done
+    return 1
+}
+
+let_go() {
+    local start=$(date +%s%N) waited
+    while held; do
+        if [ "$(ms $start)" -ge $((MAX * 1000)) ]; then
+            echo "$IF still held by wpa_supplicant after ${MAX} s, going on anyway"
+            return
+        fi
+        sleep 0.05
+    done
+    waited=$(ms $start)
+    # The deinit's last steps (mode change, link down/up) follow the removal of the control socket closely.
+    sleep 0.5
+    echo "wpa_supplicant let go of $IF after $waited ms (+500 ms)"
+}
+
+let_go
+[ "${Y700_AP_FW_RESET:-1}" = 1 ] || { echo "firmware restart skipped (Y700_AP_FW_RESET=${Y700_AP_FW_RESET})"; exit 0; }
+[ "$(basename "$(readlink -f $NET/$IF/device/driver 2>/dev/null)")" = ath12k_wifi7_pci ] ||
+    { echo "$IF is not on ath12k, no firmware restart"; exit 0; }
+grep -qs "interface-name:$IF" $LIVI_NM_CONF ||
+    echo "$IF is not in $LIVI_NM_CONF: NetworkManager will take the new interface for a moment"
+# Load the driver back, once more after a second if that fails: from here on a missing interface is no Wi-Fi at all
+# until a reboot - neither y700-carplay's cleanup nor the boot guard can hand NM an interface that is not there.
+load_back() {
+    lsmod | grep -q '^ath12k_wifi7 ' && return 0
+    modprobe ath12k_wifi7 2>/dev/null && return 0
+    sleep 1
+    modprobe ath12k_wifi7 2>/dev/null
+}
+start=$(date +%s%N); err=
+modprobe -r ath12k_wifi7 ath12k 2>&1 | tr '\n' ' '
+if lsmod | grep -qE '^ath12k(_wifi7)? '; then
+    # modprobe -r stops at the first module it cannot remove: ath12k_wifi7 can be gone while ath12k stays (10-19
+    # audit). Exiting here then left the tablet without wlp1s0.
+    load_back || err="; modprobe failed"
+    echo "ath12k is still loaded after modprobe -r, no firmware restart${err}"
+    exit 0
+fi
+load_back || err="; modprobe failed"
+i=0
+while [ ! -e $NET/$IF ]; do
+    i=$((i + 1)); [ $i -ge 100 ] && { err="$err; no $IF 20 s after the reload"; break; }; sleep 0.2
+done
+udevadm settle -t 5 2>/dev/null       # the rename, and the regulatory rule (90-y700-wifi-regdom.rules), run on add
+echo "firmware restart: ath12k $(cat /sys/module/ath12k/version 2>/dev/null || echo '-'), $IF back after $(ms $start) ms${err}"
+[ -e $NET/$IF ] || exit 0
+nmcli device set "$IF" managed no 2>/dev/null
+let_go
+exit 0
