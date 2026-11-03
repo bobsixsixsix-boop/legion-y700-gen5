@@ -12,7 +12,8 @@
 //!      anything. One file per boot, the last 12 kept, current.log -> this boot's. "Last" is by boots.txt there
 //!      (each boot's id appended at start), not by file time: the RTC starts at 1970, see boot_order() in run.rs.
 //! At start it copies whatever systemd-pstore archived (and anything still in /sys/fs/pstore) into
-//! /var/log/y700-flightrec/pstore/<bootid>/, because systemd-pstore overwrites same-named files next boot.
+//! /var/log/y700-flightrec/pstore/<bootid>/, because systemd-pstore overwrites same-named files next boot; kept for
+//! the same boots as the logs (prune_logs() in run.rs).
 //!
 //! Cadence (new 2026-10-17): a line every --interval s (1) and fdatasync every --sync lines (5) only while an
 //! experiment is on - a CX knob (allow_cluster_off / allow_system_off) is set, or `--mark "<STEP> start ..."` was
@@ -31,10 +32,17 @@
 //!   qs=apss:<count>/+<ms>,cxsd:...,aosd:...,ddr:...   (qcom_stats; ticks / 19200 = ms)
 //! Other lines: HEADER (start), MARK (--mark), MODE fast|slow (cadence switch), STOP (SIGTERM).
 //!
+//! Battery page counters (acc.rs, linux/power/battery/DESIGN.md section 2): after every data line the bat= reading
+//! is integrated into /run/y700-flightrec/energy (one fixed-width line rewritten in place) and
+//! /run/y700-flightrec/edge is replaced at start and on a dpms or power-direction change. For it the sample also
+//! keeps, outside the line: whether the gauge read at all, the battery status when current_now read exactly 0 (a
+//! real 0 on the charger or not), and the backlight level with the screen on. The line format is unchanged.
+//!
 //! Usage:  y700-flightrec [--interval S] [--sync N] [--idle-interval S] [--idle-sync N] [--iface wlp1s0]   daemon
 //!         y700-flightrec --mark "E1 start 30min"   append a MARK line to all three sinks (and flag the experiment)
 //!         y700-flightrec --once                    one sample line over a 1 s window to stdout (self-test)
-//!   test only: --log-dir D --run-dir D --no-pmsg   (a second instance next to the running one)
+//!   test only: --log-dir D --run-dir D --no-pmsg   (a second instance next to the running one; one daemon per
+//!   run dir - flock on <run_dir>/lock - so a second one without --run-dir exits 1 before it writes anything)
 //! Read-only apart from its own files and /dev/pmsg0. Every file read each sample stays open and is re-read with
 //! pread at offset 0 (sysfs/procfs/debugfs regenerate it there). Root (debugfs).
 use std::collections::HashMap;
@@ -47,6 +55,7 @@ const PMSG: &str = "/dev/pmsg0";
 const QS_DIR: &str = "/sys/kernel/debug/qcom_stats";
 const GENPD: &str = "/sys/kernel/debug/pm_genpd";
 const BAT: &str = "/sys/class/power_supply/qcom-battmgr-bat";
+const BACKLIGHT: &str = "/sys/class/backlight/aw99706-backlight/brightness"; // the cached level, no I2C (not actual_brightness)
 const PARAMS: [(&str, &str); 4] = [
     ("gov", "/sys/devices/system/cpu/cpuidle/current_governor"),
     ("aco", "/sys/module/cpuidle_psci_domain/parameters/allow_cluster_off"),
@@ -125,8 +134,13 @@ impl Files {
         Some(String::from_utf8_lossy(&out).trim().to_string())
     }
 
+    /// the first number in the file, or None (unreadable, or not a number)
+    fn num_opt(&mut self, path: &str) -> Option<i64> {
+        self.read(path).and_then(|s| s.split_whitespace().next().and_then(|t| t.parse::<i64>().ok()))
+    }
+
     fn num(&mut self, path: &str) -> i64 {
-        self.read(path).and_then(|s| s.split_whitespace().next().and_then(|t| t.parse().ok())).unwrap_or(0)
+        self.num_opt(path).unwrap_or(0)
     }
 }
 
@@ -143,14 +157,27 @@ struct Sample {
     cpu_idle: i64,
     ctxt: i64,
     bat_mw: f64,
+    bat_ok: bool,           // voltage_now and current_now both read (a failed read is printed as 0 mW too)
+    bat_st: Option<String>, // battery status, read only when current_now read exactly 0
     dpms: String,
+    bl: Option<i64>, // backlight level, read only with dpms On
+}
+
+/// the last battery gauge read, reused for ~5 s
+#[derive(Default)]
+struct Gauge {
+    at: f64, // monotonic s of the read
+    uv: f64, // voltage_now, 0 if unreadable
+    ua: f64, // current_now, 0 if unreadable
+    ok: bool,
+    status: Option<String>,
 }
 
 struct Recorder {
     f: Files,
     idle_files: Vec<(usize, usize, String, String)>, // (cluster, state index, usage path, rejected path)
     dpms_path: Option<String>,
-    bat: (f64, f64, f64), // (last read monotonic, voltage uV, current uA)
+    bat: Gauge,
 }
 
 impl Recorder {
@@ -186,7 +213,7 @@ impl Recorder {
             (n.starts_with("card") && n.contains("-DSI-") && e.path().join("dpms").exists())
                 .then(|| e.path().join("dpms").to_string_lossy().into_owned())
         });
-        Recorder { f: Files::new(), idle_files, dpms_path, bat: (-1e9, 0.0, 0.0) }
+        Recorder { f: Files::new(), idle_files, dpms_path, bat: Gauge { at: -1e9, ..Default::default() } }
     }
 
     fn sample(&mut self) -> Sample {
@@ -261,15 +288,25 @@ impl Recorder {
             }
         }
         // the battery gauge is a glink round trip to the ADSP and changes every 5-8 s: read it at most every ~5 s
-        if s.t - self.bat.0 >= 4.5 {
-            self.bat = (s.t, self.f.num(&format!("{BAT}/voltage_now")) as f64, self.f.num(&format!("{BAT}/current_now")) as f64);
+        if s.t - self.bat.at >= 4.5 {
+            let uv = self.f.num_opt(&format!("{BAT}/voltage_now"));
+            let ua = self.f.num_opt(&format!("{BAT}/current_now"));
+            let ok = uv.is_some() && ua.is_some();
+            // exactly 0 is a real 0 on the charger (full, held at the limit, bypass) or no reading while discharging:
+            // the status tells acc.rs which. One more round trip, only on such reads.
+            let status = if ok && ua == Some(0) { self.f.read(&format!("{BAT}/status")) } else { None };
+            self.bat = Gauge { at: s.t, uv: uv.unwrap_or(0) as f64, ua: ua.unwrap_or(0) as f64, ok, status };
         }
-        s.bat_mw = -(self.bat.1 / 1e6) * (self.bat.2 / 1e6) * 1000.0; // + = drawn from the battery
+        s.bat_mw = -(self.bat.uv / 1e6) * (self.bat.ua / 1e6) * 1000.0; // + = drawn from the battery
+        s.bat_ok = self.bat.ok;
+        s.bat_st = self.bat.status.clone();
         s.dpms = match self.dpms_path.clone() {
             Some(p) => self.f.read(&p).unwrap_or_else(|| "?".into()),
             None => "?".into(),
         };
         s.up = self.f.read("/proc/uptime").and_then(|u| u.split_whitespace().next().map(str::to_string)).unwrap_or_else(|| "0".into());
+        // acc.rs's bl (level x ms with the screen on)
+        s.bl = if s.dpms == "On" { self.f.num_opt(BACKLIGHT) } else { None };
         s
     }
 
@@ -333,6 +370,7 @@ impl Recorder {
     }
 }
 
+mod acc;
 mod run;
 
 fn main() {

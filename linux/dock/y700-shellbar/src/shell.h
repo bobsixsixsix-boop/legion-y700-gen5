@@ -2,7 +2,8 @@
 //   reveal()      the y700-taskswitcher effect: a short slow swipe up from the bottom edge in an app (dock mode B+)
 //   hideDock()    put a revealed dock away again
 // The status bar's pull-down is forwarded to the control centre (fyi.y700.ControlCenter pullBegin/pullMove/pullEnd);
-// its openChanged signal is mirrored in ccOpen so the bars ignore touches while the sheet is over them.
+// its openChanged signal is mirrored in ccOpen so the bars ignore touches while the sheet is over them (and its
+// name changing hands - a control centre that died open - resets ccOpen to false).
 // KWin blur behind the dock, the banners and the app grid goes through the control centre's WlBlurWindow
 // (linux/controlpanel/y700-control-center/src/wlblur.h, compiled in: CMakeLists WLBLUR_DIR), one per window - not
 // KWindowEffects::enableBlurBehind, which releases the previous blur object before KWin has applied the new one and

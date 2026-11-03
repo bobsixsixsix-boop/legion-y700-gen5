@@ -1,0 +1,138 @@
+Description: software_isp: report a luminance-gradient focus metric
+ The CPU statistics accumulate the absolute difference between
+ horizontally adjacent luminance samples of each statistics line
+ (focusSum, focusSamples in SwIspStats), and the simple soft IPA reports
+ it as the FocusFoM metadata control.
+ .
+ Patch 2/4 of the libcamera autofocus series of iceland-mainline
+ 990a0597, a cherry-pick of commit
+ 9afba3cd3da3c84fc6acabf24aa6c7092c0a641f.
+ .
+ Ported by hand to 0.7.0: 0.7.1 accumulates statistics per worker thread
+ (a stats array passed to every line function, summed in finishFrame()),
+ 0.7.0 accumulates into the single SwStatsCpu::stats_ that finishFrame()
+ copies whole to the shared buffer. The line macros therefore write to
+ stats_, startFrame() clears the two new fields of stats_, and the
+ finishFrame() hunk is dropped. The metric itself is unchanged. The
+ SwIspStats layout changes, so libcamera0.7 and libcamera-ipa from this
+ build must be installed together.
+Author: Osilvfe <64585305+Osilvfe@users.noreply.github.com>
+Origin: other, https://github.com/mzakamin-hub/iceland-mainline/blob/990a0597cab555bcdadb90d39f1d241198de07de/packaging/libcamera/0002-software_isp-report-a-luminance-gradient-focus-metri.patch
+Forwarded: no
+Last-Update: 2026-10-28
+---
+ .../internal/software_isp/swisp_stats.h       |  8 +++++++
+ src/ipa/simple/soft_simple.cpp                | 11 ++++++++++
+ src/libcamera/software_isp/swstats_cpu.cpp    | 22 +++++++++++++++++--
+ 3 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index d9d0d9b..f923ece 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -31,6 +31,14 @@ struct SwIspStats {
+ 	 * \brief Sums of colour channels of all the sampled pixels
+ 	 */
+ 	RGB<uint64_t> sum_;
++	/**
++	 * \brief Sum of horizontal luminance gradients used for focus measurement
++	 */
++	uint64_t focusSum;
++	/**
++	 * \brief Number of gradients accumulated in focusSum
++	 */
++	uint32_t focusSamples;
+ 	/**
+ 	 * \brief Number of bins in the yHistogram
+ 	 */
+diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
+index 6bef597..f8675bf 100644
+--- a/src/ipa/simple/soft_simple.cpp
++++ b/src/ipa/simple/soft_simple.cpp
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include <chrono>
++#include <limits>
+ #include <stdint.h>
+ #include <sys/mman.h>
+ 
+@@ -177,6 +178,9 @@ int IPASoftSimple::init(const IPASettings &settings,
+ 		stats_ = static_cast<SwIspStats *>(mem);
+ 	}
+ 
++	context_.ctrlMap[&controls::FocusFoM] = ControlInfo(
++		0, std::numeric_limits<int32_t>::max(), 0);
++
+ 	ControlInfoMap::Map ctrlMap = context_.ctrlMap;
+ 	*ipaControls = ControlInfoMap(std::move(ctrlMap), controls::controls);
+ 
+@@ -309,6 +313,13 @@ void IPASoftSimple::processStats(const uint32_t frame,
+ 	ControlList metadata(controls::controls);
+ 	for (auto const &algo : algorithms())
+ 		algo->process(context_, frame, frameContext, stats_, metadata);
++	if (stats_->valid && stats_->focusSamples) {
++		const uint64_t focus = stats_->focusSum * 1024 /
++				       stats_->focusSamples;
++		metadata.set(controls::FocusFoM,
++			     static_cast<int32_t>(std::min<uint64_t>(
++				     focus, std::numeric_limits<int32_t>::max())));
++	}
+ 	metadataReady.emit(frame, metadata);
+ 
+ 	/* Sanity check */
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 5c3011a..b6cf088 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -169,10 +169,14 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ #define SWSTATS_START_LINE_STATS(pixel_t) \
+ 	pixel_t r, g, g2, b;              \
+ 	uint64_t yVal;                    \
++	uint32_t previousY = 0;           \
++	bool havePreviousY = false;       \
+                                           \
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+-	uint64_t sumB = 0;
++	uint64_t sumB = 0;                \
++	uint64_t focusSum = 0;            \
++	uint32_t focusSamples = 0;
+ 
+ #define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+ 	sumR += r;                         \
+@@ -182,12 +186,24 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ 	yVal = r * kRedYMul;               \
+ 	yVal += g * kGreenYMul;            \
+ 	yVal += b * kBlueYMul;             \
++	{                                          \
++		const uint32_t focusY = yVal / (256 * (div)); \
++		if (havePreviousY) {                 \
++			focusSum += focusY > previousY ? focusY - previousY \
++							 : previousY - focusY; \
++			focusSamples++;                    \
++		}                                      \
++		previousY = focusY;                  \
++		havePreviousY = true;                \
++	}                                          \
+ 	stats_.yHistogram[yVal * SwIspStats::kYHistogramSize / (256 * 256 * (div))]++;
+ 
+ #define SWSTATS_FINISH_LINE_STATS() \
+ 	stats_.sum_.r() += sumR;    \
+ 	stats_.sum_.g() += sumG;    \
+-	stats_.sum_.b() += sumB;
++	stats_.sum_.b() += sumB;    \
++	stats_.focusSum += focusSum; \
++	stats_.focusSamples += focusSamples;
+ 
+ void SwStatsCpu::statsBGGR8Line0(const uint8_t *src[])
+ {
+@@ -333,6 +349,8 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 		LOG(SwStatsCpu, Error) << "Calling startFrame() without setWindow()";
+ 
+ 	stats_.sum_ = RGB<uint64_t>({ 0, 0, 0 });
++	stats_.focusSum = 0;
++	stats_.focusSamples = 0;
+ 	stats_.yHistogram.fill(0);
+ }
+ 

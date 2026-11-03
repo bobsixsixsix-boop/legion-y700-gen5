@@ -6,7 +6,8 @@
 # (from linux/osk/tests), python3-tk for the "game" window.
 #
 # Cases: swipe up and hold -> cards; swipe a card up -> that window gets closeWindow (closed, not
-# killed); the keyboard mapping mid-gesture does not lose the release (10-21 "卡片无法滑动");
+# killed; 3 s later the effect starts y700-appquit@, which leaves this test's windows alone: they run in
+# y700-tstest-* units, not app-*, see ts-scenarios/appquit.sh); the keyboard mapping mid-gesture does not lose the release (10-21 "卡片无法滑动");
 # flick -> home (minimized, no cards); a "game" (X11 class steam_app_*) needs two swipes; opening the
 # cards from an app activates no other window on the way (10-21 minimizeAll order);
 # keyboard / control centre up -> no edge; the G9 shortcut opens the cards; closing the cards without

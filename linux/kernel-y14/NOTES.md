@@ -313,7 +313,7 @@ tail -1 /root/y700-kernel-y14.log              # 必须是 KFULL_OK
 
 - **02:3x trial 安装，02:36 重启进 y14。** 第一次体检（`runs/kernel/y14-verify-20261023-0236.log`）90 项 PASS，只挂 vaapi-check 一项：两条 VP9 流各打 7 行 `iris-vaapi: replaced damaged picture`。
 - **那一项不是内核回归**，是 1051 把 libva-v4l2 的一个问题暴露了：libva-v4l2 把 VP9 隐藏帧包成「隐藏帧 + show_existing」超帧提交，Iris 先对隐藏的那半回一个空的 NOSHOW CAPTURE（内核标 `V4L2_BUF_FLAG_ERROR`），再回真画面。没有 1051 时那个错误缓冲的时间戳是 0、匹配不上任何帧；有了 1051 它带上了这帧的 token，libva-v4l2 就把 surface 换成灰帧、再把随后到的真画面丢掉。只有码流后来用 show_existing_frame 显示那个槽位时，灰帧才会上屏。
-- **修在 libva-v4l2 这一侧**：本地补丁 `linux/video/libva-v4l2-patches/0001-…patch`（只吃隐藏帧的第一个 bytesused=0 的 ERROR CAPTURE；真错误、更晚的帧先回来、NOSHOW 后 1 s 没画面这三种情况照旧灰化），03:58 由 `libva-v4l2-update.sh` 装上（`2de1857` = 6d03c3f + 0001）。没改内核：iris 标 ERROR 的地方分不清 NOSHOW 和真错误，要往缓冲上加状态，还得编 y15；radxa 自己的 0004 配上游 libva 也有同样的问题，修在 libva 一侧对上游更有用。完整记录在仓库 README「视频硬解」一节的「2026-10-23 y14 上 VP9 隐藏帧被刷成灰帧」。
+- **修在 libva-v4l2 这一侧**：本地补丁 `linux/video/libva-v4l2-patches/0001-…patch`（10-28 随 y15 退役，现在在 `retired/` 里；只吃隐藏帧的第一个 bytesused=0 的 ERROR CAPTURE；真错误、更晚的帧先回来、NOSHOW 后 1 s 没画面这三种情况照旧灰化），03:58 由 `libva-v4l2-update.sh` 装上（`2de1857` = 6d03c3f + 0001）。没改内核：iris 标 ERROR 的地方分不清 NOSHOW 和真错误，要往缓冲上加状态，还得编 y15；radxa 自己的 0004 配上游 libva 也有同样的问题，修在 libva 一侧对上游更有用。完整记录在仓库 README「视频硬解」一节的「2026-10-23 y14 上 VP9 隐藏帧被刷成灰帧」。
 - **体检跟着加强**（`y14-verify.sh`）：
   - vaapi-check 是 7 条流（加了两条 `-sef`，让隐藏帧真的上屏），逐帧 framemd5 和软解比；
   - 新加一项 `/root/vp9-hidden-check.sh`（`linux/video/vp9-hidden-check.sh`）：VP9 隐藏帧的故障注入，判据「只在真坏时灰、永远不等 sync 超时」；

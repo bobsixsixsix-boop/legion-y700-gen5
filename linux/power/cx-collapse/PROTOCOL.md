@@ -10,7 +10,7 @@
 - **我们缺的两个状态**：簇下电 cl5「ret-pll-off」PSCI 0x01000054（两个簇各自）和系统级 ss3「apps-pc」0x0200c354（CX 下电 / AOSS 睡眠 / DDR 自刷新的入口）。上游用两个补丁有意关掉它们：0118（`allow_cluster_off=0`，运行时拒绝簇下电，原因是允许时 78 分钟复位 2 次）和 0106（系统域 `GENPD_FLAG_RPM_ALWAYS_ON`，只在 s2idle 里用，原因是开关屏 + s2idle 循环约 1/25 复位）。安卓在同一台机、同一份固件上运行时进这些状态，所以是内核侧配置/唤醒路径问题。
 - **y9 现状（审计 22:47）**：两个簇域 S0 被拒 58147 / 42201 次、系统域从未尝试（Rejected=Usage=0），`qcom_stats` 的 apss / cxsd / aosd / ddr 计数全 0；熄屏仍约 300–400 次中断/秒。
 - **03:41 的死机与此无关**：rawdump 里的最后日志是 SCMI/DPU/GMU/ADC/battmgr 同时超时的总线挂死（读了 `debugfs pcie@1c00000` 的寄存器），不是空闲复位。
-- **取证路径已验证**：`download_mode` 开机 3 分钟后关 → 静默复位 = 直接重启；ramoops 内容挺过热重启（今天 5 次重启后 `console-ramoops-0` 都在，头部有 ECC 纠正的位翻转），长按冷切断则丢（6 条 uncorrectable）。所以飞行记录器写 **pmsg + tmpfs + UFS 三份**，UFS 每秒 fdatasync 兜底。（10-19 核对，X44：「每秒 fdatasync」是旧 Python 版的节奏；Rust 版 10-17 起实验时每 1 s 一行/每 5 行落盘，平时每 10 s 一行/每 6 行落盘（旧 Python 版曾每秒写、每 5 s 落盘），见 §2 :58-59 与 `linux/power/flightrec/src/main.rs:16-22`）
+- **取证路径已验证**：`download_mode` 开机 3 分钟后关 → 静默复位 = 直接重启（**11-01 更正：错了**——只用 5 次干净重启验证过，干净重启本来就写 NODUMP；y16 之前 SDI 没关，固件接手的复位照样进转储模式等人，10-31 21:04 等了 2 h 9 min，见 README「10-31 21:04 死机」；y16 起写 off 也关 SDI，11-01 咬测试直接重启，见 README「内核 y16」）；ramoops 内容挺过热重启（今天 5 次重启后 `console-ramoops-0` 都在，头部有 ECC 纠正的位翻转），长按冷切断则丢（6 条 uncorrectable）。所以飞行记录器写 **pmsg + tmpfs + UFS 三份**，UFS 每秒 fdatasync 兜底。（10-19 核对，X44：「每秒 fdatasync」是旧 Python 版的节奏；Rust 版 10-17 起实验时每 1 s 一行/每 5 行落盘，平时每 10 s 一行/每 6 行落盘（旧 Python 版曾每秒写、每 5 s 落盘），见 §2 :58-59 与 `linux/power/flightrec/src/main.rs:16-22`）
 - **阶梯**：E0 基线与取证演练 → E1 簇下电（熄屏 2×30 分钟）→ E2 簇下电 + DC ZVA 压力 → E3a/b/c 系统域分级放开（先只让 APSS 下电、CX/DDR 由 AOP 保持；再放 CX；再放 DDR）→ E4 开关屏循环 → E5 Wi‑Fi 流量。每级有前提、命令、时长、成功/中止判据、测量和风险。E3 需要 y10 的 `allow_system_off` 模块参数（规格见 §6）。
 - **预期收益要说实话**：s2idle 0.07–0.13 W 是下限；熄屏时每秒 300 次唤醒的现状下，ss3 驻留率估计只有 10–25%，省 **0.03–0.08 W**；把唤醒压到每秒 50 次以下才可能到 60–85% 驻留、省 0.2–0.27 W。安卓同机熄屏驻留率没有公开数字（猜测 70–90%）。还有两个未知：mainline 没有安卓 PCIe DRV（链路在 apps-pc 期间靠硬件状态机维持 L1.2），CX 真下电时 PCIe/UFS/USB 的 GDSC 是否都能保持（0059 为 s2idle 修过 USB 的保持）。
 
@@ -49,9 +49,9 @@ rawdump 里 `lastkmsg.log` 的最后几秒：163 条 `arm-scmi.1 timed out in re
 - 布局：`ramoops@c2000000` 0xc0000，`record-size 0x10000`（4 个 dmesg 区）、`console-size 0x40000`、`pmsg-size 0x40000`、`ecc-size 16`（`kernel/dts/kaanapali-lenovo-baldur.dts` reserved-memory；`patches/0054`）。vendor `qcom_ramoops` 同一几何（`record 0x10000 / console 0x40000 / pmsg 0x40000 / ecc 0x10`）。ECC 是 RS(255,239)，每 128 字节块 16 字节校验，最多纠 8 字节（`ram_core.c:198-201`）。
 - **热重启挺过**：22:22 热重启后的开机日志是 `ramoops: error in header, 1` ×4、`error in header, 2` ×1（`ram_core.c:243-245`：**已纠正** 1–2 字节），`baldur: console-ramoops-0` 存在，systemd-pstore 把它归档到 `/var/lib/systemd/pstore/console-ramoops-0`（审计 pstore 段）。README 850 行：今天 5 次热重启后都在。头部每次都有一两个字节的位翻转，说明 DDR 在复位过程中没刷新、内容略有衰减（上游 kexec 配置片段的注释也提到「ramoops 的位翻转是设备自己的」）。
 - **冷切断丢**：11:04 长按关机后的开机（`kernel-y8/inventory/dmesg:238-243`）6 个区全是 `uncorrectable error in header`，pstore 列表为空（`dmesg:782-783`）。
-- **未知**：固件发起的静默复位是否走同一种热路径。E1 第一次复位后立刻验证（§3 E1 的「复位后」步骤）。
+- **未知**：固件发起的静默复位是否走同一种热路径。E1 第一次复位后立刻验证（§3 E1 的「复位后」步骤）。**11-01 一次样本：保留**——10-31 固件复位 → 转储模式 2 h → 长按，console-ramoops 和 pmsg 都在，头部 `error in header` 全部已纠正（见 README「10-31 21:04 死机」）。
 - **systemd-pstore 的行为**（`src/pstore/pstore.c:47-51, 95-150, 348`）：默认 `Storage=external`、`Unlink=yes`；非 EFI/ERST 的文件原名复制到 `/var/lib/systemd/pstore/<原名>`，**同名覆盖**（`COPY_REPLACE`），并把内容作为 `FILE=` 字段写进 journal（`journalctl -o verbose MESSAGE_ID=...` 或 `journalctl -b -u systemd-pstore`）。所以每次开机的 `console-ramoops-0` / `pmsg-ramoops-0` 会覆盖上一次的——飞行记录器启动时先把它们拷到 `/var/log/y700-flightrec/pstore/<boot-id>/`。
-- **rawdump**（`download_mode=full` 时）：XBL 在转储模式把 ramoops 控制台（`lastkmsg.log`）、OCIMEM、AOP CODERAM/DATARAM、RPMh MSGRAM0–15、CPUCP 固件、`RST_STAT`/`PMIC_PON` 等 51 段写进 UFS 的 rawdump 分区（`/dev/disk/by-partlabel/rawdump`），`tools/rawdump-ls.py` 解析。代价是停在 900E 等人长按开机（03:41 那次 7 小时耗掉 36% 电）。**无人值守一律 off；有人盯着、想拿 AOP/RPMh 现场时临时 `echo full > /sys/module/qcom_scm/parameters/download_mode`**，实验完改回 `off`。
+- **rawdump**（`download_mode=full` 时）：XBL 在转储模式把 ramoops 控制台（`lastkmsg.log`）、OCIMEM、AOP CODERAM/DATARAM、RPMh MSGRAM0–15、CPUCP 固件、`RST_STAT`/`PMIC_PON` 等 51 段写进 UFS 的 rawdump 分区（`/dev/disk/by-partlabel/rawdump`），`tools/rawdump-ls.py` 解析。代价是停在 900E 等人长按开机（03:41 那次 7 小时耗掉 36% 电）。**无人值守一律 off；有人盯着、想拿 AOP/RPMh 现场时临时 `echo full > /sys/module/qcom_scm/parameters/download_mode`**，实验完改回 `off`。（11-01 起内核 y16：开机 3 分钟写 off 时 SDI 也关了，`echo full` 打不开它；这时被咬或 panic 还写不写 rawdump 没试过，见 README「内核 y16」副作用。要靠这条路取证，先在有人在场时试一次。）
 
 ## 2. 飞行记录器 `y700-flightrec`（2026-10-17 起 Rust：`linux/power/flightrec/`）
 
@@ -77,7 +77,7 @@ rawdump 里 `lastkmsg.log` 的最后几秒：163 条 `arm-scmi.1 timed out in re
      - `pd=sys:N/..` 第一次 >0 后复位 → 系统域路径（0106 类）；看 `qs=apss` 是否也动了（AOP 看到 APSS 睡了没）、`cxsd/aosd` 是否动了（死在 APSS 下电本身，还是死在 CX/DDR 真下电）。
      - （先看节奏：最后一条 `MODE` 是 fast 时每秒一行、每 5 行落盘，下面这条判据成立；是 slow 时每 10 秒一行、约 1 分钟落盘一次，UFS 尾行本来就可能比复位早几十秒——改看 pmsg 尾行，它比复位早 >20 s 才算异常。）最后一行之后记录器停了很久（UFS 文件时间戳与 journal 停止时间差几十秒）才复位 → 不是瞬间复位，是挂死后被 qcom_wdt（30 s）或固件看门狗咬的；对照 `console-ramoops-0` 末尾有没有 03:41 那种 `timed out in resp` 刷屏。
      - `bat` 在最后几行突然变化、`dpms` 翻转、`wifi` 包数激增 → 触发事件是外设/屏幕/网络，而非纯空闲。
-  4. 想要 AOP/RPMh 现场（RST_STAT、MSGRAM）就得 `download_mode=full` + 有人在场；`rawdump-ls /dev/disk/by-partlabel/rawdump lastkmsg.log RST_STAT.BIN PMIC_PON.BIN`。
+  4. 想要 AOP/RPMh 现场（RST_STAT、MSGRAM）就得 `download_mode=full` + 有人在场（y16 起临时 full 还管不管用没试过，见 §1.4）；`rawdump-ls /dev/disk/by-partlabel/rawdump lastkmsg.log RST_STAT.BIN PMIC_PON.BIN`。
 
 ## 3. 实验阶梯
 
@@ -200,7 +200,7 @@ rawdump 里 `lastkmsg.log` 的最后几秒：163 条 `arm-scmi.1 timed out in re
 
 ## 8. 开放问题
 
-1. 固件发起的静默复位后 pstore 是否仍在（E1 第一次复位即知）。
+1. 固件发起的静默复位后 pstore 是否仍在（E1 第一次复位即知）。11-01：一次样本，在（见 README「10-31 21:04 死机」）。
 2. `qcom_aoss` 的 `cx_mol`/`ddr_mol` 消息本机 AOP 是否接受（E3a 第一步即知）。
 3. 熄屏时哪些仍在跳的中断不走 PDC（审计 `/proc/interrupts` 分类）；它们能不能在 apps-pc 期间唤醒。
 4. 上游 drgn 看到的「CPU0-4 进 retention 再没回来」在本机复现时，记录器最后一行的 `irq` 是什么——这是区分"GIC 断电丢中断"与"固件 PSCI 实现缺陷"的第一手线索。

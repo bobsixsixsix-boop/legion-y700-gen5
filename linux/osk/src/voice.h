@@ -44,6 +44,7 @@ public:
     // (gateway /v1/voice?target=..), empty = plain recognition (/v1/asr)
     Q_INVOKABLE void finish(const QString &target = QString());
     Q_INVOKABLE void cancel();      // stop and throw the audio away
+    void discard();                 // the field lost the focus / the keyboard went away: drop what is still being recognised
     Q_INVOKABLE void warmUp();      // open the TLS connection early (called when a hold begins)
 
     void onCapture(const int16_t *pcm, int frames);   // PipeWire RT thread

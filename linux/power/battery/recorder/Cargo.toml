@@ -1,0 +1,19 @@
+[package]
+name = "y700-batteryd"
+version = "0.1.0"
+edition = "2021"
+description = "y700 battery page recorder: cgroup CPU, cluster, GPU, wake-up and flightrec energy counters to a JSON-lines ledger, edge-driven"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (only libc; .cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/power/flightrec. The JSON lines are written by hand (snap.rs): no serde.
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-batteryd"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

@@ -4,10 +4,11 @@ PartOf=graphical-session.target
 After=graphical-session.target plasma-kwin_wayland.service
 
 [Service]
-ExecStart=/usr/bin/python3 %h/.local/bin/y700-refresh-auto
+# Rust since 2026-11-03 (linux/display/refresh-auto/daemon/install.sh); the Python version it replaced: git 669f79f
+ExecStart=/usr/local/libexec/y700-refresh-auto
 # after any exit (clean, crash, SIGKILL): if the panel was left at 30/60 Hz, put the base back (a full modeset at 30/60 Hz,
 # e.g. the next screen-on, makes the panel flicker)
-ExecStopPost=-/usr/bin/python3 %h/.local/bin/y700-refresh-auto --restore
+ExecStopPost=-/usr/local/libexec/y700-refresh-auto --restore
 Restart=on-failure
 RestartSec=5
 # on stop the daemon puts the base mode back itself (SIGTERM handler); give kscreen-doctor the time

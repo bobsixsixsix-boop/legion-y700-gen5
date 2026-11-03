@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-# ts-app.py NAME COLOR [CLASS] [--fullscreen|--small] [--refuse-close] [--delay MS]: a plain window for the headless task-switcher test bed
+# ts-app.py NAME COLOR [CLASS] [--fullscreen|--small] [--refuse-close|--tray] [--delay MS]: a plain window for the headless task-switcher test bed
 # (linux/gesture/tests/ts-bed.sh): a flat colour with its name in big letters, maximized unless asked
 # otherwise, so screenshots show which card is which. CLASS sets the Wayland app id (e.g. steam_app_1 to
 # get a guarded "game" card). --refuse-close ignores the close request, like an app asking "save changes?".
-# --delay MS maps the window MS ms after start (a slow app appearing while a gesture is under way).
+# --tray hides the window on close and keeps running, like Steam or Claude going to the tray, and shows it again
+# on SIGUSR1, like a tap on its dock icon (10-31, ts-scenarios/appquit.sh). --delay MS maps the window MS ms after start (a slow app appearing while a gesture is under way).
+import signal
 import sys
 
 import gi
@@ -25,6 +27,9 @@ elif "--small" not in sys.argv:
     w.maximize()
 if "--refuse-close" in sys.argv:
     w.connect("delete-event", lambda *a: True)
+elif "--tray" in sys.argv:
+    w.connect("delete-event", lambda *a: w.hide() or True)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda: w.show_all() or True)
 w.connect("destroy", Gtk.main_quit)
 if "--delay" in sys.argv:
     GLib.timeout_add(int(sys.argv[sys.argv.index("--delay") + 1]), lambda: w.show_all() or False)

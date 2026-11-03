@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stand-in for tailscale in cc-stall.sh's bed (see bluetoothctl next to it): `status` is a tailscaled hung while
+# holding its socket, logged and waiting for ever the same way. Anything else is refused (the scenario taps nothing).
+[ "$1" = status ] || { echo "cc-stall tailscale stand-in: '$*' is not faked" >&2; exit 1; }
+echo "$$ tailscale $*" >> "$XDG_RUNTIME_DIR/cc-stall.calls"
+exec sleep 600

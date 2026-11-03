@@ -5,7 +5,6 @@
 #pragma once
 #include <QDBusVirtualObject>
 #include <QObject>
-#include <QElapsedTimer>
 #include <QPointer>
 #include <QStringList>
 #include <QVariantList>
@@ -126,6 +125,11 @@ private slots:
 
 private:
     void applyMotorSide();
+    void x11Decide();                     // a burst of focus-driven Shows for an X11 client: show or not
+    void x11TouchEnded();                 // a lift: a tap in an app window may have taken the focus off every field
+    void x11Check();                      // up over an X11 client: x11Verify() once fcitx5 is quiet
+    void x11Verify();                     // ... and no field has the focus: put the keyboard away
+    bool x11Pending() const;              // x11Decide() still to come, or a finger still on an app window
 
     Fcitx *m_fcitx = nullptr;
     Sound *m_sound = nullptr;
@@ -133,8 +137,11 @@ private:
     Voice *m_voice = nullptr;
     Gate *m_gate = nullptr;               // the KWin effect's view of taps (created with the real bus)
     bool m_clientTextInput = true;        // KWin: the focused client speaks text-input (false: X11)
-    QElapsedTimer m_since;
-    qint64 m_ignoredShowAt = -100000;     // m_since ms of the last gated (ignored) focus-driven Show
+    // X11 clients: the current burst of gated Shows, fcitx5's last Hide and last swallowed Hide, in Gate::now() ms
+    QTimer *m_x11Settle = nullptr;
+    QTimer *m_x11Verify = nullptr;
+    qint64 m_x11FirstShow = -1, m_x11LastShow = -100000, m_fcitxHideAt = -100000, m_echoHideAt = -100000;
+    bool m_fcitxLastHide = false;         // fcitx5's last word was a Hide (a Show and a Hide can share a ms)
     OskBusObject *m_busObject = nullptr;
     QPointer<QQuickWindow> m_win;
     QTimer *m_hideTimer = nullptr;

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """y700-checklist: the tablet's "things to remember", checked instead of remembered (2026-10-15).
 Installed on the tablet as /usr/local/bin/y700-checklist; run as root.
-Read-only except its own baseline (/var/lib/y700/checklist-state.json, written with --save).
+Read-only except its own baseline (/var/lib/y700/checklist-state.json, written with --save: a .tmp renamed over it).
 
 Two kinds of checks:
   CHANGED  a watched package/component changed since the baseline -> the follow-up it needs
@@ -20,6 +20,12 @@ Crash forensics (2026-10-16, for the cx-collapse experiments; PROTOCOL.md sectio
   - a NEW dump in the rawdump partition (XBL wrote it in download mode) is reported with the lastkmsg tail
     and the raw RST_STAT / PMIC_PON bytes (hash of header + lastkmsg kept in the baseline);
   - experiment hygiene: allow_cluster_off / allow_system_off left on without a y700-cx-exp unit running.
+Battery page (2026-10-30, linux/power/battery/DESIGN.md section 7; silent where it is not installed): y700-batteryd
+running with no automatic restart since the last --save (its NRestarts and boot kept in the baseline), its ledger
+written within 40 min and at most 20 MiB with the foreground logs (the 16 MiB cap plus a day's growth before the next
+prune), flightrec's energy line at most 60 s old by CLOCK_MONOTONIC while flightrec runs, and the report's diag block
+(coefficients to recalibrate: INFO while they are still the uncalibrated priors, WARN once calibrated; a report that
+times out is INFO, one that exits with no output is WARN).
 Every one of these runs under guard(): a broken check prints one WARN line instead of killing the run.
 """
 import glob, hashlib, json, os, re, struct, subprocess, sys, time
@@ -27,6 +33,22 @@ import glob, hashlib, json, os, re, struct, subprocess, sys, time
 STATE = "/var/lib/y700/checklist-state.json"
 FLIGHTREC = "/var/log/y700-flightrec"                       # y700-flightrec (Rust): flightrec-<boot8>.log, pstore/<boot8>/
 FLIGHTREC_UNIT = "/etc/systemd/system/y700-flightrec.service"
+# the battery page (linux/power/battery, DESIGN.md section 7, 2026-10-30): its recorder is a systemd user unit of user that
+# linux/power/battery/install.sh installs (its presence is what turns these checks on), its ledger lives in user's
+# ~/.local/state, its energy counters in the flight recorder's tmpfs dir, and its report is a read-only CLI
+BATTERYD_UNIT = "/home/user/.config/systemd/user/y700-batteryd.service"
+BATTERY_LEDGER = "/home/user/.local/state/y700-battery"   # b-<boot8>[.<n>].jsonl, fg-<boot8>[.<n>].log, boots.txt
+FLIGHTREC_ENERGY = "/run/y700-flightrec/energy"               # flightrec's acc.rs: one fixed-width line, pwrite in place
+BATTERY_REPORT = "/usr/local/bin/y700-battery-report"
+BATTERY_LEDGER_STALE_S = 2400     # batteryd snapshots every 300 s with the screen on, checkpoints every 1800 s with it off
+BATTERY_LEDGER_MAX = (16 + 4) << 20   # ledger.rs KEEP_BYTES (16 MiB) + one 4 MiB part: the prune runs about once a day
+#   (at start and the first screen-on snapshot a day after the last one), so the total may pass 16 MiB by up to a day's
+#   growth in between, always less than one part. At the estimated 130-300 KB/day the 40-day rule keeps it at 5-12 MiB
+BATTERY_ENERGY_STALE_S = 60       # flightrec rewrites the line after every data line: every 10 s, every 1 s in experiments
+BATTERY_UNEXPLAINED_MAX = 0.20    # the report's diag thresholds (DESIGN.md 6b.a "diag" quotes them from section 7)
+BATTERY_FLOOR_DRIFT_MAX = 0.25
+BATTERY_COEFF_MAX_DAYS = 90
+BATTERY_REPORT_TIMEOUT_S = 30     # the report aims at < 1.5 s; its busctl / journalctl calls time out at 5 s each
 PSTORE_DIRS = ("/var/lib/systemd/pstore", "/sys/fs/pstore")  # systemd-pstore's archive (flat: every ramoops record at the top level,
 #   console/pmsg overwritten each boot, dmesg-ramoops-N never deleted - cx-audit-2247.txt, PROTOCOL.md 1.4), then the raw fs
 RAWDUMP = "/dev/disk/by-partlabel/rawdump"
@@ -34,14 +56,23 @@ CX_PARAMS = "/sys/module/cpuidle_psci_domain/parameters"     # allow_cluster_off
 # signatures in the last lines of a kernel console -> what the end of that boot looked like
 CRASH_SIGNS = (
     (r"Kernel panic", "内核 panic"),
+    # qcom_wdt barks 1 s before it bites (pretimeout 1); no pretimeout governor, so the bark only prints this. bootstatus
+    # does not tell a bite on this SoC (0 after the 2026-11-01 01:27 bite test), this line in the console tail does
+    (r"watchdog\d+: pretimeout event", "硬件看门狗到点：系统卡了 30 秒没人喂狗，1 秒后被看门狗复位（y16 起直接重启，11-01 咬测试）"),
+    # 2026-10-31 21:04: die() printed this, CPU0 stopped mid-register-dump, panic() never ran; the firmware reset into dump mode
+    (r"synchronous external abort", "同步外部中止（SEA）：读硬件寄存器时总线报错，CPU 当场停住，panic 和 10 秒重启都没跑到"),
+    (r"pc : msm_mdss_irq", "出错点在显示模块的中断处理（读 MDSS 中断状态寄存器，10-31 21:04 同款）"),
     (r"Internal error: Oops|Unable to handle kernel", "内核 Oops（oops=panic，所以也会 panic）"),
     (r"SError Interrupt", "SError（总线/固件异常）"),
     (r"Unhandled fault", "未处理的异常"),
     (r"soft lockup|hard LOCKUP|rcu_[a-z]+ (self-)?detected|rcu: INFO", "lockup / RCU stall"),
     (r"blocked for more than|hung_task", "hung task"),
     (r"timed out in resp|TCS Busy|rpmh[^\n]*(timeout|fail)", "固件通道超时（SCMI/RPMh）＝总线挂死那一类（03:41 同款）"),
+    # 2026-11-02 15:15 (boot 447a621b): the only sign in the console, about 2 s before a silent reset; in no boot's journal
+    # otherwise (checked 11-03). A plain sysfs read that times out does not print it, only the uevent after a change does
+    (r"qcom-battmgr-bat: driver failed to report", "电池固件（ADSP，经 pmic_glink）超时不回话（11-02 15:15 只有这一样，约 2 秒后整机复位；03:41 总线挂死时也有）"),
     (r"failed to flush transmit queue|ath12k[^\n]*(crash|firmware)", "Wi‑Fi 固件出事"),
-    (r"vblank timeout|wait for commit done", "显示管线超时（DPU）"),
+    (r"vblank timeout|wait for commit done", "显示管线超时（DPU；平时也零星有，单独出现不算死因）"),
     (r"hangcheck recover", "GPU 卡死"),
     (r"Out of memory|oom-kill", "OOM"),
 )
@@ -59,6 +90,14 @@ DESKTOP_PROGS = ("kwin_wayland", "Xwayland", "plasmashell")   # the desktop itse
 USER_ENV = ["sudo", "-u", "user", "env", "XDG_RUNTIME_DIR=/run/user/1000",
             "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"]
 GOOD_KERNEL_TAG = re.compile(r"-tb323fu-t\d+-y\d+$")    # our builds: ...-tb323fu-t49-y7
+# the initramfs's e2fsck of the roots (kernel y17, linux/kernel-y17/NOTES.md, 2026-11-01): y17's init says on kmsg
+# "baldur:  fsck NAME (DEV): exit N (WHAT), T s" after each run (journalctl strips "baldur:", the syslog identifier, so
+# the message reads " fsck ..."), or "... no e2fsck in this image, not checked". One journalctl -g per boot reads those,
+# the kernel's ext4 complaints that matter (in order with them) and the boot's "Linux version" line
+FSCK_GREP = (r"^Linux version \S+|fsck \S+ \(/dev/\S+\): (exit |no e2fsck)|EXT4-fs (error \(device \S+\)|\(\S+\): "
+             r"(warning: mounting fs with errors|Couldn't remount RDWR|Errors on filesystem, clearing orphan list))")
+FSCK_RESULT = re.compile(r"fsck (\S+) \((/dev/\S+)\): exit (\d+) \(([^)]*)\), (\d+) s$")
+FSCK_FIRST_Y = 17                                     # the first kernel whose initramfs runs it
 
 # package -> what to do when it changes
 PACKAGES = {
@@ -81,7 +120,10 @@ PACKAGES = {
                "体检报「和 deb 的桌面项对不上」就重跑 /root/daily/chatgpt-wayland-ime.sh（README『屏幕键盘 y700-osk』10-22）",
     "libgl1-mesa-dri": "Ubuntu Mesa GL 升级：/etc/drirc 让 Chrome、ChatGPT、Steam 界面（steamwebhelper）走 zink 绕开它；"
                        "可以考虑撤掉，三个要一起复测（撤哪个就从 freedreno GL 上开它、看 journalctl -k 有没有 hangcheck，"
-                       "Chrome 打开一个重页面来回滑）；撤掉要同时改 linux/gpu/drirc 和体检的 DRIRC_ZINK（README『Chrome 让 GPU 卡死』）",
+                       "Chrome 打开一个重页面来回滑）；撤掉要同时改 linux/gpu/drirc 和体检的 DRIRC_ZINK（README『Chrome 让 GPU 卡死』）。"
+                       "Steam 界面 10-30 起走 GPU、关掉 zink 的渲染通道跟踪（ZINK_DEBUG=norp，开着时商店评测花屏）："
+                       "以 Y700_STEAM_UI=gpu-rp 开一次 Steam，看商店评测区还花不花，不花了就可以撤掉启动器里的 "
+                       "ZINK_DEBUG=norp（README『Steam 界面花屏』）",
     "libva2": "libva 升级：大版本时重编 radxa libva-v4l2（/usr/local），否则 Chrome/mpv 的 VA-API 硬解会掉",
     "tb323fu-helper": "helper 包升级：若装了熄屏慢轮询补丁（/etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf），"
                       "要在新源码上重打 linux/power/helperd-slow-poll.patch 重编到 /usr/local/libexec（README『熄屏唤醒治理』）",
@@ -106,6 +148,18 @@ def run(cmd, user=False, timeout=20):
         return r.stdout.strip()
     except Exception as e:
         return f"ERROR {e}"
+
+
+def run_rc(cmd, user=False, timeout=20):
+    """run() keeping the exit status: (rc, stdout, stderr), both stripped. rc None: still running at `timeout` (killed);
+    rc 127 with the reason as stderr: it could not be started. sudo and env pass the command's own status through"""
+    try:
+        r = subprocess.run((USER_ENV + cmd) if user else cmd, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return None, "", ""
+    except Exception as e:
+        return 127, "", f"ERROR {e}"
 
 
 def dpkg_version(pkg):
@@ -196,20 +250,32 @@ def current():
     cur["tb323fu_mesa"] = os.path.basename(mesa) if mesa else None
     cur["fex"] = file_hash("/home/user/.local/share/Steam/steamapps/common/FEX-Emu/VERSIONS.txt")
     cur["livi"] = os.path.basename(os.path.realpath("/opt/livi")) if os.path.exists("/opt/livi") else None   # -> livi-10.0.0
-    boots = run(["journalctl", "--list-boots", "--no-pager", "-q"]).splitlines()
-    cur["prev_boot"] = boots[-2].split()[1] if len(boots) >= 2 and len(boots[-2].split()) > 1 else None
-    return cur
+    boots = list_boots()
+    ended = [b for b in boots if b["boot_id"][:8] != cur["boot8"]] if cur["boot8"] else boots[:-1]
+    cur["prev_boot"] = ended[-1]["boot_id"] if ended else None
+    return cur, ended
 
 
-def prev_boot_ending():
-    """How the previous boot ended: (clean?, time of its last journal line). A crash or SoC reset leaves
-    no shutdown lines; with qcom_scm.download_mode=full a panic then sits in the crash-dump screen and
-    drains the battery until someone holds the power key (2026-10-15 03:41: 73 % -> 37 % overnight).
+def list_boots():
+    """The boots journald keeps, oldest first, as `journalctl --list-boots -o json` gives them: [{"index" (0 = this
+    boot), "boot_id" (32 hex), "first_entry", "last_entry"}]; [] when journalctl cannot say."""
+    try:
+        boots = json.loads(run(["journalctl", "--list-boots", "-o", "json", "--no-pager", "-q"]) or "[]")
+        return sorted([b for b in boots if isinstance(b.get("boot_id"), str)], key=lambda b: b["index"])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return []
+
+
+def prev_boot_ending(boot):
+    """How a boot that is over ended (`boot`: its id): (clean?, time of its last journal line). A crash or SoC reset leaves
+    no shutdown lines; a reset the firmware does (watchdog bite, fatal bus error) then sits in the crash-dump screen and
+    drains the battery until someone holds the power key (2026-10-15 03:41: 73 % -> 37 % overnight; 2026-10-31 21:04:
+    2 h 9 min although download_mode was off: SDI stays armed until kernel y16, README「10-31 21:04 死机」).
     tb323fu-ctl's LastBootClean did not notice that one, so look at the journal itself."""
-    tail = run(["journalctl", "-b", "-1", "-n", "300", "--no-pager", "-o", "cat"])
+    tail = run(["journalctl", "-b", boot, "-n", "300", "--no-pager", "-o", "cat"])
     clean = any(s in tail for s in ("systemd-shutdown", "Reached target reboot.target", "Reached target poweroff.target",
                                      "Reached target System Reboot", "Reached target System Power Off", "Journal stopped"))
-    last = run(["journalctl", "-b", "-1", "-n", "1", "--no-pager", "-o", "short-iso"]).split(" ", 1)[0]
+    last = run(["journalctl", "-b", boot, "-n", "1", "--no-pager", "-o", "short-iso"]).split(" ", 1)[0]
     return clean, last
 
 
@@ -323,6 +389,31 @@ def pstore_archived_at():
 
 def uptime_s():
     return float((read("/proc/uptime", "0 0") or "0 0").split()[0])
+
+
+def mono_s():
+    """CLOCK_MONOTONIC in seconds, the clock flightrec's energy line counts its t= in (ms). A function of its own so
+    the selftest, which runs on Windows (no clock_gettime there), can replace it. /proc/uptime is not used: it is
+    CLOCK_BOOTTIME, which only equals CLOCK_MONOTONIC while the tablet never suspends."""
+    return time.clock_gettime(time.CLOCK_MONOTONIC)
+
+
+def read_agreed(path, tries=4):
+    """A file another process rewrites in place (flightrec's energy line: pwrite at offset 0, never a rename), taken
+    only when two reads in a row return the same bytes - the reader rule acc.rs and DESIGN.md section 2 give, since a
+    read that overlaps the pwrite can return half the old line and half the new. None: the file is missing; False: no
+    two of `tries` reads agreed."""
+    prev = None
+    for _ in range(tries):
+        try:
+            with open(path, "rb") as f:
+                data = f.read(4096)
+        except FileNotFoundError:
+            return None
+        if data == prev:
+            return data
+        prev = data
+    return False
 
 
 def is_fresh(path, since, boot8):
@@ -563,13 +654,16 @@ def rawdump_summary():
 
 def main():
     save = "--save" in sys.argv
-    old = {}
+    old, bad = {}, None
     if os.path.exists(STATE):
         try:
-            old = json.load(open(STATE))
-        except Exception:
-            old = {}
-    cur = current()
+            with open(STATE) as f:
+                old = json.load(f)
+            if not isinstance(old, dict):
+                raise ValueError(f"不是 JSON 对象而是 {type(old).__name__}")
+        except Exception as e:
+            old, bad = {}, e                          # said below as a WARN, not passed off as a first run (10-31 audit C6)
+    cur, ended = current()
     out, attention = [], False
 
     def say(kind, text):
@@ -613,19 +707,41 @@ def main():
                            "dryrun-wireless.sh（dryrun.sh 自 10.0.0 起会让 bluetoothd 重启两次）；"
                            "确认 LIVI_GST_SINK、LIVI_GST_PRELOAD 两个口子还在（gst-host 的管线字符串和 LD_PRELOAD），"
                            "v4l2 解码器是否已经收 1:3:7:1（收了就不用色彩修正库）；热点单元的 drop-in 还挂得上（linux/carplay/README.md）")
+    elif bad:
+        say("WARN", f"基线 {STATE} 坏了（{bad}），这次只能当第一次运行，--save 时重建：和上次比的 CHANGED 都没了，"
+                    "上次体检以来升过什么看 /var/log/apt/history.log")
     else:
         say("INFO", "第一次运行：建立基线（下次起报告变化）")
 
-    # ---- how the previous boot ended (reported once per boot)
-    if cur.get("prev_boot") and cur["prev_boot"] != old.get("prev_boot"):
-        clean, last = prev_boot_ending()
+    # ---- how the boots since the last --save ended (each reported once). Not only the previous one (10-31 audit C2): the
+    # check runs once a day, so a reset in boot X, a clean reboot in boot Y and the check in boot Z left X's reset unseen
+    # (a silent reset with cx-auto off leaves neither a pstore panic record nor a rawdump). From the boot the last --save
+    # ran in (its boot8 in the baseline: it ended since) to the previous one; when that boot is not in journald's list
+    # (no baseline, journald rotated it away) the previous boot, once, as before. pstore holds only the last reset's
+    # console, so an earlier boot gets no attribution beyond its flight recorder's last UFS line
+    pos = next((i for i, b in enumerate(ended) if old.get("boot8") and b["boot_id"][:8] == old["boot8"]), None)
+    todo = ended[pos:] if pos is not None else ended[-1:] if cur["prev_boot"] != old.get("prev_boot") else []
+    clean_earlier = 0
+    for b in todo[:-1]:
+        clean, last = prev_boot_ending(b["boot_id"])
+        if clean:
+            clean_earlier += 1
+            continue
+        ufs_last = last_line(f"{FLIGHTREC}/flightrec-{b['boot_id'][:8]}.log")
+        say("WARN", f"开机 {b['index']}（{b['boot_id'][:8]}，上次体检以来、上一次之前的）没有正常结束，日志停在 {last}：死机或 SoC 复位。"
+                    "pstore 只留最近一次复位的控制台，它没有归因" + (f"；记录器 UFS 份最后一行 {brief_flightrec(ufs_last)}" if ufs_last else "")
+                    + f"（journalctl -b {b['boot_id']} | tail）")
+    if clean_earlier:
+        say("OK", f"上次体检以来、上一次之前的 {clean_earlier} 次开机都是正常关机/重启的")
+    if todo:
+        clean, last = prev_boot_ending(todo[-1]["boot_id"])
         if clean:
             say("OK", f"上一次开机是正常关机/重启的（{last}）")
         else:
             det = {}
             guard("上次开机归因", lambda: det.update(unclean_details(old, cur)))
             say("WARN", f"上一次开机没有正常结束，日志停在 {last}：{det.get('verdict', '死机或 SoC 复位')}。"
-                        "download_mode=full 时会卡在 dump 界面耗电；看 /var/lib/systemd/pstore、journalctl -b -1 | tail")
+                        "固件接手的复位会卡在转储界面耗电（y16 前关了 download_mode 也一样）；看 /var/lib/systemd/pstore、journalctl -b -1 | tail")
             for kind, text in det.get("lines", []):
                 say(kind, text)
 
@@ -674,8 +790,12 @@ def main():
     # it was still starting; systemd lost track of it, killed it at the default 90 s start timeout and kept it "failed",
     # so `systemctl is-system-running` said degraded for the rest of the boot and no check noticed. Any failed system or
     # user unit is worth a line now.
+    # 11-03: KDE runs every app launch as a transient user unit app-<desktop id>@<32 hex>.service, and one that exits
+    # non-zero stays "failed" until reboot. That is the app's business, not a broken service: bluedevil-wizard exits 1
+    # after a successful pairing (QDialog::Accepted), the owner's battery-notify shortcut pressed fast hits Plasma's
+    # flood limit. Those get one INFO line per app; anything else still WARNs.
     def check_failed_units():
-        found, unknown = [], False
+        found, apps, unknown = [], {}, False
         for scope, cmd, user in (("系统", ["systemctl", "--failed", "--no-legend", "--plain", "--no-pager"], False),
                                  ("用户", ["systemctl", "--user", "--failed", "--no-legend", "--plain", "--no-pager"], True)):
             txt = run(cmd, user=user)
@@ -683,7 +803,17 @@ def main():
                 say("INFO", f"查不了{scope}的失败服务（{txt[:80]}）")
                 unknown = True
                 continue
-            found += [f"{scope} {l.split()[0]}" for l in txt.splitlines() if l.strip()]
+            for name in [l.split()[0] for l in txt.splitlines() if l.strip()]:
+                m = user and re.fullmatch(r"app-(.+)@[0-9a-f]{32}\.service", name)
+                if m:
+                    app = m[1].replace("\\x2d", "-")
+                    apps[app] = apps.get(app, 0) + 1
+                else:
+                    found.append(f"{scope} {name}")
+        if apps:
+            say("INFO", "应用启动后退出码非 0（KDE 每开一次应用就起一个临时单元，不算服务坏了）："
+                        + "、".join(f"{a} ×{n}" for a, n in sorted(apps.items()))
+                        + "（systemctl --user status 'app-…' 看原因；systemctl --user reset-failed 清掉）")
         if found:
             say("WARN", f"有失败的服务：{'、'.join(found[:8])}{' 等' if len(found) > 8 else ''}"
                         "（systemctl [--user] status <名字> 看原因；处理完 systemctl [--user] reset-failed <名字>）")
@@ -772,6 +902,51 @@ def main():
             say("WARN", f"多任务卡片手势状态不对：特效最后记的是「{edge or '没有记录'}」，键盘/控制中心{'开着' if blocker else '都没开'}"
                         "（重新登录会重载特效）")
     guard("底边上滑手势", check_home_gesture)
+
+    # a swiped-away card quits its app (2026-10-31, linux/gesture/taskswitcher/appquit.py): the effect starts
+    # y700-appquit@PID_....service over D-Bus and the unit is collected as soon as it ends, so a missing piece or a
+    # failed quit only shows in the journal. Silent when all is well (a quit that had nothing to do is no failure).
+    def check_appquit():
+        if not os.path.exists("/home/user/.local/share/kwin/effects/y700-taskswitcher/contents/ui/AppQuit.qml"):
+            return
+        missing = [p for p in ("/usr/local/libexec/y700-appquit", "/home/user/.config/systemd/user/y700-appquit@.service")
+                   if not os.path.exists(p)]
+        if missing:
+            say("WARN", f"划走卡片只关窗口、不退程序：{'、'.join(missing)} 不在（重跑 linux/gesture/taskswitcher/install.sh）")
+            return
+        bad = run(["sh", "-c", "journalctl --user -b --no-pager -o cat | grep -cE "
+                   "'y700-taskswitcher: app quit: StartUnit failed|y700-appquit@[0-9_]+[.]service: Failed with result'"], user=True)
+        if bad.isdigit() and int(bad) > 0:
+            say("WARN", f"划走卡片退出程序这次开机失败了 {bad} 次（journalctl --user -b | grep -E 'app quit|y700-appquit'）")
+    guard("划走退出程序", check_appquit)
+
+    # y700-gamepad-screen (linux/gamepad/screen, 11-01): until then it fought y700-padkeys for the G9's joystick node every
+    # 5 s while the screen was dark, a traceback each time (17k journal lines a boot) and no wake from the pad's buttons.
+    # Now one line per distinct error, so many lines mean something loops again. Counted since the service last started
+    # (its invocation id), so a restart onto a fixed build clears it. Silent when all is well.
+    # 11-03 it became Rust: the binary must be an ELF (a script there is the Python version back, i.e. a rollback), and
+    # a panic shows as automatic restarts (Restart=on-failure; NRestarts starts from 0 at a manual restart and a boot).
+    def check_gamepad_screen():
+        b = "/usr/local/libexec/y700-gamepad-screen"
+        try:
+            elf = open(b, "rb").read(4) == b"\x7fELF"
+        except OSError:
+            return
+        if not elf:
+            say("WARN", f"G9 息屏服务 {b} 不是编译好的 Rust 程序（11-03 起是 Rust；回滚到 Python 版才会这样；"
+                        "在平板上重跑 y700/linux/gamepad/screen/install.sh）")
+            return
+        n = run(["sh", "-c", "journalctl -b -u y700-gamepad-screen "
+                 "_SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value y700-gamepad-screen) "
+                 "--no-pager -o cat | grep -c 'G9 lighting/wake handling failed'"])
+        r = run(["systemctl", "show", "-p", "NRestarts", "--value", "y700-gamepad-screen"])
+        if n.isdigit() and int(n) > 20:
+            say("WARN", f"G9 息屏服务这次启动以来报错 {n} 次，手柄按键可能亮不了屏、日志在刷（journalctl -b -u y700-gamepad-screen；"
+                        "README『G9 息屏关灯与按键亮屏』）")
+        elif r.isdigit() and int(r) > 5:
+            say("WARN", f"G9 息屏服务自动重启了 {r} 次（本次开机或上次手动重启以来），Rust 版崩了才会这样"
+                        "（journalctl -b -u y700-gamepad-screen | grep panicked）")
+    guard("G9 息屏服务", check_gamepad_screen)
 
     # the installed /etc/drirc against the repo's list (DRIRC_ZINK = linux/gpu/drirc, the selftest holds them equal): a
     # program rolled back on the tablet only, or added there only, is said every day until the repo says the same
@@ -870,20 +1045,118 @@ def main():
             say("OK", "ChatGPT 启动项带 Wayland IME 参数" + ("，正在跑的也带" if running else ""))
     guard("ChatGPT 屏幕键盘", check_chatgpt_ime)
 
+    # X11 apps' scale (2026-10-29, README "Steam 字太小"): kwinrc [Xwayland] Scale means "X11 apps scale themselves", and
+    # Steam (the only X11 client here) takes its scale from Xft.dpi in the Xwayland resource database. KWin writes it at
+    # every Xwayland start (kcminit -> xrdb -merge, int(Scale x 96) = 182 at 1.9) while Ubuntu's Xwayland-session.d/00-xrdb
+    # merges /etc/X11/Xresources and ~/.Xresources at the same moment; on 10-29 the database held only 00-xrdb's line and
+    # Steam drew at 1x. ~/.Xresources carries the value too, so whichever writer lands last has it. The live database is
+    # read only while Xwayland runs (KWin starts it on demand: our xrdb must not be what starts it).
+    def check_xft_dpi():
+        scale = run(["kreadconfig6", "--file", "kwinrc", "--group", "Xwayland", "--key", "Scale"], user=True)
+        try:
+            want = int(float(scale) * 96)
+        except ValueError:
+            return                      # KWin scales Xwayland itself (or no session): no X11 app reads Xft.dpi for it
+        if want <= 96:
+            return                      # 1x: an X11 app without Xft.dpi draws at the right size anyway
+        bad, notes, steam, where = [], [], None, "~/.Xresources 的 Xft.dpi 是"
+        m = re.search(r"^Xft\.dpi:\s*(\S+)", read("/home/user/.Xresources") or "", re.M)
+        if not m:
+            bad.append("~/.Xresources 里没有 Xft.dpi（Xwayland 启动时它被挤掉就没有兜底）")
+        elif m.group(1) != str(want):
+            bad.append(f"~/.Xresources 写的 Xft.dpi 是 {m.group(1)}，显示缩放 {scale} 要 {want}（改了显示缩放要一起改）")
+        if not run(["pidof", "Xwayland"]):
+            notes.append("Xwayland 没在跑，实时库没查")
+        else:
+            env = dict(ln.split("=", 1) for ln in run(["systemctl", "--user", "show-environment"], user=True).splitlines()
+                       if "=" in ln)
+            q = ""
+            if env.get("DISPLAY"):
+                xenv = [f"DISPLAY={env['DISPLAY']}"] + ([f"XAUTHORITY={env['XAUTHORITY']}"] if env.get("XAUTHORITY") else [])
+                q = run(["env"] + xenv + ["sh", "-c", "xrdb -query; echo xrdb-rc=$?"], user=True)
+            if "xrdb-rc=0" not in q:
+                say("INFO", "X11 程序缩放：读不到 Xwayland 的资源库（会话环境里没有 DISPLAY，或 xrdb 连不上），实时的 Xft.dpi 没查")
+            else:
+                got = re.search(r"^Xft\.dpi:\s*(\S+)", q, re.M)
+                where = "实时库和 ~/.Xresources 的 Xft.dpi 都是"
+                if not got or got.group(1) != str(want):
+                    bad.append(("实时库里没有 Xft.dpi" if not got else f"实时库里 Xft.dpi 是 {got.group(1)}") + f"（要 {want}），"
+                               "之后打开的 Steam 会画小：以 user 在会话环境里跑 "
+                               "QT_QPA_PLATFORM=wayland kcminit kcm_fonts_init kcm_style_init，再完全退出 Steam 重开")
+        if run(["pidof", "steam"]):     # the scale Steam's browser picked at its start: its GPU log's display line
+            try:
+                found = re.findall(r"Display\[\d+\] bounds=[^\n]*?scale=([\d.]+)",
+                                   tail_text("/home/user/.local/share/Steam/logs/webhelper_gpu.txt", 4 << 20))
+            except OSError:
+                found = []
+            if found:
+                steam = float(found[-1])
+                if steam < want / 96 - 0.05:
+                    bad.append(f"正在跑的 Steam 按 {steam:g} 倍画（它启动时库里还没有 Xft.dpi）：Steam 菜单里退出 Steam 再开")
+        if bad:
+            say("WARN", "X11 程序缩放（Steam 字小）：" + "；".join(bad) + "（README『Steam 字太小』）")
+        else:
+            say("OK", f"X11 程序缩放：{where} {want}（= Xwayland 缩放 {scale} × 96）"
+                + "".join(f"，{n}" for n in notes) + ("" if steam is None else f"，Steam 按 {steam:g} 倍画"))
+    guard("X11 程序缩放", check_xft_dpi)
+
+    # Steam's UI on the GPU with zink's render-pass tracking off (2026-10-30, README "Steam 界面花屏"): with it on (ANGLE
+    # GL -> zink -> Turnip) store pages show noise blocks where faded/masked layers are. Our launcher exports
+    # ZINK_DEBUG=norp, which the steamwebhelper browser process (no --type=) then carries in its environment;
+    # Y700_STEAM_UI=cpu (the 10-29 -cef-disable-gpu) is clean too and gives --disable-gpu.
+    def check_steam_ui():
+        launcher = read("/home/user/.local/bin/steam-arm64")
+        if launcher is None:
+            return                      # Steam not installed our way
+        if not any(re.search(r"\bZINK_DEBUG=norp\b", ln) for ln in launcher.splitlines() if not ln.lstrip().startswith("#")):
+            say("WARN", "Steam 启动器 ~/.local/bin/steam-arm64 不带 ZINK_DEBUG=norp：GPU 绘制的商店评测会花屏"
+                        "（换回仓库的 linux/games/steam-arm64；README『Steam 界面花屏』）")
+            return
+        running = env = None
+        for p in glob.glob("/proc/[0-9]*"):
+            try:
+                if not os.readlink(p + "/exe").endswith("/steamrtarm64/steamwebhelper"):
+                    continue
+                cmd = open(p + "/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")
+            except OSError:
+                continue
+            if "--type=" not in cmd:
+                running = cmd
+                try:
+                    env = open(p + "/environ", "rb").read().decode(errors="replace").split("\0")
+                except OSError:
+                    pass
+                break
+        if running is not None and re.search(r"--disable-gpu( |$)", running):
+            say("OK", "Steam 界面由 CPU 绘制（Y700_STEAM_UI=cpu 开的；不花屏，滚动时比 GPU 绘制多用约 0.3 核）")
+        elif env is not None and not any(v.startswith("ZINK_DEBUG=") and "norp" in v[11:].split(",") for v in env):
+            say("WARN", "正在跑的 Steam 界面走 GPU 但没关 zink 的渲染通道跟踪（Y700_STEAM_UI=gpu-rp 试验后没换回，"
+                        "或从别的入口开的）：商店评测会花屏，Steam 菜单里退出 Steam 再从图标开")
+        else:
+            say("OK", "Steam 界面走 GPU、关了 zink 的渲染通道跟踪（启动器带 ZINK_DEBUG=norp"
+                + ("，正在跑的也是）" if env is not None else "）"))
+    guard("Steam 界面绘制", check_steam_ui)
+
     # GPU hangs since the last --save (2026-10-23; until then: this boot only). The daily run that saves the baseline was
     # stuck from 10-20, and the 10-19 hangs (3 x ChatGPT's GPU process, 1 x steamwebhelper, kernel y12) left with their
     # boot before any run looked. Now a hang is a WARN in every run until a --save has reported it. Without a checked_at
     # in the baseline: this boot, as before. journald keeps only some boots (24 on 10-23): a window older than that is said.
+    # The window starts at gpu_since when the baseline has one: the start of a window a run could not read the journal for,
+    # kept (10-31 audit C4). checked_at moves on with every --save, so a failed read used to lose that window's hangs for
+    # good. checked_at itself is not held back: the pstore checks date "new" records by it and would report them again
     def check_gpu_hangs():
-        since = old.get("checked_at")
+        since = old.get("gpu_since") or old.get("checked_at")
 
         def when(t):
             return time.strftime("%m-%d %H:%M", time.localtime(t))
         scope = f"上次体检（{when(since)}）以来" if since else "本次开机"
+        if since:
+            cur["gpu_since"] = since                  # until the journal has been read: the next run looks from here again
         h = gpu_hangs(since, cur.get("boot8"))
         if "error" in h:
             say("INFO", f"查不了{scope}的 GPU 卡死：journalctl 没答上来（{h['error']}）")
             return
+        cur.pop("gpu_since", None)
         o = h["oldest"]
         if since and o and (o["start"] if o["start"] is not None else o["end"]) > since:   # no real start: conservative
             say("INFO", f"内核日志最早只留到开机 {o['index']}（{when(o['start']) + ' 起' if o['start'] is not None else when(o['end']) + ' 结束'}），"
@@ -958,6 +1231,14 @@ def main():
                 say("OK", "y700-kmsg-watch 读得到内核日志、能启动两个看门狗（" + ans.split("; ", 1)[-1] + "）")
             else:
                 say("WARN", f"y700-kmsg-watch 自检没通过：{ans or '没有输出'}（systemctl restart y700-kmsg-watch；linux/net/KMSG-WATCH.md）")
+            # Rust since 11-03 (linux/net/kmsg-watch); a script at the same path is the Python one back (a rollback)
+            try:
+                elf = open("/usr/local/libexec/y700-kmsg-watch", "rb").read(4) == b"\x7fELF"
+            except OSError:
+                elf = True
+            if not elf:
+                say("WARN", "y700-kmsg-watch 跑的是 Python 版（11-03 起是 Rust；回滚了才会这样；"
+                            "在平板上重跑 y700/linux/net/kmsg-watch/install.sh）")
             for t in watchdog_timers:
                 if run(["systemctl", "is-enabled", t]) != "enabled":
                     continue
@@ -991,7 +1272,7 @@ def main():
             bad.append(f"下拉条 y700-cc-pull.service 是 {state}（右上往下拉不出面板）")
         if "true" not in run(["busctl", "--user", "call", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting",
                               "isScriptLoaded", "s", "y700-edge"], user=True):
-            bad.append("KWin 脚本 y700-edge 没加载（左右边缘返回键没了）")
+            bad.append("KWin 脚本 y700-edge 没加载（左右边缘返回键、控制中心「显示桌面」都没了）")
         if "org_kde_kwin_fake_input" not in (read("/usr/local/share/applications/y700-control-center.desktop") or ""):
             bad.append("/usr/local/share/applications/y700-control-center.desktop 缺 fake_input 授权（返回键发不出去）")
         if "true" not in run(["busctl", "--user", "call", "org.kde.KWin", "/Effects", "org.kde.kwin.Effects",
@@ -1201,6 +1482,12 @@ def main():
             # live one keeps running until the owner agrees to the blink), so this is the reminder that it is pending
             if any(s.startswith("/usr/local/bin/y700-shellbar（") for s in stale):
                 hint += "；y700-shellbar 是用户单元：以 user 身份 systemctl --user restart y700-shellbar（dock 和状态栏闪一下，先确认没人在用）"
+            # logind is never restarted by its postinst on purpose (Debian #919509: the graphical session goes with it)
+            # and a lone wireplumber/pipewire restart drops the speakers to pro-audio (README「flatpak 更新」): both
+            # wait for the next reboot (11-01, systemd 259.9 / wireplumber 0.5.13-1ubuntu1.1)
+            wait = sorted({s.split("（")[0].rsplit("/", 1)[-1] for s in stale} & {"systemd-logind", "wireplumber", "pipewire"})
+            if wait:
+                hint += f"；{'、'.join(wait)} 别单独重启（logind 一重启图形会话就没了，音频服务单独重启会掉到 pro-audio），等下次整机重启"
             say("WARN", f"{len(stale)} 个进程还在跑升级前被替换掉的旧二进制：{'；'.join(sorted(stale)[:6])}——{hint}")
         else:
             say("OK", "没有进程在跑被升级替换掉的旧二进制")
@@ -1264,11 +1551,92 @@ def main():
             say("OK", f"wiliwili 带着我们的 {len(WILIWILI_PATCHES)} 个补丁")
     guard("wiliwili 补丁", check_wiliwili_patches)
 
-    if run(["systemctl", "--user", "is-enabled", "y700-autobright.service"], user=True) == "enabled":
-        state = run(["systemctl", "--user", "is-active", "y700-autobright.service"], user=True)
-        (say("OK", "自动亮度在跑") if state == "active" else say("WARN", f"自动亮度开着但服务是 {state}（journalctl --user -u y700-autobright）"))
+    # libcamera with our rear autofocus + lens power patches (linux/camera/, 2026-10-29), held at 0.7.0-1ubuntu2+y700.N.
+    # The hold stops Ubuntu's libcamera updates, security ones too, without a word; Ubuntu's build coming back (an
+    # unhold, an upgrade) means no focus and the lens leak again: the VCM and vreg_l6b_2p8 powered for as long as
+    # pipewire runs. linux/camera/README.md「周期性义务」. Only where libcamera-af-install.sh --install ever ran.
+    LIBCAMERA_STATE = "/root/libcamera-y700/install-state.txt"
+    LIBCAMERA_MARK = b"Failed to open the focus lens"               # only patch 0005 puts this into libcamera.so
+    LENS_RT = "/sys/bus/i2c/devices/5-000c/power/runtime_status"   # gt9764 VCM, dw9719 driver
+    REAR_RT = "/sys/bus/i2c/devices/5-0056/power/runtime_status"   # s5kjns: runtime active only while it streams
+    def check_libcamera():
+        if not os.path.exists(LIBCAMERA_STATE):
+            return                          # never installed here
+        inst = dpkg_version("libcamera0.7")
+        if not inst or "+y700." not in inst:
+            say("WARN", f"libcamera：libcamera0.7 是 {inst or '没装'}，不是我们编的 +y700 版，后摄对焦没了、镜头漏电回来了——"
+                        "按 linux/camera/README.md「用法」重装（作者定了不要时，删掉体检的 check_libcamera）")
+            return
+        try:
+            with open("/usr/lib/aarch64-linux-gnu/libcamera.so.0.7", "rb") as f:
+                marked = LIBCAMERA_MARK in f.read()
+        except OSError:
+            marked = False
+        bad = []
+        if not marked:
+            bad.append("libcamera.so.0.7 里没有补丁 0005 的字符串，装着的库不是我们编的那份")
+        if "libcamera0.7" not in run(["apt-mark", "showhold"]).split():
+            bad.append("libcamera0.7 没 hold，Ubuntu 一出新版 apt upgrade 就会换掉它（五个包都要 apt-mark hold）")
+        m = re.search(r"^\s*Candidate:\s*(\S+)", run(["env", "LC_ALL=C", "apt-cache", "policy", "libcamera0.7"]), re.M)
+        cand = m.group(1) if m else None
+        if cand and cand not in ("(none)", inst) and \
+                run(["sh", "-c", 'dpkg --compare-versions "$1" gt "$2" && echo newer', "sh", cand, inst]) == "newer":
+            bad.append(f"Ubuntu 出了 {cand}，被 hold 挡住了：先看是不是安全更新（USN），再按「周期性义务」在新版上重编；"
+                       "来不及就 libcamera-af-install.sh --rollback（对焦没了、漏电回来）")
+        # the candidate is only as new as the apt lists: this tablet has no APT::Periodic, so apt-daily refreshes
+        # nothing (10-29); they move when someone runs apt update (or Discover does)
+        lists = [os.path.getmtime(p) for p in glob.glob("/var/lib/apt/lists/*_Packages*")]
+        age = (time.time() - max(lists)) / 86400 if lists else None
+        if age is None or age > 30:
+            bad.append(f"apt 列表{'不在' if age is None else f' {age:.0f} 天没刷新'}，看不到 Ubuntu 有没有出新的 libcamera："
+                       "apt-get update（平板没配 APT::Periodic，apt-daily 什么都不刷新）")
+        lens = read(LENS_RT)
+        if lens == "active" and read(REAR_RT) != "active":
+            time.sleep(2)                   # a CameraManager starting (cam -l, a pipewire restart) holds the lens ~1 s
+            lens = read(LENS_RT)
+        rear = read(REAR_RT)
+        if lens is None:
+            bad.append(f"读不到 {LENS_RT}（镜头的 I2C 地址变了？），漏电查不了")
+        elif lens == "active" and rear != "active":
+            bad.append("后摄没在出流，镜头却上着电：0005 修的漏电回来了（bash /root/libcamera-af-install.sh --status 看谁开着镜头节点）")
+        for b in bad:
+            say("WARN", f"libcamera：{b}（linux/camera/README.md）")
+        if not bad:
+            say("OK", f"libcamera {inst} 带着对焦和镜头补丁、hold 着，Ubuntu 没有更新的版本（apt 列表 {age:.0f} 天前刷新）；镜头 {lens}"
+                      + ("（后摄正在出流）" if rear == "active" else ""))
+    guard("libcamera 补丁", check_libcamera)
 
-    # refresh rate follows the video + GPU thresholds (README "刷新率跟随视频" / "视频播放功耗", 2026-10-16)
+    # automatic brightness (README "自动亮度"; Rust since 11-03, linux/display/autobright): a unit that runs python3 is
+    # the old version back (a rollback), a panic shows as automatic restarts, and when its last word on KWin's screen
+    # events is "no KWin screen events ..." it reads /sys/class/drm every second again (the Python version's cost)
+    def check_autobright():
+        if run(["systemctl", "--user", "is-enabled", "y700-autobright.service"], user=True) != "enabled":
+            return
+        state = run(["systemctl", "--user", "is-active", "y700-autobright.service"], user=True)
+        if state != "active":
+            say("WARN", f"自动亮度开着但服务是 {state}（journalctl --user -u y700-autobright）")
+            return
+        try:
+            unit = open("/home/user/.config/systemd/user/y700-autobright.service").read()
+        except OSError:
+            unit = ""
+        r = run(["systemctl", "--user", "show", "-p", "NRestarts", "--value", "y700-autobright.service"], user=True)
+        last = run(["sh", "-c", "journalctl --user -b -u y700-autobright --no-pager -o cat | grep 'KWin screen events' | tail -1"], user=True)
+        if "python3" in unit:
+            say("WARN", "自动亮度跑的是 Python 版（11-03 起是 Rust；回滚了才会这样；在平板上重跑 y700/linux/display/autobright/install.sh）")
+        elif r.isdigit() and int(r) > 5:
+            say("WARN", f"自动亮度自动重启了 {r} 次（本次开机或上次手动重启以来），Rust 版崩了才会这样"
+                        "（journalctl --user -b -u y700-autobright | grep panicked）")
+        elif last.startswith("no KWin screen events"):
+            say("WARN", f"自动亮度收不到 KWin 的熄屏事件（{last}），正每秒读一次 sysfs：功能照常，但熄屏时也每秒醒一次"
+                        "（README『自动亮度』）")
+        else:
+            say("OK", "自动亮度在跑")
+    guard("自动亮度", check_autobright)
+
+    # refresh rate follows the video + GPU thresholds (README "刷新率跟随视频" / "视频播放功耗", 2026-10-16). Rust since
+    # 11-03 (linux/display/refresh-auto/daemon), checked as check_autobright: python3 in the unit is a rollback, a panic
+    # shows as restarts, and "no KWin screen events" as its last word means the screen-off guard is on the 1 s sysfs tick
     def check_refresh_auto():
         if run(["systemctl", "--user", "is-enabled", "y700-refresh-auto.service"], user=True) != "enabled":
             return
@@ -1276,6 +1644,21 @@ def main():
         if state != "active":
             say("WARN", f"刷新率跟随视频的守护是 {state}（journalctl --user -u y700-refresh-auto）")
             return
+        try:
+            unit = open("/home/user/.config/systemd/user/y700-refresh-auto.service").read()
+        except OSError:
+            unit = ""
+        r = run(["systemctl", "--user", "show", "-p", "NRestarts", "--value", "y700-refresh-auto.service"], user=True)
+        last = run(["sh", "-c", "journalctl --user -b -u y700-refresh-auto --no-pager -o cat | grep 'KWin screen events' | tail -1"], user=True)
+        if "python3" in unit:
+            say("WARN", "刷新率守护跑的是 Python 版（11-03 起是 Rust；回滚了才会这样；"
+                        "在平板上重跑 y700/linux/display/refresh-auto/daemon/install.sh）")
+        elif r.isdigit() and int(r) > 5:
+            say("WARN", f"刷新率守护自动重启了 {r} 次（本次开机或上次手动重启以来），Rust 版崩了才会这样"
+                        "（journalctl --user -b -u y700-refresh-auto | grep panicked）")
+        elif last.startswith("no KWin screen events"):
+            say("WARN", f"刷新率守护收不到 KWin 的熄屏事件（{last}）：降档时改回每秒读 sysfs，防闪烁照常，但放视频时每秒醒一次"
+                        "（README『刷新率跟随视频』）")
         st = run(["gdbus", "call", "--session", "-d", "fyi.y700.RefreshAuto", "-o", "/RefreshAuto", "-m",
                   "fyi.y700.RefreshAuto.status"], user=True) or ""
         try:
@@ -1361,6 +1744,30 @@ def main():
         else:
             say("OK", f"音量键对准联想调音（kded6 开机时：{waited}）")
     guard("音量键", check_volume_keys)
+    # y700-speaker-guard is Rust since 11-03 (linux/audio/speaker-guard): a script there is the bash version back (a
+    # rollback), a panic shows as automatic restarts (Restart=on-failure; NRestarts starts from 0 at a manual restart
+    # and a boot), and it waits on pipewire-pulse events: when its last word about them is "lost" or "no ..." (not
+    # "back", nor a later start), it is checking every 2 s - protection as before, but the bash version's cost and more
+    def check_speaker_guard():
+        b = "/usr/local/libexec/y700-speaker-guard"
+        try:
+            elf = open(b, "rb").read(4) == b"\x7fELF"
+        except OSError:
+            return
+        if not elf:
+            say("WARN", f"扬声器守护 {b} 不是编译好的 Rust 程序（11-03 起是 Rust；回滚到 bash 版才会这样；"
+                        "在平板上重跑 y700/linux/audio/speaker-guard/install.sh）")
+            return
+        r = run(["systemctl", "--user", "show", "-p", "NRestarts", "--value", "y700-speaker-guard.service"], user=True)
+        last = run(["sh", "-c", "journalctl --user -b -u y700-speaker-guard --no-pager -o cat "
+                    "| grep -E 'watching the default output|pulse event connection' | tail -1"], user=True)
+        if r.isdigit() and int(r) > 5:
+            say("WARN", f"扬声器守护自动重启了 {r} 次（本次开机或上次手动重启以来），Rust 版崩了才会这样"
+                        "（journalctl --user -b -u y700-speaker-guard | grep panicked）")
+        elif last.startswith(("pulse event connection lost", "no pulse event connection")):
+            say("WARN", f"扬声器守护收不到 pipewire-pulse 的事件（{last}），正每 2 秒查一次：保护照常，但费电"
+                        "（systemctl --user status pipewire-pulse；README『扬声器守护』）")
+    guard("扬声器守护", check_speaker_guard)
     # the game overlay is a Rust binary since 2026-10-17 (linux/games/hud/install.sh); the unit runs it directly, so
     # a Python script or a missing file there means a half-done install (Restart=on-failure, no start limit: it
     # would restart every 3 s); a sampling panic is logged, not fatal. Since 10-22 the unit runs `--sampler` and the
@@ -1409,16 +1816,125 @@ def main():
         say("OK", "内存调频统计每秒轮询一次（udev 规则在生效）")
     else:
         say("WARN", f"内存调频统计轮询不是 1000 ms：{polls}（每 2 ms 一次会多出约 950 次/秒中断；linux/power/install.sh）")
-    # crash-dump mode is left 3 min after boot (y700-dumpmode-off.timer): a crash then reboots after 10 s
-    # instead of sitting in XBL dump mode at ~1.6 W (2026-10-15 03:41, 7 h, 73 % -> 37 %)
+    # crash-dump mode is left 3 min after boot (y700-dumpmode-off.timer): only a kernel panic then reboots after 10 s
+    # instead of sitting in XBL dump mode at ~1.6 W (2026-10-15 03:41, 7 h, 73 % -> 37 %). "off" clears the TCSR
+    # dload bits only: SDI stays armed, so a firmware reset still dumps and waits (2026-10-31 21:04, 2 h 9 min) until y16
+    # (patch 1058: switching off also disables SDI and logs the SCM call's result once, linux/kernel-y16/NOTES.md)
     dm = run(["cat", "/sys/module/qcom_scm/parameters/download_mode"])
     up = float(open("/proc/uptime").read().split()[0])
-    if dm == "off":
-        say("OK", "转储模式已退出（死机会自动重启）")
+    ky = re.search(r"-y(\d+)$", cur["kernel"])
+    sdi = [l for l in run(["journalctl", "-k", "-b", "--no-pager", "-o", "cat", "-g", "SDI disable: "]).splitlines()
+           if "download mode off, SDI disable: " in l] if dm == "off" else []
+    if sdi and all(l.endswith("SDI disable: 0") for l in sdi):
+        say("OK", "转储模式已退出，SDI 也关了（y16 的 1058）：内核 panic 10 秒后重启，看门狗复位也直接重启（11-01 咬测试）；"
+                  "固件当场判致命的复位、整机卡死时的咬还没验证过（README「内核 y16」）")
+    elif sdi:
+        say("WARN", f"转储模式退出了，但 SDI 没关掉（{sdi[-1]}）：看门狗复位仍会卡在转储界面耗电（linux/kernel-y16/NOTES.md 风险 1）")
+    elif dm == "off" and ky and int(ky.group(1)) >= 16:
+        say("WARN", "y16 起关转储模式时内核会关 SDI 并打一行「download mode off, SDI disable: 0」，这次开机没有：1058 没生效？"
+                    "（journalctl -k -b -g 'SDI disable'）")
+    elif dm == "off":
+        say("OK", "转储模式已退出（内核 panic 会 10 秒后重启；固件接手的复位在 y16 前仍会进转储模式，见 README「10-31 21:04 死机」）")
     elif up < 300:
         say("INFO", f"开机 {up:.0f} s，转储模式还没到关闭时间（3 min）")
     else:
         say("WARN", f"download_mode 是 {dm}：死机会卡在转储模式耗电（systemctl status y700-dumpmode-off.timer；linux/power/install.sh --dumpmode-off）")
+    # printk time prefix (linux/power/y700-printk-time.conf, 2026-11-01): the upstream initramfs switches it off
+    if read("/sys/module/printk/parameters/time") == "Y":
+        say("OK", "内核日志带时间戳（死机时控制台尾部能和飞行记录器对时间）")
+    else:
+        say("WARN", "内核日志没有时间戳：/etc/tmpfiles.d/y700-printk-time.conf 没生效（linux/power/install.sh；"
+                    "echo Y > /sys/module/printk/parameters/time）")
+
+    # ---- the boot-time e2fsck of the roots (kernel y17, 2026-11-01; FSCK_GREP above): every boot since the last --save
+    # (not the one it ran in: that run read it) and this one, unless the last --save ran in this one (11-01 review: a
+    # repair at this boot came back every day until a reboot; a mark it left still shows in tune2fs below). It never
+    # stops a boot, so only this says what it did:
+    # exit 0 clean; 1-3 repaired = the disk was damaged since the last check (a crash, a hard reset) - WARN, except on
+    # the first checked boot after unchecked ones (the old mark from before y17: expected, INFO); 4-7 errors left and
+    # 8+ / stopped / the 600 s limit - WARN; a y17+ boot with no result line - WARN. The kernel's ext4 complaints count
+    # only after the boot's last check (before it they are what the check is about: the first y17 boot's remount,rw
+    # of the still-marked root says "mounting fs with errors" once). Then the root's state now (tune2fs -l)
+    def check_bootfsck():
+        boots = list_boots()
+        ids = [b["boot_id"] for b in boots]
+        scope = ended[pos + 1:] if pos is not None else todo
+        scope = [(b["boot_id"], f"开机 {b['index']}（{b['boot_id'][:8]}）") for b in scope]
+        if not cur["boot8"] or old.get("boot8") != cur["boot8"]:
+            scope.append(("0", "本次开机"))
+        seen = {}
+
+        def events(bid):
+            if bid not in seen:
+                lines = run(["journalctl", "-k", "-b", bid, "--no-pager", "-o", "cat", "-g", FSCK_GREP]).splitlines()
+                rel = next((l.split()[2] for l in lines if l.startswith("Linux version ") and len(l.split()) > 2), None)
+                seen[bid] = (rel, [l.strip() for l in lines if not l.startswith("Linux version ")])
+            return seen[bid]
+
+        def checked(bid):
+            return any(FSCK_RESULT.search(l) for l in events(bid)[1])
+
+        clean = 0
+        for bid, label in scope:
+            rel, ev = events(bid)
+            rel = cur["kernel"] if bid == "0" else rel
+            ky = re.search(r"-y(\d+)$", rel or "")
+            res = [(i, FSCK_RESULT.search(l)) for i, l in enumerate(ev) if FSCK_RESULT.search(l)]
+            if not res:
+                nof = next((l for l in ev if "no e2fsck in this image" in l), None)
+                if nof:
+                    say("WARN", f"{label}的 initramfs 里没有 e2fsck（{nof[:90]}）：根分区没查")
+                elif ky and int(ky.group(1)) >= FSCK_FIRST_Y:
+                    say("WARN", f"{label}跑的是 {rel}（y{FSCK_FIRST_Y} 起开机要查根分区），却没有磁盘检查的结果行：initramfs 里的 "
+                                f"init 不对？（journalctl -k -b {bid} -t baldur | grep fsck）")
+                continue
+            # the boot before this one in journald's list ran no check: its repair is the old mark's (first y17 boot)
+            me = boots[-1]["boot_id"] if bid == "0" and boots else bid      # list_boots: oldest first, this boot last
+            i = ids.index(me) if me in ids else 0
+            first = i > 0 and not checked(ids[i - 1])
+            bad = False
+            for _, m in res:
+                name, dev, rc, what, secs = m.group(1), m.group(2), int(m.group(3)), m.group(4), m.group(5)
+                where = f"{name} {dev}：exit {rc}（{what}），{secs} s"
+                if rc == 0 and "limit" not in what:
+                    continue
+                bad = True
+                if 1 <= rc <= 3 and "limit" not in what and first:
+                    say("INFO", f"{label}是头一次带开机磁盘检查，修掉了 y{FSCK_FIRST_Y} 之前留下的错误（{where}），这是预期的；"
+                                "详细输出在 /var/log/baldur-fsck.log")
+                elif 1 <= rc <= 3 and "limit" not in what:
+                    say("WARN", f"{label}的磁盘检查修了根分区（{where}）：上次检查以来磁盘被弄坏过，多半是死机或硬复位，已经修好；"
+                                "详细输出在 /var/log/baldur-fsck.log")
+                elif 4 <= rc <= 7:
+                    say("WARN", f"{label}的磁盘检查有修不了的错误（{where}）：要在根分区卸下时手动跑 e2fsck -f"
+                                "（从别的系统里，README「内核 y17」）；开机照常，但错误还在")
+                else:
+                    say("WARN", f"{label}的磁盘检查没做完（{where}）：这次开机没查完；看 /var/log/baldur-fsck.log，"
+                                "下次开机会再查")
+            devs = {m.group(2)[len("/dev/"):] for _, m in res}
+            after = [l for l in ev[res[-1][0] + 1:] if any(f"({d})" in l or f"(device {d})" in l for d in devs)]
+            if after:
+                bad = True
+                say("WARN", f"{label}检查完以后内核又报了根分区的 ext4 问题 {len(after)} 次（{after[0][:100]}）："
+                            f"下次开机 e2fsck -p 会再查（journalctl -k -b {bid} -g EXT4-fs）")
+            clean += not bad
+        if clean:
+            say("OK", f"开机磁盘检查：{clean} 次开机（上次体检以来，含本次）根分区都查过、干净")
+        dev = run(["findmnt", "-no", "SOURCE", "/"])
+        st = run(["tune2fs", "-l", dev]) if dev.startswith("/dev/") else ""
+        state = re.search(r"^Filesystem state:\s*(.+?)\s*$", st, re.M)
+        errs = re.search(r"^FS Error count:\s*(\d+)", st, re.M)
+        ky = re.search(r"-y(\d+)$", cur["kernel"])
+        if not state:
+            say("INFO", f"读不到根分区（{dev or '?'}）的 ext4 状态（tune2fs -l）")
+        elif state.group(1) == "clean" and not errs:
+            say("OK", f"根分区 {dev} 的 ext4 状态 clean，没有记着错误")
+        else:
+            fix = ("下次开机 initramfs 的 e2fsck -p 会修" if ky and int(ky.group(1)) >= FSCK_FIRST_Y
+                   else f"这个内核开机不查（y{FSCK_FIRST_Y} 起才查，README「内核 y17」）")
+            say("WARN", f"根分区 {dev} 的 ext4 状态是「{state.group(1)}」" + (f"，记着 {errs.group(1)} 次错误" if errs else "")
+                        + f"：{fix}；带着错误标记时死机后的孤儿文件不回收、trial 漏记（README「10-31 21:04 死机」）")
+    guard("开机磁盘检查", check_bootfsck)
 
     # ---- crash forensics (cx-collapse experiments, 2026-10-16): new pstore panic records, a new rawdump
     def check_panic_records():
@@ -1443,7 +1959,8 @@ def main():
         if "rawdump" not in old:
             say("INFO", f"rawdump 分区里有一份崩溃转储（{where}；尾行 {rd['tail'][-1]}）：记入基线，以后只报新的")
         elif old["rawdump"] != rd["hash"]:
-            say("WARN", f"新的崩溃转储：XBL 重写了 rawdump 分区（{where}），说明死机时 download_mode 还是 full、机器在转储模式里等过人。"
+            say("WARN", f"新的崩溃转储：XBL 重写了 rawdump 分区（{where}），说明机器进过转储模式、在那里等过人"
+                        "（download_mode 还是 full，或复位是固件接手的——y16 前关了 download_mode 也会这样，10-31 21:04 同款）。"
                         f"lastkmsg 尾部：" + " ｜ ".join(rd["tail"]) +
                         f"；RST_STAT={rd['regs']['RST_STAT.BIN']} PMIC_PON={rd['regs']['PMIC_PON.BIN']}"
                         "（原始字节，解码见 cx-collapse/RESEARCH.md §2.6；导出：rawdump-ls /dev/disk/by-partlabel/rawdump lastkmsg.log RST_STAT.BIN PMIC_PON.BIN）")
@@ -1589,6 +2106,190 @@ def main():
             say("INFO", f"飞行记录器 {active}（{enabled or '未启用'}）；{state}")
     guard("飞行记录器", check_flightrec)
 
+    # ---- the battery page (linux/power/battery, DESIGN.md section 7, 2026-10-30). Every one of these is silent where
+    # it is not installed (no y700-batteryd user unit). The recorder is a systemd user unit of user, asked over
+    # that user's bus like the HUD; the ledger and the energy line are judged here directly, the report only for its model (its
+    # diag also carries ledger_bytes / ledger_newest_age_s / energy_age_s, which repeat the direct checks and are not
+    # used: the report may not be installed yet, and a broken report must not hide a dead recorder)
+    batt = {}                                         # check_batteryd's verdict, for check_battery_ledger
+
+    def check_batteryd():
+        if not os.path.exists(BATTERYD_UNIT):
+            return
+        if "batteryd" in old:
+            cur["batteryd"] = old["batteryd"]         # kept as it was when NRestarts cannot be read below
+        unit = "y700-batteryd.service"
+        state = run(["systemctl", "--user", "is-active", unit], user=True)
+        batt["active"] = state == "active"
+        if not batt["active"]:
+            en = run(["systemctl", "--user", "is-enabled", unit], user=True)
+            say("WARN", f"电池页的记账服务 y700-batteryd 是 {state or '查不到（user 的用户总线不通？）'}（{en or '?'}）："
+                        "从这时起电量曲线和谁用了电都不再记录（journalctl --user -u y700-batteryd 看原因；"
+                        "systemctl --user -M user@ restart y700-batteryd，起不来就重跑 linux/power/battery/install.sh）")
+        n = run(["systemctl", "--user", "show", "-p", "NRestarts", "--value", unit], user=True)
+        if not n.isdigit():
+            if batt["active"]:
+                say("INFO", f"y700-batteryd 在跑，但读不到它的重启次数（{n[:80] or '空'}），基线照旧")
+            return
+        n = int(n)
+        cur["batteryd"] = {"boot8": cur["boot8"], "nrestarts": n}
+        base = old.get("batteryd")
+        if not isinstance(base, dict):
+            if n:
+                say("INFO", f"y700-batteryd 本次开机已自动重启 {n} 次：记入基线，以后只报新的（journalctl --user -u y700-batteryd）")
+            elif batt["active"]:
+                say("OK", "y700-batteryd 在跑，本次开机没有自动重启过")
+            return
+        # NRestarts counts the automatic restarts (Restart=on-failure) and starts again from 0 on a new boot, a restart
+        # of user's user manager and a manual start / restart: another boot's baseline, or a count below the
+        # baseline, means every restart counted now came after the last --save
+        b = base.get("nrestarts")
+        since = b if base.get("boot8") == cur["boot8"] and isinstance(b, int) and b <= n else 0
+        if n > since:
+            say("WARN", f"y700-batteryd 自上次体检以来自动重启了 {n - since} 次（本次开机共 {n} 次）：Restart=on-failure 的"
+                        "每次重启都是它崩了或被杀了（比如超了单元的 MemoryMax），看 journalctl --user -u y700-batteryd")
+        elif batt["active"]:
+            say("OK", f"y700-batteryd 在跑，自上次体检以来没有自动重启（本次开机共 {n} 次）")
+    guard("电池页记账服务", check_batteryd)
+
+    def check_battery_ledger():
+        if not os.path.exists(BATTERYD_UNIT):
+            return
+        parts = set(glob.glob(f"{BATTERY_LEDGER}/b-*.jsonl"))
+        total, newest, early = 0, None, False
+        for p in sorted(parts) + glob.glob(f"{BATTERY_LEDGER}/fg-*.log"):   # what ledger.rs prunes, as diag.ledger_bytes
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue                              # pruned between the glob and the stat
+            total += st.st_size
+            if p in parts:
+                newest = st.st_mtime if newest is None else max(newest, st.st_mtime)
+                early = early or st.st_mtime < 1e9
+        mib = total / (1 << 20)
+        fresh = None
+        if batt.get("active", True):                  # a dead batteryd was WARNed above: its stale ledger is the same news
+            age = time.time() - newest if newest is not None else None
+            if age is None:
+                say("WARN", f"y700-batteryd 在跑，但 {BATTERY_LEDGER} 里一份账本（b-*.jsonl）都没有：它写不了盘？"
+                            "journalctl --user -u y700-batteryd")
+            elif age <= BATTERY_LEDGER_STALE_S:
+                fresh = age
+            elif early and uptime_s() < BATTERY_LEDGER_STALE_S + 1800:
+                # the RTC starts at 1970 here (ledger.rs): this boot's part, written before chrony set the clock, carries
+                # a 1970 mtime (and the newest real mtime is the previous boot's) until the next snapshot / checkpoint,
+                # at most 30 min after the clock is right
+                say("INFO", "电池页账本上次写入时时钟还没对上（mtime 在 1970 年），过了下一个检查点（≤30 分钟）再看")
+            else:
+                ago = (f"{age / 60:.0f} 分钟" if age < 7200 else f"{age / 3600:.0f} 小时" if age < 2 * 86400
+                       else f"{age / 86400:.0f} 天")
+                say("WARN", f"电池页账本已 {ago}没写入（应 ≤40 分钟：亮屏每 5 分钟、熄屏每 30 分钟一次）："
+                            "y700-batteryd 卡住了？journalctl --user -u y700-batteryd")
+        if total > BATTERY_LEDGER_MAX:
+            say("WARN", f"电池页账本加前台日志共 {mib:.1f} MiB，超过 20 MiB（16 MiB 上限加一天的余量）：batteryd 的修剪没起作用"
+                        f"（开机和每天第一次亮屏时修剪；按 40 天保留平时只有 5–12 MiB）。ls -la {BATTERY_LEDGER}；"
+                        "journalctl --user -u y700-batteryd | grep prune")
+        elif fresh is not None:
+            say("OK", f"电池页账本 {fresh:.0f} s 前写过，账本加前台日志共 {mib:.1f} MiB（≤20 MiB）")
+        elif total:
+            say("OK", f"电池页账本加前台日志共 {mib:.1f} MiB（≤20 MiB）")
+    guard("电池页账本", check_battery_ledger)
+
+    def check_battery_energy():
+        if not os.path.exists(BATTERYD_UNIT) or run(["systemctl", "is-active", "y700-flightrec"]) != "active":
+            return                                    # a recorder that is not running is the flight recorder line's news
+        line = read_agreed(FLIGHTREC_ENERGY)
+        if line is None:
+            say("WARN", f"飞行记录器在跑，但没有 {FLIGHTREC_ENERGY}：装的 y700-flightrec 不带电池页的电量累计（acc.rs），"
+                        "batteryd 只能降级记账、分不出应用（重装飞行记录器：linux/power/flightrec/deploy.sh）")
+            return
+        if line is False:
+            say("INFO", f"{FLIGHTREC_ENERGY} 连读 4 次都不一样（正好在改写？），这次不判断")
+            return
+        m = re.match(r"v1 boot=(\w+) t=(\d+) ", line.decode("ascii", "replace"))
+        if not m:
+            say("WARN", f"{FLIGHTREC_ENERGY} 认不出：{line[:60]!r}（飞行记录器和电池页的版本对不上？）")
+            return
+        age = mono_s() - int(m.group(2)) / 1000      # t= is CLOCK_MONOTONIC ms
+        if cur["boot8"] and m.group(1) != cur["boot8"]:
+            say("WARN", f"{FLIGHTREC_ENERGY} 是另一次开机的（boot={m.group(1)}，本次 {cur['boot8']}）：飞行记录器没在更新它"
+                        "（journalctl -u y700-flightrec）")
+        elif age > BATTERY_ENERGY_STALE_S:
+            say("WARN", f"飞行记录器在跑，但电量累计 {FLIGHTREC_ENERGY} 已 {age:.0f} s 没更新（应 ≤60 s，平时每 10 s 一次）："
+                        "电池页从这时起只能按电量粗算（journalctl -u y700-flightrec）")
+        else:
+            say("OK", f"飞行记录器的电量累计 {max(age, 0):.0f} s 前更新过（≤60 s）")
+    guard("电池页电量累计", check_battery_energy)
+
+    def check_battery_diag():
+        if not os.path.exists(BATTERYD_UNIT) or not os.path.exists(BATTERY_REPORT):
+            return
+        # as user: its ledger, its user journal, its ~/.config coefficients. The report is read-only (DESIGN.md
+        # 6b.b). coreutils timeout stops the report itself; run_rc()'s timeout is only the backstop, since killing sudo
+        # with SIGKILL would leave the python behind it running
+        rc, raw, err = run_rc(["timeout", str(BATTERY_REPORT_TIMEOUT_S), BATTERY_REPORT, "--json"], user=True,
+                              timeout=BATTERY_REPORT_TIMEOUT_S + 10)
+        try:
+            doc = json.loads(raw) if raw else None
+        except ValueError:
+            doc = None
+        hint = f"sudo -u user {BATTERY_REPORT} --json 看 stderr 里的细节"
+        if not isinstance(doc, dict):
+            if rc is None or rc == 124:                # timed out (it prints only at the end): timeout's 124, or the backstop
+                how = "timeout 到点停了它" if rc == 124 else f"{BATTERY_REPORT_TIMEOUT_S + 10} s 的后备超时到了"
+                say("INFO", f"电池页报表 {BATTERY_REPORT_TIMEOUT_S} s 内没出结果（{how}），这次不看系数")
+            elif not raw:
+                # the report always writes a document, its error document too (exit 0 / 2, DESIGN.md 6b.b): an empty
+                # stdout is python dying before cli.main (1: an import error after an upgrade or a partial install) or
+                # env / timeout not starting it (126 / 127). That repeats every run, and the page is broken with it
+                last = (err.splitlines() or [""])[-1][:160]
+                say("WARN", f"电池页报表没输出就退出了（退出码 {rc}：{last or 'stderr 也是空的'}）：打开电池页也会出错（{hint}）")
+            else:
+                say("WARN", f"电池页报表的输出不是 JSON：{raw[:80]!r}（打开电池页也会出错；{hint}）")
+            return
+        if "error" in doc:
+            say("WARN", f"电池页报表出错：{str(doc['error'])[:160]}（打开电池页也会看到这个错；{hint}）")
+            return
+        dg = doc.get("diag")
+        if not isinstance(dg, dict):
+            say("WARN", "电池页报表的 JSON 里没有 diag 块（报表和体检的版本对不上？）")
+            return
+        num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        med, learned, model = dg.get("unexplained_median_7d"), dg.get("floor_off_learned_mw"), dg.get("floor_off_model_mw")
+        days, flagged = dg.get("coeff_age_days"), dg.get("segments_flagged_7d")
+        # like with like (DESIGN.md 6b.a): the learned figure is the P25 of the measured power of the >= 20 min screen-off
+        # segments, the model's is its own prediction for those same segments (F_off + wakeups + CPU / GPU / Wi-Fi), so
+        # "differs by > 25 %" is read relative to the model's: the learned one is the measurement
+        drift = abs(learned - model) / model if num(learned) and num(model) and model > 0 else None
+        why = []
+        if num(med) and med > BATTERY_UNEXPLAINED_MAX:
+            why.append(f"7 天里各放电段「没算清」的中位数 {med * 100:.0f} %（>20 %）")
+        if drift is not None and drift > BATTERY_FLOOR_DRIFT_MAX:
+            why.append(f"账本里学到的熄屏功率 {learned:.0f} mW，模型对同样这些段算出 {model:.0f} mW（差 {drift * 100:.0f} %，>25 %）")
+        if num(days) and days > BATTERY_COEFF_MAX_DAYS:
+            why.append(f"系数是 {days:.0f} 天前定的（>90 天）")
+        co = doc.get("coeffs") if isinstance(doc.get("coeffs"), dict) else {}
+        which = f"系数 v{co.get('version', '?')}{'，还是没标定的先验值' if co.get('calibrated') is False else ''}"
+        if why:
+            # the shipped priors (coeffs-v1, calibrated false) are not expected to fit the ledger: until the calibration
+            # night they are only shown (INFO), or this would notify every day with nothing to do but agree to that night
+            cal = co.get("calibrated") is True
+            say("WARN" if cal else "INFO", "电池页系数要重标：" + "；".join(why) + f"（{which}"
+                + ("" if cal else "：标定前只提示、不报警") + "。标定在作者同意的夜里跑，DESIGN.md 第 9 节第 8 步；"
+                "y700-battery-report --fit 只出建议值，人工确认后放 ~/.config/y700-battery/coeffs-v<N>.json）")
+            return
+        seen = []
+        if num(med):
+            seen.append(f"7 天里没算清的中位数 {med * 100:.0f} %")
+        if drift is not None:
+            seen.append(f"熄屏功率学到 {learned:.0f} mW、模型算 {model:.0f} mW")
+        if num(days):
+            seen.append(f"系数 {days:.0f} 天")
+        if num(flagged) and flagged:                  # recorded only (DESIGN.md 6b.a): no threshold
+            seen.append(f"7 天里 {flagged} 段标了「模型偏高」")
+        say("OK", f"电池页系数不用重标（{'，'.join(seen) or '数据还不够判断'}；{which}）")
+    guard("电池页报表", check_battery_diag)
+
     # never suspend (owner, 2026-10-15 night): PowerDevil idle action "nothing" on battery, sleep.target masked
     pdrc = "/home/user/.config/powerdevilrc"
     pd = slurp(pdrc, "")
@@ -1608,7 +2309,10 @@ def main():
     # in all three profiles. System Settings' power page deletes a key it saves with a value equal to the default of
     # the moment (KConfigSkeleton), which is how they could vanish again. kscreenlocker's idle / resume locks default
     # to on. Read the way KConfig reads: a bool is false for false / no / off / 0 in any case, and an immutable
-    # marker [$i] on a key or a group header does not change its name
+    # marker [$i] on a key or a group header does not change its name.
+    # Battery / low battery dim or screen-off set to "never" is a WARN too (11-01): KDE's power page wrote that into all
+    # three profiles the moment it opened (10-30 20:12, [AC] said never without times; linux/power/battery/
+    # kcm-never-test.sh), and the screen then stayed on all night unless switched off by hand
     def check_no_lock():
         klrc = "/home/user/.config/kscreenlockerrc"
         pd, kl = (slurp(p, "" if not os.path.exists(p) else None) for p in (pdrc, klrc))   # no file = all defaults
@@ -1635,9 +2339,12 @@ def main():
             if not off(d.get("LockBeforeTurnOffDisplay")):
                 bad.append(f"{prof} 熄屏前锁屏没关")
             if prof != "AC":
-                loose = [w for w, on, sec in (("变暗", "DimDisplayWhenIdle", "DimDisplayIdleTimeoutSec"),
-                                              ("熄屏", "TurnOffDisplayWhenIdle", "TurnOffDisplayIdleTimeoutSec"))
-                         if not off(d.get(on)) and sec not in d]
+                idle = (("变暗", "DimDisplayWhenIdle", "DimDisplayIdleTimeoutSec"),
+                        ("熄屏", "TurnOffDisplayWhenIdle", "TurnOffDisplayIdleTimeoutSec"))
+                never = [w for w, on, _ in idle if off(d.get(on))]
+                loose = [w for w, on, sec in idle if not off(d.get(on)) and sec not in d]
+                if never:
+                    bad.append(f"{prof} 闲置不{'、不'.join(never)}（「从不」：KDE 电量页打开时会这样写）")
                 if loose:
                     bad.append(f"{prof} 闲置{'、'.join(loose)}时间没写死（平板模式下会缩短）")
         dm = group(kl, "[Daemon]")
@@ -1646,11 +2353,11 @@ def main():
         if not off(dm.get("LockOnResume")):
             bad.append("kscreenlocker 唤醒后锁屏没关")
         if bad:
-            say("WARN", "熄屏会锁屏，或闲置时间会跟着平板模式变：" + "；".join(bad) + "（README「熄屏不锁屏」：kwriteconfig6 写回，"
+            say("WARN", "熄屏会锁屏，或闲置变暗 / 熄屏不对：" + "；".join(bad) + "（README「熄屏不锁屏」：kwriteconfig6 写回，"
                         "再 busctl --user call org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement "
                         "org.kde.Solid.PowerManagement refreshStatus）")
         else:
-            say("OK", "熄屏不锁屏：PowerDevil 三档都关了熄屏前锁屏，电池档闲置时间写死，kscreenlocker 不自动锁")
+            say("OK", "熄屏不锁屏：PowerDevil 三档都关了熄屏前锁屏，电池档闲置变暗 / 熄屏开着且时间写死，kscreenlocker 不自动锁")
     guard("熄屏不锁屏", check_no_lock)
     usbc = run(["cat", "/sys/bus/platform/devices/a600000.usb/power/control"])
     if usbc == "auto":
@@ -1919,8 +2626,14 @@ def main():
 
     print("\n".join(out))
     if save:
+        # a new file renamed over the old one: truncating STATE and writing into it left an empty or half file after a
+        # reset or a full disk mid-write, read next time as a first run - a day's CHANGED lost, unnoticed (10-31 audit C6)
         os.makedirs(os.path.dirname(STATE), exist_ok=True)
-        json.dump(cur, open(STATE, "w"), ensure_ascii=False, indent=1)
+        with open(STATE + ".tmp", "w") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(STATE + ".tmp", STATE)
     return 10 if attention else 0
 
 

@@ -136,6 +136,8 @@ path = [
   "linux/power/keyhold-event-driven.patch",
   "linux/power/keyhold-model-test.py",
   "linux/power/tb323fu-dsp-no-cdsp.conf",
+  "linux/kernel-y17/init",
+  "linux/kernel-y17/test-root-selection.sh",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = [
@@ -213,3 +215,17 @@ SPDX-FileCopyrightText = [
   "Krystian Zajdel (KDE Plasma wallpaper Sub-Arctic)",
 ]
 SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# 18. Patches against libcamera 0.7.0 (LGPL-2.1-or-later). 0001-0004 come from
+#     mzakamin-hub/iceland-mainline 990a0597 (packaging/libcamera/; authors in
+#     each patch's Author: field), 0002 hand-ported to 0.7.0; 0005 is our own.
+[[annotations]]
+path = "linux/camera/patches/*.patch"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Osilvfe",
+  "2026 mzak",
+  "The libcamera contributors (context lines)",
+  "2026 bobsixsixsix-boop",
+]
+SPDX-License-Identifier = "LGPL-2.1-or-later"

@@ -2,6 +2,7 @@
 // pill on the right. Same press feedback and haptic tick as Tile. Used for Tailscale, where the status
 // (tailnet address / not logged in / off) is the useful part. 60 high like every single-line control of
 // the curtain (10-22: the pills, the performance segments, the power row), chip 44 like the pills'.
+// toggle: false (11-01) drops the pill: the four actions at the bottom of the thumb column, half width.
 import QtQuick
 
 Item {
@@ -11,6 +12,7 @@ Item {
     property string status: ""
     property bool active: false
     property bool busy: false
+    property bool toggle: true
     signal tapped()
     signal longPressed()
     implicitHeight: 60
@@ -34,7 +36,7 @@ Item {
             Image { anchors.centerIn: parent; source: tile.icon !== "" ? "icons/" + tile.icon + ".svg" : ""; sourceSize: Qt.size(24, 24) }
         }
         Column {
-            anchors { left: chip.right; leftMargin: 12; right: pillSw.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            anchors { left: chip.right; leftMargin: 12; right: tile.toggle ? pillSw.left : parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
             spacing: 2
             Text { width: parent.width; elide: Text.ElideRight; text: tile.title; color: "white"; font.pixelSize: 16; font.weight: Font.DemiBold }
             Text { width: parent.width; elide: Text.ElideRight; text: tile.status; color: Qt.rgba(1, 1, 1, 0.75); font.pixelSize: 13; visible: text !== "" }
@@ -42,6 +44,7 @@ Item {
         // on/off pill: the knob slides, the track tints
         Rectangle {
             id: pillSw
+            visible: tile.toggle
             anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
             width: 46; height: 26; radius: 13
             color: tile.active ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(1, 1, 1, 0.18)

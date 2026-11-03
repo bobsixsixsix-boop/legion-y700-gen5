@@ -23,6 +23,8 @@ FocusScope {
     focus: true
 
     property TaskSwitcherPlugin.MobileTaskSwitcherState state
+    // main.qml's AppQuit (y700-taskswitcher.patch): a swiped-away app is quit, not only its window closed
+    property QtObject appQuit: null
     readonly property QtObject targetScreen: KWinComponents.SceneView.screen
 
     property TaskSwitcherPlugin.TaskFilterModel tasksModel: TaskSwitcherPlugin.TaskFilterModel {
@@ -429,7 +431,9 @@ FocusScope {
     function requestClose(c): void {
         c.checkAt = Date.now() + 1500;
         closeCheck.start();
-        if (c.window && !c.window.deleted) c.window.closeWindow();
+        if (!c.window || c.window.deleted) return;
+        if (appQuit && !c.guarded) appQuit.watch(c.window);   // a game is never quit: it runs inside Steam's unit
+        c.window.closeWindow();
     }
     // a window that is still there 1.5 s after closeWindow is probably asking "save changes?" (its dialog
     // is hidden behind us): its card comes back, so the question is one tap away instead of lost

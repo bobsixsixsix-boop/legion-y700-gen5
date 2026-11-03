@@ -1,0 +1,39 @@
+#!/usr/bin/python3 -I
+"""y700-battery-report: the battery page's report (linux/power/battery/DESIGN.md 6b.b).
+
+-I keeps the user's PYTHON* variables and site-packages out. The package is looked up beside this script first
+(the dev tree: report/y700_battery/), then in /usr/local/lib/y700-battery/ (installed), and put first on sys.path.
+A package that is there but does not import (half copied, a module missing, a SyntaxError on another python) still
+gives the page a JSON error document and exit code 2, like every failure cli.main catches.
+"""
+
+import json
+import os
+import sys
+import traceback
+
+LIB_DIR = "/usr/local/lib/y700-battery"
+
+
+def _root():
+    for d in (os.path.dirname(os.path.realpath(__file__)), LIB_DIR):
+        if os.path.isfile(os.path.join(d, "y700_battery", "cli.py")):
+            return d
+    return None
+
+
+if __name__ == "__main__":
+    root = _root()
+    if root is None:
+        sys.stdout.buffer.write('{"v":1,"error":"报表出错：ModuleNotFoundError: 找不到 y700_battery 包"}\n'
+                                .encode("utf-8"))
+        sys.exit(2)
+    sys.path.insert(0, root)
+    try:
+        from y700_battery import cli
+    except Exception as e:      # noqa: BLE001 - the page must always get a document
+        sys.stderr.write(traceback.format_exc())
+        sys.stdout.buffer.write((json.dumps({"v": 1, "error": f"报表出错：{type(e).__name__}: {e}"},
+                                            ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+        sys.exit(2)
+    sys.exit(cli.main())

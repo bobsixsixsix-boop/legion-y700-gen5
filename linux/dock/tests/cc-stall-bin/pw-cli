@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stand-in for pw-cli in cc-stall.sh's bed (see bluetoothctl next to it). The status pipeline's ===REC section runs it
+# after the bluetoothctl and tailscale stalls, so each call is one pipeline that got past both. Logged; prints nothing
+# (no recording). While $XDG_RUNTIME_DIR/cc-stall.pwhang exists it waits for ever instead: a command without a
+# timeout of its own, left to the pipeline's outer bound.
+echo "$$ pw-cli $*" >> "$XDG_RUNTIME_DIR/cc-stall.calls"
+[ -e "$XDG_RUNTIME_DIR/cc-stall.pwhang" ] && exec sleep 600
+exit 0

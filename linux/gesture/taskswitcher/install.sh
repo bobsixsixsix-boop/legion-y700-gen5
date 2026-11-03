@@ -19,8 +19,10 @@
 #   /usr/local/libexec/y700-taskswitcher-aptcheck + /etc/apt/apt.conf.d/99y700-taskswitcher   after every dpkg run
 #       that changed KWin / plasma-mobile / Qt: the installed build in a headless test KWin; off for the next
 #       login if it does not start (10-23)
+#   /usr/local/libexec/y700-appquit (appquit.py) + ~user/.config/systemd/user/y700-appquit@.service   a card
+#       swiped away quits its app, not only its window (10-31; ui/AppQuit.qml starts the unit)
 # --build DIR only assembles the effect into DIR (for linux/gesture/tests/ts-bed.sh) and stops.
-# --remove undoes the last four (the apt package stays; it does nothing in the desktop session by itself).
+# --remove undoes the last five (the apt package stays; it does nothing in the desktop session by itself).
 #
 # KWin caches compiled QML in memory by file URL: unloadEffect + loadEffect brings back the OLD code.
 # The first install takes effect at once; a changed patch or upgraded package only after the next
@@ -43,6 +45,8 @@ if [ "$1" = "--remove" ]; then
     fx unloadEffect s y700-taskswitcher >/dev/null 2>&1 || true
     rm -rf "$DST"
     rm -f /etc/apt/apt.conf.d/99y700-taskswitcher /usr/local/libexec/y700-taskswitcher-aptcheck
+    rm -f /usr/local/libexec/y700-appquit "$H/.config/systemd/user/y700-appquit@.service"
+    $RUN systemctl --user daemon-reload || true
     $RUN kwriteconfig6 --file kwinrc --group Plugins --key y700-taskswitcherEnabled --delete
     $RUN kwriteconfig6 --file kwinrc --group Script-y700-home --key BottomEdge --delete
     $RUN kwriteconfig6 --file plasmamobilerc --group General --key navigationPanelEnabled --delete
@@ -61,9 +65,9 @@ cp -r $UP/contents "$T/"
 ( cd "$T" && patch -p1 --no-backup-if-mismatch < "$SRC/y700-taskswitcher.patch" ) \
     || { echo "INSTALL_FAIL: y700-taskswitcher.patch does not apply to this plasma-mobile" >&2; exit 1; }
 for f in TaskSwitcher.qml Task.qml TaskList.qml FlickContainer.qml TaskSwitcherHelpers.qml; do rm -f "$T/contents/ui/$f"; done
-cp "$SRC"/ui/TaskSwitcher.qml "$SRC"/ui/StackCard.qml "$SRC"/ui/stack.js "$T/contents/ui/"
+cp "$SRC"/ui/TaskSwitcher.qml "$SRC"/ui/StackCard.qml "$SRC"/ui/stack.js "$SRC"/ui/AppQuit.qml "$T/contents/ui/"
 cp "$SRC/metadata.json" "$T/"
-BUILD="$(dpkg-query -W -f '${Version}' plasma-mobile)+$(cat "$SRC/y700-taskswitcher.patch" "$SRC"/ui/TaskSwitcher.qml "$SRC"/ui/StackCard.qml "$SRC"/ui/stack.js | sha256sum | cut -c1-12)"
+BUILD="$(dpkg-query -W -f '${Version}' plasma-mobile)+$(cat "$SRC/y700-taskswitcher.patch" "$SRC"/ui/TaskSwitcher.qml "$SRC"/ui/StackCard.qml "$SRC"/ui/stack.js "$SRC"/ui/AppQuit.qml | sha256sum | cut -c1-12)"
 sed -i "s/@Y700_BUILD@/$BUILD/" "$T/contents/ui/main.qml"
 grep -q "\"$BUILD\"" "$T/contents/ui/main.qml" || { echo "INSTALL_FAIL: build marker not written" >&2; exit 1; }
 if [ "$1" = "--build" ]; then
@@ -94,6 +98,10 @@ home
 install -D -m 755 "$SRC/y700-taskswitcher-aptcheck" /usr/local/libexec/y700-taskswitcher-aptcheck
 echo 'DPkg::Post-Invoke { "/usr/local/libexec/y700-taskswitcher-aptcheck || true"; };' > /etc/apt/apt.conf.d/99y700-taskswitcher
 [ "${Y700_SKIP_SMOKE:-}" = 1 ] || /usr/local/libexec/y700-taskswitcher-aptcheck --stamp >/dev/null
+# what a swiped-away card starts (ui/AppQuit.qml -> StartUnit y700-appquit@PID_WINPIDS.service -> appquit.py)
+install -D -m 755 "$SRC/appquit.py" /usr/local/libexec/y700-appquit
+install -D -o $U -g $U -m 644 "$SRC/y700-appquit@.service" "$H/.config/systemd/user/y700-appquit@.service"
+$RUN systemctl --user daemon-reload
 fx loadEffect s y700-taskswitcher >/dev/null 2>&1 || true
 for i in 1 2 3 4 5 6 7 8 9 10; do
     sleep 0.3

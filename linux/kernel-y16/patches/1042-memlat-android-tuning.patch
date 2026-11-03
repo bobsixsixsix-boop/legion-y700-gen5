@@ -1,0 +1,370 @@
+From 9605b39146805b2e7b2e21fe82ba292753872df4 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 09:00:00 +0000
+Subject: [PATCH] PM / devfreq: scmi-qcom-memlat: use the Android memlat
+ tunables on Kaanapali
+
+The RFC driver (0126) programs every Kaanapali latency monitor with
+ipm_ceil 20000000 and be_stall_floor 1. An IPM ceiling that high lets
+practically every CPU vote every sample, so the DDR, LLCC and DDR_QOS votes
+simply follow cpufreq (seen on the tablet: the ddr devfreq read-back tracks
+the CPU clocks; a sampling window puts the vote at the 547 MHz floor 88 % of
+the time only because the CPUs idle that much).
+
+The Android BSP that ships on this device (ColorOS 17 for TB323FU) runs the
+same CPUCP firmware (cpucp_a.img is loaded by the bootloader for both OSes)
+with the same monitors: its "CanoeP SoC" device tree (msm-id 0x295) has the
+same four DDR, three LLCC and four DDR_QOS monitors, with cpufreq->memfreq
+maps and DDR/LLCC frequency tables identical to the kaanapali tables below.
+It only lets CPUs vote whose instructions-per-miss is low:
+
+ - its memlat driver (vendor_dlkm memlat.ko) programs every monitor at
+   probe with ipm_ceil 400, fe/be stall floor 0, wb_pct 100, ipm filter
+   25000, freq_scale 0 % with ceil/floor 5000 MHz, and sends sample_ms 8;
+   its ipm_ceil sysfs store clamps to 1..500000;
+ - /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh (init.kernel.post_boot.sh
+   hands soc_id 660/661/704/722/723 to init.kernel.post_boot-canoe.sh, which
+   picks the 6_2 variant from the 6+2 CPU topology, i.e. this tablet) then sets
+   ipm_ceil: DDR gold 3000, DDR prime 13000 (plus freq_scale_pct 25 with
+   floor 1500 / ceil 2800 MHz), every *latfloor monitor 300000, DDR_QOS gold
+   700, DDR_QOS prime 350. LLCC monitors are not touched (400). Compute
+   monitors are flagged by mon_type and ignore IPM.
+
+Use those values on Kaanapali. The parameters the RFC driver did not send
+yet (FE_STALL_FLOOR, WB_PCT, IPM_FILTER, FREQ_SCALE_PCT/CEIL/FLOOR, param ids
+24 and 26-30) are already in the RFC's MEMLAT protocol list and carry the
+same 12-byte {hw_type, mon_idx, val} message as IPM_CEIL; the Android driver
+sends exactly these ids with 12-byte payloads per monitor (17, 23-30, 32-34,
+then 31 once, then 36). They are sent only for SoCs that set mon_tunables
+(Kaanapali), and a firmware error on one of them only warns: the monitor
+keeps the firmware default for it instead of the probe failing and bus
+scaling being lost. Glymur and Hamoa are unchanged. Compute monitors keep
+ipm_ceil 0 (mon_type 1). The sample period becomes 8 ms like Android (the
+devfreq polling default follows, 4 ms; the udev rule sets 1 s anyway).
+
+One deliberate deviation: wb_filter_ipm is 0, not 25000. Android's event-map
+messages are 12 bytes ({u32 num_evs, u32 hw_type, u8 cid[]}: 4 common
+events inst/cyc/fe/be, 3 group events), while this driver sends 28-byte
+messages with u32 cids and a fifth CONST_CYC slot. If the firmware reads the
+RFC's message with Android's layout, the FE/BE/WB/ACC slots land on counter
+0 (cycles) instead of "unset": the stall percentages read 100 % and wb_pct
+reads 100 %, and the write-back path (wb_pct >= wb_pct_thres && ipm <=
+wb_filter_ipm votes the raw CPU frequency, bypassing ipm_ceil) would let every
+CPU with IPM <= 25000 vote, blunting the ceilings above. With the stall floors
+at 0 and wb_filter_ipm at 0 neither path can fire on this SoC, whichever way
+the firmware parses the map, so ipm_ceil is the only gate, as on Android.
+The map layout itself is not changed here (not testable off-device); it is
+noted for the RFC authors.
+
+Not ported (no message for it in the RFC protocol, or not memlat):
+ - the HLOS bandwidth monitors: Android's bwmon4 llcc-gold/llcc-prime
+   (CPU-side, with mbps_zones, io_percent 80/120, idle_mbps 1600, sample 4 ms,
+   max_freq 806000 kHz, sched_boost 1350000 kHz) and bwmon5 bwmon-ddr (LLCC->DDR,
+   max_freq 3187000 kHz, idle_mbps 1600, sample 4 ms). Mainline drives the two
+   CPU-side monitors with icc-bwmon (qcom,kaanapali-cpu-bwmon, a fixed 11-row
+   OPP table, no sysfs tunables) and has no LLCC->DDR monitor at all;
+ - adaptive_low_freq / adaptive_high_freq / adaptive_cur_freq (ids 20-22,
+   defined in the RFC list but never sent by Android's boot script either),
+   adaptive_level_1 (id 40, group tunable, 12 bytes), subsampling_enabled
+   (id 41, 4 bytes), cpucp log level / flush (ids 3-4), hlos_cpucp_offset /
+   GET_TIMESTAMP (id 38): none are set by Android at boot;
+ - "boost_freq = hw_min_freq" for every bus_dcvs device (Android's qcom_dcvs
+   HLOS voter, a no-op floor);
+ - MEMLAT_SET_EFFECTIVE_FREQ_METHOD (39): the RFC sends 1 (legacy); Android's
+   kaanapali driver never sends this id, so the firmware default applies
+   there. Left as the RFC has it.
+---
+ drivers/devfreq/scmi-qcom-memlat-devfreq.c | 136 ++++++++++++++++++---
+ 1 file changed, 119 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/devfreq/scmi-qcom-memlat-devfreq.c b/drivers/devfreq/scmi-qcom-memlat-devfreq.c
+index 9ca85b2f4..16786a17e 100644
+--- a/drivers/devfreq/scmi-qcom-memlat-devfreq.c
++++ b/drivers/devfreq/scmi-qcom-memlat-devfreq.c
+@@ -98,6 +98,20 @@ enum scmi_qcom_memlat_hw_type {
+  *            at or below this ceiling; a monitor with @ipm_ceil == 0 is a
+  *            "compute" monitor and scales passively with cpufreq.
+  * @table_len: number of valid rows in @table.
++ * @fe_stall_floor: front-end-stall threshold, in percent.
++ * @wb_pct_thres: write-back percentage at or above which a CPU may also vote
++ *                when its IPM is at or below @wb_filter_ipm.
++ * @wb_filter_ipm: IPM limit for the write-back path above.
++ * @freq_scale_pct: extra CPU frequency, in percent, added before the table
++ *                  lookup for a latency-bound CPU running between
++ *                  @freq_scale_floor_mhz and @freq_scale_ceil_mhz (0: off).
++ * @freq_scale_ceil_mhz: upper CPU frequency limit of the scaling, in MHz.
++ * @freq_scale_floor_mhz: lower CPU frequency limit of the scaling, in MHz.
++ *
++ * @fe_stall_floor, @wb_pct_thres, @wb_filter_ipm and the @freq_scale_* fields
++ * are sent (MEMLAT_FE_STALL_FLOOR, MEMLAT_WB_PCT, MEMLAT_IPM_FILTER,
++ * MEMLAT_FREQ_SCALE_*) only when the SoC's &scmi_qcom_memlat_cfg_data.mon_tunables
++ * is set; otherwise the firmware keeps its own defaults for them.
+  */
+ struct scmi_qcom_monitor_cfg {
+ 	const struct scmi_qcom_map_table *table;
+@@ -106,6 +120,12 @@ struct scmi_qcom_monitor_cfg {
+ 	u32 cpu_mask;
+ 	u32 ipm_ceil;
+ 	u32 table_len;
++	u32 fe_stall_floor;
++	u32 wb_pct_thres;
++	u32 wb_filter_ipm;
++	u32 freq_scale_pct;
++	u32 freq_scale_ceil_mhz;
++	u32 freq_scale_floor_mhz;
+ };
+ 
+ struct scmi_qcom_memory_cfg {
+@@ -123,6 +143,8 @@ struct scmi_qcom_memlat_cfg_data {
+ 	const struct scmi_qcom_memory_cfg *memory_cfg;
+ 	const u32 *common_ev;
+ 	bool cpucp_legacy_freq_method;
++	/* also send fe_stall_floor, wb_* and freq_scale_* for every monitor */
++	bool mon_tunables;
+ 	u32 cpucp_sample_ms;
+ 	u32 memory_cnt;
+ };
+@@ -763,6 +785,39 @@ static const struct scmi_qcom_memory_cfg hamoa_memory_cfg[] = {
+ 	},
+ };
+ 
++/*
++ * Kaanapali per-monitor tuneables, taken from the Android BSP that ships on
++ * Kaanapali devices (same CPUCP firmware, same monitors, same cpufreq->memfreq
++ * maps and the same DDR/LLCC frequency tables as below):
++ *  - its memlat driver programs every monitor with fe/be stall floor 0,
++ *    wb_pct 100, ipm filter 25000 and freq_scale off (0 %, 5000/5000 MHz);
++ *  - its boot script then sets ipm_ceil: DDR gold 3000, prime 13000 (plus
++ *    freq_scale 25 % between 1500 and 2800 MHz), prime-latfloor 300000;
++ *    DDR_QOS gold 700, prime 350, prime-latfloor 300000; LLCC keeps the
++ *    driver default of 400;
++ *  - the memlat sample period stays at the driver default of 8 ms.
++ * Compute monitors (ipm_ceil 0 here) follow cpufreq whatever these say.
++ *
++ * wb_filter_ipm is 0 rather than Android's 25000: the write-back path
++ * (wb_pct >= wb_pct_thres && ipm <= wb_filter_ipm votes the raw CPU
++ * frequency, bypassing ipm_ceil) needs the WB and ACC counters, and neither
++ * kaanapali_*_grp_ev above nor Android's device tree wires them on this SoC.
++ * Android's 25000 is only inert as long as the firmware really sees those
++ * two slots as unset; 0 keeps the path inert whatever the firmware computes
++ * for wb_pct (ipm is >= 1 for any CPU that retired instructions), so
++ * ipm_ceil is the only gate, exactly as on Android.
++ */
++#define KAANAPALI_MON_TUNABLES(_pct, _floor_mhz, _ceil_mhz)	\
++	.fe_stall_floor = 0,					\
++	.be_stall_floor = 0,					\
++	.wb_pct_thres = 100,					\
++	.wb_filter_ipm = 0,					\
++	.freq_scale_pct = (_pct),				\
++	.freq_scale_floor_mhz = (_floor_mhz),			\
++	.freq_scale_ceil_mhz = (_ceil_mhz)
++
++#define KAANAPALI_MON_DEFAULTS	KAANAPALI_MON_TUNABLES(0, 5000, 5000)
++
+ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 	{
+ 		.memory_type = MEMLAT_HW_DDR,
+@@ -774,10 +829,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 		.memory_range = { .min_freq_khz = 547000, .max_freq_khz = 5333000 },
+ 		.monitor_cfg = (const struct scmi_qcom_monitor_cfg[]) {
+ 			{
++				/* Android "gold" */
+ 				.name = "mon_0",
+ 				.cpu_mask = 0x3f,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 3000,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 6,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 787, .mem_freq_mhz = 547 },
+@@ -789,10 +845,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime" */
+ 				.name = "mon_1",
+ 				.cpu_mask = 0xc0,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 13000,
++				KAANAPALI_MON_TUNABLES(25, 1500, 2800),
+ 				.table_len = 8,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 614, .mem_freq_mhz = 547 },
+@@ -806,8 +863,10 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "gold-compute" */
+ 				.name = "mon_2",
+ 				.cpu_mask = 0xff,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 2035, .mem_freq_mhz = 547 },
+@@ -815,10 +874,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime-latfloor" */
+ 				.name = "mon_3",
+ 				.cpu_mask = 0xc0,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 300000,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 2726, .mem_freq_mhz = 547 },
+@@ -837,10 +897,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 		.memory_range = { .min_freq_khz = 282000, .max_freq_khz = 1350000 },
+ 		.monitor_cfg = (const struct scmi_qcom_monitor_cfg[]) {
+ 			{
++				/* Android "gold" */
+ 				.name = "mon_0",
+ 				.cpu_mask = 0x3f,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 400,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 5,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 787, .mem_freq_mhz = 282 },
+@@ -851,10 +912,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime" */
+ 				.name = "mon_1",
+ 				.cpu_mask = 0xc0,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 400,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 8,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 614, .mem_freq_mhz = 282 },
+@@ -868,8 +930,10 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "gold-compute" */
+ 				.name = "mon_2",
+ 				.cpu_mask = 0xff,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 2035, .mem_freq_mhz = 282 },
+@@ -888,10 +952,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 		.memory_range = { .min_freq_khz = 0, .max_freq_khz = 1 },
+ 		.monitor_cfg = (const struct scmi_qcom_monitor_cfg[]) {
+ 			{
++				/* Android "gold" (all eight CPUs) */
+ 				.name = "mon_0",
+ 				.cpu_mask = 0xff,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 700,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 2035, .mem_freq_mhz = 0 },
+@@ -899,10 +964,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime" */
+ 				.name = "mon_1",
+ 				.cpu_mask = 0xc0,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 350,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 1574, .mem_freq_mhz = 0 },
+@@ -910,10 +976,11 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime-latfloor" */
+ 				.name = "mon_2",
+ 				.cpu_mask = 0xc0,
+-				.ipm_ceil = 20000000,
+-				.be_stall_floor = 1,
++				.ipm_ceil = 300000,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 2131, .mem_freq_mhz = 0 },
+@@ -921,8 +988,10 @@ static const struct scmi_qcom_memory_cfg kaanapali_memory_cfg[] = {
+ 				}
+ 			},
+ 			{
++				/* Android "prime-compute" */
+ 				.name = "mon_3",
+ 				.cpu_mask = 0xc0,
++				KAANAPALI_MON_DEFAULTS,
+ 				.table_len = 2,
+ 				.table = (const struct scmi_qcom_map_table[]) {
+ 					{ .cpu_freq_mhz = 3513, .mem_freq_mhz = 0 },
+@@ -953,7 +1022,8 @@ static const struct scmi_qcom_memlat_cfg_data kaanapali_memlat_data = {
+ 	.memory_cfg = kaanapali_memory_cfg,
+ 	.common_ev = kaanapali_common_ev,
+ 	.cpucp_legacy_freq_method = true,
+-	.cpucp_sample_ms = 4,
++	.mon_tunables = true,
++	.cpucp_sample_ms = 8,
+ 	.memory_cnt = ARRAY_SIZE(kaanapali_memory_cfg),
+ };
+ 
+@@ -1051,6 +1121,34 @@ static int configure_cpucp_mon(struct device *dev, struct scmi_qcom_memlat_info
+ 	if (ret < 0)
+ 		return dev_err_probe(dev, ret, "failed to set be_stall_floor for %s\n", mon->name);
+ 
++	if (info->cfg_data->mon_tunables) {
++		const struct {
++			const char *what;
++			u32 param_id;
++			u32 val;
++		} extra[] = {
++			{ "fe_stall_floor", MEMLAT_FE_STALL_FLOOR, mon->fe_stall_floor },
++			{ "wb_pct", MEMLAT_WB_PCT, mon->wb_pct_thres },
++			{ "ipm_filter", MEMLAT_IPM_FILTER, mon->wb_filter_ipm },
++			{ "freq_scale_pct", MEMLAT_FREQ_SCALE_PCT, mon->freq_scale_pct },
++			{ "freq_scale_ceil", MEMLAT_FREQ_SCALE_CEIL_MHZ, mon->freq_scale_ceil_mhz },
++			{ "freq_scale_floor", MEMLAT_FREQ_SCALE_FLOOR_MHZ, mon->freq_scale_floor_mhz },
++		};
++
++		/*
++		 * Optional: on failure the firmware keeps its default for that
++		 * parameter, which still leaves a working monitor, so do not
++		 * fail the probe (and lose bus scaling) over it.
++		 */
++		for (i = 0; i < ARRAY_SIZE(extra); i++) {
++			scalar.val = cpu_to_le32(extra[i].val);
++			ret = memlat_set_param(info, &scalar, sizeof(scalar), extra[i].param_id);
++			if (ret < 0)
++				dev_warn(dev, "failed to set %s for %s/%s: %d\n",
++					 extra[i].what, cfg->name, mon->name, ret);
++		}
++	}
++
+ 	map.hw_type = cpu_to_le32(cfg->memory_type);
+ 	map.mon_idx = cpu_to_le32(monitor_index);
+ 	map.nr_rows = cpu_to_le32(mon->table_len);
+@@ -1170,6 +1268,10 @@ static int scmi_qcom_memlat_configure_events(struct scmi_device *sdev,
+ 	if (ret < 0)
+ 		return dev_err_probe(&sdev->dev, ret, "failed to start memory group timer\n");
+ 
++	dev_info(&sdev->dev, "memlat started, sample %u ms%s\n",
++		 info->cfg_data->cpucp_sample_ms,
++		 info->cfg_data->mon_tunables ? ", per-monitor tunables sent" : "");
++
+ 	for (i = 0; i < info->memory_cnt; i++) {
+ 		struct scmi_qcom_memory_info *memory = info->memory[i];
+ 		const struct scmi_qcom_memory_range *range = &memory->cfg->memory_range;
+-- 
+2.53.0
+

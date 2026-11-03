@@ -1,5 +1,7 @@
 # y700-kmsg-watch：把两个"每分钟看一眼"的看门狗定时器换成内核日志事件触发
 
+> **2026-11-03 起平板上跑的是 Rust 版**（`kmsg-watch/`，见 §13）。下文 §0–§12 写于 Python 版时期，说的「Python」「`y700-kmsg-watch` 脚本」就是它的前身；设计、规则、沙箱都没变。§1 表里的 Python 守护进程和两份 Python 测试（`y700-kmsg-watch-selftest.py`、`y700-kmsg-watch-realtest.py`）11-03 从仓库删了，最后一版在 git 1814212。
+>
 > 状态：**2026-10-16 写成，全部离线**（本仓库 + 公开源码；平板上正在跑无人值守的功耗测量，没有 ssh/scp/ping 过它），**没装、没上机**。PC 上的离线自测 `y700-kmsg-watch-selftest.py` 72 项全过（在作者机器上；公开仓库没有作者的开机日志，T2/T3 跳过）；体检补丁 `git apply --check` 通过、打补丁后的体检自测 0 失败。**同日独立复审**（§12）：源码行号逐条复核；修了可选安全网 drop-in 的一个真 bug（两次清空把 `OnBootSec` 也清掉了，watcher 开机就死时安全网永远不响）；在 PC 的 WSL Ubuntu 26.04（python 3.14.4 / systemd 259.5 / glibc 2.43，与平板同版本，但 x86_64、内核 6.18）上用新写的 `y700-kmsg-watch-realtest.py` 实跑了真 `/dev/kmsg` 和**单元里全部沙箱设置**下的守护进程（§12.2）。
 > 出处约定：内核 = 主线 **v7.3-rc4**（GitHub raw，2026-10-16 读；平板 = 7.3.0-rc4 + 上游补丁 + y 补丁，本仓库里的补丁没有一个碰 `kernel/printk/`、`fs/select.c`、`kernel/time/sleep_timeout.c`）；systemd = **v259.5**（平板 `systemd 259.5-0ubuntu3.4`）；CPython = **v3.14.4**（平板 `python3.14 3.14.4-1ubuntu0.2`）；glibc = GitHub 镜像 **master**（2.43 的 tag 镜像上没有，平板 `libc6 2.43-2ubuntu2.4`；复审补查：`glibc-2.42` tag 的 `poll.c` 与 master 只差版权年份，这个文件 2025-01 以来只有改版权年份的提交，所以 2.43 必然相同）。上游 tb323fu-linux 用的是本地副本（与本题无关的 helper 0.4.2 没读）。lore/patchwork 没用。
 > 读者：作者，以及接手"熄屏不休眠还能不能再省"的下一个工程师。先读 §0，部署看 §4–§6。
@@ -21,7 +23,7 @@
 | `y700-kmsg-watch.service` | `/etc/systemd/system/` | 常驻单元：root、只留 `CAP_SYSLOG`、设备白名单只有 `/dev/kmsg r`、`SCHED_IDLE` |
 | `y700-kmsg-watch-selftest.py` | 不装（PC 上跑） | 离线自测：模拟 `/dev/kmsg` 记录流 + 假时钟 + 假 systemctl；用平板真实的内核日志 |
 | `y700-kmsg-watch-realtest.py` | 不装（任何 Linux 上 root 跑，平板上是部署前一步） | 真内核 + 真 systemd 测试（复审时加）：真 `/dev/kmsg` 语义、真 `daemon()`（systemctl 换成桩）、`--sandbox` 时在单元的**全部**设置下以临时单元运行、去启动两个临时空单元 |
-| `y700-checklist-kmsg-watch.patch` | 打在 `tools/y700-checklist.py`（+ 其自测）上 | 体检：装了 watcher 就查它（含 `--selftest`），不再要求两个 timer active；没装时行为不变 |
+| 体检部分 | 已合进 `tools/y700-checklist.py` 和它的自测（S11），提交 3ed5718；原来的 `y700-checklist-kmsg-watch.patch` 10-31 删了（合进去以后再打会失败或加出重复检查） | 体检：装了 watcher 就查它（含 `--selftest`），不再要求两个 timer active；没装时行为不变 |
 | `y700-watchdog-safety.conf` | **默认不装**；可选放进两个 `*.timer.d/` | 可选安全网：旧 timer 改成 15 分钟一次 |
 | `y700-wifi-watchdog`、`y700-display-watchdog` 及其 `.service`、`.timer` | 原样 | 不改；timer 文件保留但停用 |
 
@@ -129,7 +131,7 @@ systemctl enable --now y700-kmsg-watch.service                          # 先起
 systemctl disable --now y700-wifi-watchdog.timer y700-display-watchdog.timer   # 再停 timer（文件留着）
 ```
 
-体检（在 PC 的仓库里做）：`git apply linux/net/y700-checklist-kmsg-watch.patch`，跑 `python -X utf8 -I tools/y700-checklist-selftest.py`（应 0 失败），commit，然后把 `tools/y700-checklist.py` 装到平板 `/usr/local/bin/y700-checklist`。补丁对"没装 watcher"的平板行为不变，所以先打补丁后装 watcher、或者反过来都行。
+体检：查 watcher 的部分 10-16 已合进 `tools/y700-checklist.py`（提交 3ed5718，补丁文件 10-31 删了），把它装到平板 `/usr/local/bin/y700-checklist` 就行。它对"没装 watcher"的平板行为不变，所以先装体检后装 watcher、或者反过来都行。
 
 `systemd-analyze security y700-kmsg-watch.service` 可以顺手看一眼暴露分数（只读）。
 
@@ -157,7 +159,7 @@ rm /etc/systemd/system/y700-kmsg-watch.service /usr/local/libexec/y700-kmsg-watc
 systemctl daemon-reload
 ```
 
-体检补丁不用回退：它以 `/etc/systemd/system/y700-kmsg-watch.service` 是否存在来选择检查 watcher 还是检查 timer，删了单元文件就回到原来的检查。真要回退：`git apply -R linux/net/y700-checklist-kmsg-watch.patch`。
+体检补丁不用回退：它以 `/etc/systemd/system/y700-kmsg-watch.service` 是否存在来选择检查 watcher 还是检查 timer，删了单元文件就回到原来的检查。真要回退：把提交 3ed5718 里体检那两个文件的改动反着打回去，`git show 3ed5718 -- tools/y700-checklist.py tools/y700-checklist-selftest.py | git apply -R`（那次提交还改了 README 和 cx-ladder.sh，别整个 `git revert`；之后体检又改过，打不上就照着手改）。
 
 ## 7. watcher 死了怎么办；15 分钟的安全定时器值不值得留
 
@@ -230,7 +232,7 @@ systemctl daemon-reload && systemctl enable --now y700-wifi-watchdog.timer y700-
 | `linux/net/y700-wifi-watchdog`、`.service`、`.timer` | Wi‑Fi 固件发送队列卡死（睡醒后）自动重载 ath12k 的看门狗 | 已装；2026-10-16 起由 y700-kmsg-watch 事件触发，timer 停用（文件保留） |
 | `linux/net/y700-display-watchdog`、`.service`、`.timer` | DPU vblank 超时（整机卡顿）自动重编程面板的看门狗 | 已装；同上 |
 | `linux/net/y700-kmsg-watch`、`.service`、`y700-kmsg-watch-selftest.py`、`y700-kmsg-watch-realtest.py`、`KMSG-WATCH.md` | 两个看门狗的事件触发器：阻塞读 `/dev/kmsg`，内核记下那两句才 start 对应 oneshot；安静时零唤醒。realtest = 真内核 + 真 systemd 预检（部署前在平板上跑） | 未装（PC 自测 72/72；WSL 同版本用户态实跑见 KMSG-WATCH.md §12） |
-| `linux/net/y700-checklist-kmsg-watch.patch` | 体检改为查 y700-kmsg-watch（含 `--selftest`）；没装 watcher 时行为不变 | 未打 |
+| `linux/net/y700-checklist-kmsg-watch.patch` | 体检改为查 y700-kmsg-watch（含 `--selftest`）；没装 watcher 时行为不变 | 未打（10-16 已合进 `tools/y700-checklist.py`，3ed5718；补丁文件 10-31 删了） |
 | `linux/net/y700-watchdog-safety.conf` | 可选：旧 timer 改成 15 分钟一次的安全网 | 默认不装 |
 ```
 
@@ -312,3 +314,93 @@ systemctl daemon-reload && systemctl enable --now y700-wifi-watchdog.timer y700-
 
 - 单元用 `Type=simple`：二进制坏了 `systemctl enable --now` 照样返回成功，要靠紧随其后的 `--selftest` 发现（§4 已有这一步）。`Type=exec` 能让 start 本身报错，但改了要重跑验证，没动。
 - 体检补丁在 watcher 不 active 时提前 return，就不再检查两个 timer 是否被重新启用（反正已经 WARN 了）；没改。
+
+## 13. Rust 版（2026-11-03，`kmsg-watch/`；**11-03 20:30 装上平板**）
+
+> 状态：代码在 `linux/net/kmsg-watch/`，平板上 `cargo build/test --release --offline` 通过、`realtest.py` 在真内核和单元全部沙箱设置下 0 失败。11-03 20:30 和刷新率守护一起装上（13.6），之前跑的是 git 1814212 的 Python 版。本文 §0–§12 里"Python"指的就是这份 Rust 的前身，设计、规则、沙箱、验证、回滚到 timer 版的步骤都不变。
+
+### 13.1 为什么换、换来多少（平板实测，11-03）
+
+Python 版空闲时本来就零唤醒（§2.2），所以换的不是唤醒，是内存和每条记录的解释器开销。
+
+| | Python（python3.14，在跑的那个） | Rust（`realtest.py` 里同样设置的临时单元） |
+|---|---|---|
+| VmRSS / RssAnon | 16380 kB / 6172 kB | 1860 kB / 136 kB |
+| 单元 cgroup `MemoryCurrent` | 6776 KiB | 1988–2384 KiB |
+| 一批 300 条记录（cgroup CPU，两个都 SCHED_IDLE，各醒 1 次；跑了 3 次） | 835–1684 µs，约 3–6 µs/条 | 173–246 µs，约 0.6–0.8 µs/条 |
+| 启动到打印 usage 退出（20 次合计） | 0.37–0.39 s，约 19 ms/次 | 0.015 s，不到 1 ms/次 |
+
+- Python 版开机约 19 h 一共用了 135 ms CPU（含启动、7 次 `--selftest`、约 1177 条内核记录），大头应该是它拉起的 systemctl 子进程（共 26 次启动，子进程也记在这个 cgroup 里；推算，没单独量），这部分 Rust 版一样要花。所以 **CPU 上省的是零头，实打实的是约 5 MB 内存**（cgroup 少 4.7 MiB，匿名页少 5.9 MiB）。
+- 单条记录一醒一次的真实开销（唤醒 + 一次 read）两边都没单独量，只量了批量的均摊值。
+
+### 13.2 文件
+
+| 文件 | 作用 |
+|---|---|
+| `kmsg-watch/Cargo.toml`、`.cargo/config.toml`、`.gitignore` | 照 `linux/display/autobright`：只用 Ubuntu 打包的 `librust-*`（`/usr/share/cargo/registry`），离线编；依赖只有 `libc`（`poll(2)`、`CLOCK_MONOTONIC`） |
+| `kmsg-watch/src/main.rs` | 守护进程 + `--selftest` 客户端 + `cargo test`（18 项） |
+| `kmsg-watch/install.sh` | 平板上 root 跑：编、测、备份旧二进制、装、只在单元文件有变化时才换单元并 daemon-reload、`try-restart`、`--selftest`；头上写了回滚命令 |
+| `kmsg-watch/realtest.py` | 真内核 + 真 systemd 测试（root），**不启动任何单元**，见 13.5 |
+
+装的位置不变（`/usr/local/libexec/y700-kmsg-watch`）；`y700-kmsg-watch.service` 只改了注释（头上记 Rust 版和 Python 版的提交、`MemoryDenyWriteExecute=` 那条的理由）；体检加了一项（13.8）。`cargo test` 直接读仓库里的文件（两个看门狗脚本、单元、安全网 drop-in、`kernel-y8/inventory/dmesg`、`power/cx-collapse/crash-0341-lastkmsg.log`），所以平板上要按仓库的 `linux/` 目录结构放（`install.sh` 头上列了）。
+
+### 13.3 设计：和 Python 版一一对应
+
+- 同一个状态机：只认 facility 0；`WATCHES` 两条（同样的子串，改要和脚本一起改）；`SETTLE` 5 s、`DEBOUNCE` 20 s；`EPIPE` 对两个看门狗各算一次匹配；每次醒最多处理 `DRAIN_MAX` 256 条再看排期；启动时两个各踢一次；`systemctl start --no-block --no-ask-password --quiet <unit>`。
+- 空闲时 `poll(-1)` → glibc `ppoll(…, NULL)`（arm64 系统调用 73，第 3 个参数 0x0），只在有启动排期的 ≤20 s 里带超时。没有线程、没有定时器、没有 `sd_notify`。`cargo test` 的 T14 会查 `client_selftest` 之前的代码里没有 sleep/alarm/setitimer/timerfd/thread。
+- `--selftest`：同样往 `/dev/kmsg` 写 `<15>y700-kmsg-watch: selftest <token>`，守护进程把答复原子写到 `/run/y700-kmsg-watch/selftest`，客户端最多等 10 s；输出文字和退出码（0 / 1 / 用法错 2）不变，体检的解析（`split()[2:3]==["ok"]`、`split("; ",1)[-1]`）照旧能用。
+- 日志行逐字一样（banner、`start …: watcher start-up …`、`N matching lines since the last start, first: …`、`-- systemctl FAILED (exit N)`、`--selftest` 的答复行），连 Python 的 `repr(bytes)` 和 `{:.0f}` 的四舍六入五成双都照搬了。
+- 子进程用 `std::process::Command`（posix_spawn）：子进程里 SIGPIPE 复位成默认（std 自己忽略 SIGPIPE，spawn 时会复位）；SIGXFSZ std 不碰，systemd 给服务的就是默认。退出码 = 子进程的码，被信号杀 = -信号号，拉不起来 = 255 并记一行 `cannot run …`。
+- 可测性：读的来源是一个 trait（真 `/dev/kmsg`，或测试里的假时钟回放），启动动作是 `Watcher` 里的一个闭包。realtest 要换的三个常量（systemctl 路径、RESULT、selftest 标签）在**编译期**用 `option_env!` 换；正常构建没有它们，装上去的二进制没法被指到别处（11-03 的 release 二进制里 `strings` 查不到 `y700kw-rt`）。`install.sh` 编之前先 `unset` 这三个变量。
+
+### 13.4 有意的差别（代码里标 `RUST:`）
+
+1. 出错行里的系统错误文字是 Rust `io::Error` 的格式（`Permission denied (os error 13)`），Python 是 `[Errno 13] …: '<路径>'`：`cannot write …`、`cannot run …` 两处。
+2. 守护进程出错退出：stderr 一行 + exit 1；Python 是 traceback + exit 1。客户端读写 `/dev/kmsg` 出错同理（`/dev/kmsg: <错误>`，exit 1）。
+3. SIGINT 和 SIGTERM 一样直接结束进程；Python 收到 SIGINT 是 KeyboardInterrupt、exit 0。systemd 不发 SIGINT。
+4. 记录头里两个数字只按内核打印的格式（纯十进制）解析；Python 的 `int()` 还收空格、下划线、负号，内核记录里没有这些。
+5. `poll` 被信号打断：Rust 回到循环重新算超时；CPython 是带着剩余时间自动重试。结果相同。
+6. 用法提示的括号里改成指向本文（`see y700/linux/net/KMSG-WATCH.md`），Python 写的是"看本文件开头"。
+7. realtest 的替换走编译期（见 13.3），Python 的 realtest 是直接改模块里的全局变量。
+8. 测试不再把 `MemoryDenyWriteExecute=` 当成禁用项：那条只是怕伤 CPython 的 JIT，Rust 没这个问题（单元本身没改，见 13.7）。
+9. 复审 12.3 第 2 条那种"导入期默认参数绕过 RESULT"的错误在 Rust 里不存在：RESULT 是编译期常量，`Watcher::new` 显式收它。
+
+### 13.5 测试
+
+- **`cargo test --release --offline`**（平板，11-03）：`test result: ok. 18 passed; 0 failed`，约 1 s。把 Python 自测 T1–T14 搬过来，用同一份 `inventory/dmesg`、crash-0341 日志，规则从两个脚本里现读（180 s/2 行、60 s/15 行）。场景数字和 Python 版（PC 上同时跑，0 失败）逐项对得上：T2 3058 条记录、4253 s、2880 次醒；T3 显示看门狗在 173.35、255.93、577.61、4116.96 s 启动；T4 1008.88 s；T5 每 21 s 一次、第一次重载在 2026 s；T6 7 次启动、第一次恢复在 3025 s；T9 答复行逐字相同；T11 启动序列相同。另加：socketpair（SOCK_SEQPACKET，保留记录边界、对端关闭给 POLLHUP）上的真 fd 读法、启动子进程的退出码（含 -SIGTERM、SIGPIPE 在子进程里没被忽略、程序不存在 = 255）、日志行逐字、客户端的四种结果、单元和源码的静态检查。
+- **变异**（各改一处、整套跑一遍、跑完删掉）：facility 过滤改成 `<= 1` → 4 项失败；空闲时 poll 改成 60 s 超时 → 12 项失败；去掉 20 s 去抖 → 3 项失败；去掉 `DRAIN_MAX` 上限 → T11 失败。四种都被抓到。
+- **`realtest.py`**（平板，root，`python3 -I realtest.py [--plain] [--burst N]`）：用 `cargo build --target-dir target/realtest` 编一份换了三个常量的副本——systemctl 换成桩（只做一次只读的 `systemctl show -p Version`、记下参数和子进程的 SigIgn），RESULT 换到 `/run/y700-kmsg-watch-rt/selftest`，标签换成 `y700kw-rt: selftest `（装着的 watcher 不认这个标签，它自己的标签会让它真的启动两个看门狗）。副本以临时单元 `y700kw-rt.service` 带上单元里除 `Description`/`ExecStart` 外的全部 34 项设置运行（`RuntimeDirectory` 改名）。11-03 两种模式都是 **0 failures**：启动踢的 argv 一字不差、子进程 SIGPIPE/SIGXFSZ 是默认、桩的总线调用在沙箱里返回 0；`CapEff` 只有 CAP_SYSLOG、NoNewPrivs 1、Seccomp 2、SCHED_IDLE；空闲停在 `73 … 0x0`；5 s 安静窗口自愿切换 +0；300 条 user.debug 一条不丢；副本的 `--selftest` 经真 `/dev/kmsg` 返回 0、桩多了两次调用；SIGTERM 干净退出。它往内核日志写的是 N+1 行 facility 1 的 `y700kw-rt …`（watcher 和脚本都不会当真：不含两个看门狗的句子），装着的 watcher 只是多数了这些记录。`--burst` 上限 2000：环溢出会读到 EPIPE，装着的 watcher 会把它当匹配、真的启动两个看门狗（平板的环有 4 MB 文本区，要几万条这种记录才会溢出）。
+- **旧的两份 Python 测试**：`y700-kmsg-watch-selftest.py` 测的是 Python 模块本身，换成 Rust 后就没用了（T1–T14 已搬进 `cargo test`）。`y700-kmsg-watch-realtest.py` 第 1 部分只测内核的 `/dev/kmsg` 语义，和语言无关；第 2、3 部分是 import Python 模块再改全局变量，驱动不了二进制，对应的检查都在新的 `realtest.py` 里。旧 realtest 第 2 部分的客户端发的是**真标签**：watcher 装着时别在平板上跑它，否则装着的 watcher 会真的启动两个看门狗。11-03 合并时两份旧文件和 Python 版一起删了（最后一版 git 1814212）。
+
+### 13.6 安装与回滚（平板，root）
+
+```sh
+# 平板上按仓库结构放好 linux/（至少 linux/net/、linux/kernel-y8/inventory/dmesg（公开仓库没有，cargo test 的 T2/T3 会打 SKIP，见 §1）、linux/power/cx-collapse/crash-0341-lastkmsg.log），然后：
+cd <那份 linux>/net/kmsg-watch
+python3 -I realtest.py            # 可选的预检，期望最后一行 "0 failures []"；不启动任何单元
+sh install.sh                     # 编、测、备份 /usr/local/libexec/y700-kmsg-watch 到 /root/y700-kmsg-watch.bak-<时间>、
+                                  # 装、sync、try-restart、--selftest；最后一行 INSTALL_OK
+```
+
+- `try-restart`：被人停掉的 watcher 保持停着。每次重启 watcher 都会把两个看门狗各踢一次（和 Python 版每次重启一样），最后那次 `--selftest` 也会（和每天的体检一样）。
+- **11-03 20:30 装上**（`runs/diag/20261103-rust3/swap.sh`，三个守护一起换）：18 项测试过、`INSTALL_OK`；注释改过所以单元有变化，换了单元并 daemon-reload；启动踢两个看门狗各一次，`--selftest` 答 `ok … starts wifi=2 display=2`（启动一次 + 自检一次）。备份：`/root/y700-kmsg-watch.bak-20261103-203026`（Python 版）、`/root/y700-kmsg-watch.service.bak-20261103-203026`。装好后 RSS 1860 kB、私有 520 kB、1 个线程（Python 版跑了 20.8 h：RSS 16380 kB、私有 6244 kB、0.139 s CPU）。熄屏 30 min（22:01–22:31，`runs/diag/20261103-rust3/cost-rust.txt`）0.000 % / 0.00 次唤醒/s、cgroup 不到 0.5 MB（Python 版也是 0 / 0，cgroup 7 MB）；随后的体检 OK（`records 6, lost 0`，`starts wifi=3 display=3` 多出的一次是体检自己的自检）。
+- 回滚到 Python（没有状态要转换）：`install -m755 /root/y700-kmsg-watch.bak-<时间> /usr/local/libexec/y700-kmsg-watch && systemctl try-restart y700-kmsg-watch && sleep 1 && /usr/local/libexec/y700-kmsg-watch --selftest`。11-03 那次单元注释变了，有单元备份，还原见 `install.sh` 头上（不还原也行：只差注释）。回滚到 timer 版照 §6。
+- 提交时 `install.sh`、`realtest.py` 要带可执行位（本仓库 `core.filemode=false`，要 `git update-index --chmod=+x`）。
+
+### 13.7 有意不做
+
+- **单元只改注释，不加 `MemoryDenyWriteExecute=yes`**：注释的理由（怕 CPython 的 JIT）对 Rust 不成立了，11-03 合并时改成「Rust 版没有 JIT、可以加，为了这次换装只改一样东西没加」。真要加，先在 `realtest.py` 里多带一项 `-pMemoryDenyWriteExecute=yes` 跑一遍。
+- **不加依赖**：不用 tokio/nix/signal-hook，只用 `libc`；没有信号处理（SIGTERM 走默认动作 = systemd 眼里的干净退出，和 Python 版一样）。
+- **不加 `sd_notify`/`WatchdogSec=`**：理由同 §2.5，那是周期唤醒。
+- **测试数据不复制进 `kmsg-watch/`**：测试直接读仓库里的原文件，规则和脚本不会分叉；代价是平板上要按仓库结构放文件。
+- **没跑旧 realtest**：它会用真标签 ping 装着的 watcher（见 13.5）。
+
+### 13.8 每天的体检
+
+解析不用改：同一个 `--selftest`、同样的输出和退出码。11-03 加了一条：`/usr/local/libexec/y700-kmsg-watch` 开头不是 ELF（= 换回了 Python）报 WARN（自测 S11g/h）。"`MemoryCurrent` 小于 8 MB"那条没加：ELF 那条已经能看出换回了 Python，漏内存这个程序没有可漏的地方（不分配长期增长的东西）。
+
+### 13.9 看到了、没改
+
+- 单元的 MDWE 注释过时（13.7）：11-03 合并时改了。
+- §12.2 说平板的 `printk_devkmsg` "多半是 ratelimit"，11-03 实际看是 `on`。`realtest.py` 每条记录单独打开一次 `/dev/kmsg`，两种设置下都不会被限速丢掉。
+- README 里 `linux/net/` 那一行和"熄屏唤醒治理"那段：11-03 合并时改了。

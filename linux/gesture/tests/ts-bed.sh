@@ -5,13 +5,15 @@
 # config, data and runtime dirs (like taskswitcher/smoke.sh), so it can run while the owner uses the tablet.
 #
 # SCENARIO is sourced by sh inside the test session with these helpers:
-#   app NAME COLOR [CLASS] [--fullscreen|--small|--refuse-close]   start a test window (ts-app.py) and wait for it
+#   app NAME COLOR [CLASS] [--fullscreen|--small|--refuse-close|--tray]   start a test window (ts-app.py) and
+#                            wait for it; $! after it is the window's pid
 #   touch <<EOF ... EOF     fake touch / keys (ftouch, see ftouch/ftouch.c for the script language)
 #   shortcut                 the y700-taskswitcher global shortcut (as the G9 pad's home double tap)
 #   shot NAME                screenshot of the whole screen to OUT/NAME.png
 #   eval_js JS               run a KWin script, its print() lines go to the log
 #   mark TEXT                a line in the log (to find steps); sleep N works as usual
 #   expect TEXT              fail unless the log has a line with TEXT (since the last mark)
+# $T/bin also has fake-systemd.py (systemd's StartUnit on this bus, for ts-scenarios/appquit.sh).
 # Prints TSBED_OK or TSBED_FAIL ... Run as root (switches to user) or as user.
 set -u
 BUILD=$(readlink -f "$1"); SCEN=$(readlink -f "$2"); OUT=$(readlink -m "$3"); U=user
@@ -33,7 +35,7 @@ printf '[General]\nnavigationPanelEnabled=false\nconvergenceModeEnabled=true\n' 
   && wayland-scanner private-code fake-input.xml "$T/bin/fake-input.c" \
   && cc -O2 -I"$T/bin" -o "$T/bin/ftouch" ftouch.c "$T/bin/fake-input.c" -lwayland-client -lm ) \
   || { echo "TSBED_FAIL: could not build ftouch"; rm -rf "$T"; exit 1; }
-cp "$HERE/ts-app.py" "$T/bin/"
+cp "$HERE/ts-app.py" "$HERE/fake-systemd.py" "$T/bin/"
 cp "$SCEN" "$T/scenario.sh"     # the test user may not be able to read the checkout
 chmod 700 "$T/run"
 cat > "$T/inner.sh" <<'EOF'

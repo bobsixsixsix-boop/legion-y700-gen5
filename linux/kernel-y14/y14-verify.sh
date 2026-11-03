@@ -15,8 +15,9 @@
 # vaapi-check.sh (10-23 version) exits non-zero when a stream fails; its exit status is the check, and a missing
 # /root/vaapi-check.sh is a FAIL here (y13-verify said SKIP). Since the libva-v4l2 0001 fix it also compares every frame
 # with libavcodec's software decode and decodes two VP9 show_existing_frame clips: on y14, libva-v4l2 needs the local
-# patch linux/video/libva-v4l2-patches/0001 (1051 makes Iris's NOSHOW buffer of a hidden VP9 frame carry its
-# timestamp; unpatched 6d03c3f grays every hidden frame, which a show_existing_frame then shows).
+# patch linux/video/libva-v4l2-patches/retired/0001 (retired 10-28 for y15; 1051 makes Iris's NOSHOW buffer of a
+# hidden VP9 frame carry its timestamp; unpatched 6d03c3f grays every hidden frame, which a show_existing_frame then
+# shows).
 # A rare "Failed to destroy decode context 0x6: 38" flake
 # (VA_STATUS_ERROR_TIMEDOUT at context destroy, frames still 90/90) was seen on libva-v4l2 ef18ba0 on 10-23 (on the
 # first run, then once more in ~90 reruns; none in ~40 decodes on 6d03c3f): if that check is the only FAIL and its

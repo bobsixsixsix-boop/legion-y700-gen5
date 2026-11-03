@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stand-in for tb323fu-ctl in battcap.sh's bed (battcap-run.sh puts it first on the control centre's PATH): `--json
+# status` is the real one's answer with the fields of $XDG_RUNTIME_DIR/sb-battery.json laid over its Battery section
+# (the scenario writes the charger states it wants: PPS charge-pump fast charging, held at the limit ...); every
+# other command goes to the real one untouched (the bed's control centre acts on the REAL system).
+if [ "$1 $2" = "--json status" ] && [ -s "$XDG_RUNTIME_DIR/sb-battery.json" ]; then
+    /usr/bin/tb323fu-ctl --json status | python3 -c '
+import json, os, sys
+j = json.load(sys.stdin)
+j.setdefault("Battery", {}).update(json.load(open(os.environ["XDG_RUNTIME_DIR"] + "/sb-battery.json")))
+print(json.dumps(j))'
+    exit
+fi
+exec /usr/bin/tb323fu-ctl "$@"

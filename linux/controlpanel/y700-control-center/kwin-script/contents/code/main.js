@@ -46,6 +46,21 @@ function update(added, removed) {
     print("y700-edge: side edges (back) " + (armed ? "on" : "off"));
 }
 
+// The control centre's 「显示桌面」 (11-01): org.kde.kglobalaccel /component/kwin invokeShortcut "y700-show-desktop".
+// Every window minimized, the active one last (as the task cards' minimizeAll: the focus does not pass through the
+// others), so y700-shellbar, which goes by minimized, shows its desktop: dock up, see-through status bar. One way: an
+// app comes back from the dock or the cards. Not KWin's Show Desktop (it hides without minimizing: the shellbar stayed
+// in app mode, and the hidden windows go on painting) nor KWin's minimizeall script (its second press restores by
+// flags that go stale, and then activates a window it never put away). Review 11-01. No default key, not tied to `armed`.
+function showDesktop() {
+    const act = workspace.activeWindow;
+    const away = workspace.windowList().filter(function (w) { return w.minimizable && !w.minimized && !w.deleted; });
+    away.sort(function (a, b) { return (a === act) - (b === act); });   // the active one last
+    away.forEach(function (w) { w.minimized = true; });
+    print("y700-edge: show desktop, " + away.length + " minimized");
+}
+registerShortcut("y700-show-desktop", "Y700: minimize every window (show the desktop)", "", showDesktop);
+
 workspace.windowAdded.connect(function (w) { if (isBlocker(w)) update(w, null); });
 workspace.windowRemoved.connect(function (w) { if (isBlocker(w)) update(null, w); });
 update(null, null);

@@ -3,7 +3,11 @@
 Light on purpose (it runs inside the measurement): once a second it reads battery V/I, the panel's live
 refresh rate, the GPU/DDR/LLCC devfreq frequency; at start and end it reads cpuidle residency, /proc/stat,
 interrupts and the qcom_stats subsystem sleep counters. Battery only: with the charger in, the battery
-current is not the device's power (use y700-powerwhy then). Read-only; run as root. 2026-10-15."""
+current is not the device's power (use y700-powerwhy then). Read-only; run as root. 2026-10-15.
+2026-10-29: with Y700_POWERSAMPLE_RAW=FILE it also appends one tab-separated line to FILE: label, mean power in mW
+(two decimals; the printed line rounds to 10 mW), samples, distinct currents, battery status, then every per-second
+power in mW comma-separated (linux/camera/lens-power-ab.sh averages it over many pairs). Written once at the end,
+nothing extra inside the sampling loop. Without the variable the output is unchanged."""
 import glob, os, re, sys, time
 from collections import Counter
 
@@ -84,3 +88,8 @@ qs = " ".join(f"{k}={100 * (q1[k][1] - q0[k][1]) / (dt * 19.2e6):.0f}%/{q1[k][0]
 print(f"{label:<28} {avg:5.2f} W (min {min(pw):.2f} max {max(pw):.2f}, {len(ivals)} distinct I in {len(pw)} s, {st}) "
       f"| backlight {sum(bl) // max(1, len(bl))} | panel {hzs} | cpu busy {busy:.1f}% idle[{res}] "
       f"| irq {(n1 - n0) / dt:.0f}/s | {dfs} | sleep {qs}", flush=True)
+raw = os.environ.get("Y700_POWERSAMPLE_RAW")
+if raw:
+    with open(raw, "a") as f:
+        f.write("\t".join([label, f"{avg * 1000:.2f}", str(len(pw)), str(len(ivals)), st,
+                           ",".join(f"{p * 1000:.1f}" for p in pw)]) + "\n")

@@ -1,0 +1,174 @@
+== /usr/share/applications/chatgpt.desktop
+Name=ChatGPT
+Exec=chatgpt %U
+Icon=chatgpt
+Type=Application
+== /usr/share/applications/com.anthropic.Claude.desktop
+Name=Claude
+Exec=claude-desktop %U
+Icon=claude-desktop
+Type=Application
+StartupWMClass=com.anthropic.Claude
+== /usr/share/applications/com.google.Chrome.desktop
+Name=Google Chrome
+Exec=/usr/bin/google-chrome-stable %U
+StartupWMClass=google-chrome
+Icon=google-chrome
+Type=Application
+NoDisplay=true
+== /usr/share/applications/geoclue-demo-agent.desktop
+Name=Geoclue Demo agent
+Exec=/usr/libexec/geoclue-2.0/demos/agent
+Icon=mark-location-symbolic
+NotShowIn=GNOME;
+NoDisplay=true
+Type=Application
+== /usr/share/applications/google-chrome.desktop
+Name=Google Chrome
+Exec=/usr/bin/google-chrome-stable %U
+StartupWMClass=google-chrome
+Icon=google-chrome
+Type=Application
+== /usr/share/applications/kcm_mobile_power.desktop
+Type=Application
+NoDisplay=true
+Exec=systemsettings kcm_mobile_power
+Icon=preferences-system-power-management
+Name=Energy
+Name[zh_CN]=电量
+== /usr/share/applications/mpv.desktop
+Type=Application
+Name=mpv Media Player
+Name[zh_CN]=mpv 媒体播放器
+Icon=mpv
+Exec=mpv --player-operation-mode=pseudo-gui -- %U
+StartupWMClass=mpv
+== /usr/share/applications/org.fcitx.Fcitx5.desktop
+Name[zh_CN]=Fcitx 5
+Name=Fcitx 5
+Exec=/usr/bin/fcitx5
+Icon=fcitx
+Type=Application
+== /usr/share/applications/org.freedesktop.Xwayland.desktop
+Name=Xwayland
+Type=Application
+Exec=/usr/bin/Xwayland -decorate -displayfd 1
+NoDisplay=true
+== /usr/share/applications/org.kde.dolphin.desktop
+Name=Dolphin
+Name[zh_CN]=Dolphin 文件管理器
+Exec=dolphin %u
+Icon=org.kde.dolphin
+Type=Application
+StartupWMClass=dolphin
+== /usr/share/applications/org.kde.konsole.desktop
+Type=Application
+Exec=konsole
+Icon=utilities-terminal
+StartupWMClass=konsole
+Name=Konsole
+Name[zh_CN]=Konsole 终端
+== /usr/share/applications/org.kde.plasmashell.desktop
+Exec=/usr/bin/plasmashell
+Name=Plasma Desktop Workspace
+Name[zh_CN]=Plasma 桌面工作空间
+Type=Application
+OnlyShowIn=KDE;
+Icon=plasmashell
+NoDisplay=true
+== /usr/share/applications/systemsettings.desktop
+Exec=systemsettings
+Icon=preferences-system
+Type=Application
+OnlyShowIn=KDE;
+Name=System Settings
+Name[zh_CN]=系统设置
+== /usr/local/share/applications/cn.xfangfang.wiliwili.desktop
+Name=wiliwili
+Exec=wiliwili
+Icon=cn.xfangfang.wiliwili
+Type=Application
+== /usr/local/share/applications/fyi.fortime.Fcitx5Osk.desktop
+Name=Fcitx 5 Osk
+Exec=/usr/local/bin/fcitx5-osk force-show
+Icon=fyi.fortime.Fcitx5Osk
+Type=Application
+== /usr/local/share/applications/y700-control-center.desktop
+Type=Application
+Name=Y700 控制中心
+Exec=/usr/local/bin/y700-control-center
+Icon=preferences-system
+NoDisplay=true
+== /usr/local/share/applications/y700-shellbar.desktop
+Type=Application
+Name=Y700 状态栏与 dock
+Exec=/usr/local/bin/y700-shellbar
+Icon=preferences-desktop
+NoDisplay=true
+== /var/lib/flatpak/exports/share/applications/cn.xfangfang.wiliwili.desktop
+Name=wiliwili
+Exec=/usr/bin/flatpak run --branch=stable --arch=aarch64 --command=wiliwili cn.xfangfang.wiliwili
+Icon=cn.xfangfang.wiliwili
+Type=Application
+== /var/lib/flatpak/exports/share/applications/org.telegram.desktop.desktop
+Name=Telegram
+Exec=/usr/bin/flatpak run --branch=stable --arch=aarch64 --command=Telegram --file-forwarding org.telegram.desktop -- @@u %U @@
+Icon=org.telegram.desktop
+StartupWMClass=TelegramDesktop
+Type=Application
+== /home/user/.local/share/applications/Sample Drone Demo.desktop
+Name=Sample Drone Demo
+Exec=steam steam://rungameid/4242431
+Icon=steam_icon_4242431
+Type=Application
+== /home/user/.local/share/applications/chatgpt.desktop
+Name=ChatGPT
+Exec=chatgpt --ozone-platform=wayland --enable-wayland-ime --wayland-text-input-version=3 %U
+Icon=chatgpt
+Type=Application
+== /home/user/.local/share/applications/cn.xfangfang.wiliwili.desktop
+Name=wiliwili
+Exec=/usr/local/bin/wiliwili
+Icon=cn.xfangfang.wiliwili
+Type=Application
+== /home/user/.local/share/applications/com.anthropic.Claude.desktop
+Name=Claude
+Exec=claude-desktop %U
+Icon=claude-desktop
+Type=Application
+StartupWMClass=com.anthropic.Claude
+== /home/user/.local/share/applications/com.google.Chrome.desktop
+Name=Google Chrome
+Exec=env MESA_LOADER_DRIVER_OVERRIDE=zink /usr/bin/google-chrome-stable --ozone-platform=wayland --enable-wayland-ime --wayland-text-input-version=3 --enable-features=WebRtcPipeWireCamera,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,VaapiIgnoreDriverChecks,PlatformHEVCDecoderSupport,WaylandExternalBeginFrameSource --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+StartupWMClass=google-chrome
+Icon=google-chrome
+Type=Application
+NoDisplay=true
+== /home/user/.local/share/applications/dev.f-io.livi.desktop
+Type=Application
+Name=CarPlay
+Exec=/usr/local/bin/y700-carplay
+Icon=/opt/livi-10.0.0/livi.png
+StartupWMClass=dev.f-io.livi
+== /home/user/.local/share/applications/google-chrome.desktop
+Name=Google Chrome
+Exec=env MESA_LOADER_DRIVER_OVERRIDE=zink /usr/bin/google-chrome-stable --ozone-platform=wayland --enable-wayland-ime --wayland-text-input-version=3 --enable-features=WebRtcPipeWireCamera,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecoder,AcceleratedVideoEncoder,VaapiVideoDecoder,VaapiVideoEncodeAccelerator,VaapiIgnoreDriverChecks,PlatformHEVCDecoderSupport,WaylandExternalBeginFrameSource --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+StartupWMClass=google-chrome
+Icon=google-chrome
+Type=Application
+== /home/user/.local/share/applications/steam-arm64.desktop
+Type=Application
+Name=Steam
+Exec=/home/user/.local/bin/steam-arm64 %U
+Icon=steam-arm64
+StartupWMClass=steam
+== /home/user/.local/share/applications/y700-battery.desktop
+Type=Application
+Name=电池
+Exec=/usr/local/bin/y700-battery
+Icon=battery
+== /home/user/.local/share/applications/示例游戏(Sample).desktop
+Name=示例游戏(Sample)
+Exec=steam steam://rungameid/4242421
+Icon=steam_icon_4242421
+Type=Application

@@ -28,6 +28,8 @@ OWNER_CHG_ULOG, TYPE_REQ_RESP, GET_CHG_ULOG = 32778, 1, 0x18
 ULOG_SIZE = 8192
 USB = "/sys/class/power_supply/qcom-battmgr-usb/"
 BAT = "/sys/class/power_supply/qcom-battmgr-bat/"
+WLS = "/sys/class/power_supply/qcom-battmgr-wls/"
+DPMS = "/sys/class/drm/card1-DSI-1/dpms"
 
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 20
 INT = float(os.environ.get("INT", 1))
@@ -50,9 +52,13 @@ def num(p, scale):
 
 
 def state():
+    # the firmware runs the side port as its second ("wireless") input (10-18 log: wls_in=1, set_wls_icl), so wls may
+    # be where a side-port charger shows (not verified yet); dpms for the screen on/off split
     return (f"usb {num(USB + 'voltage_now', 1e6):.2f}V {num(USB + 'current_now', 1e6):.2f}A "
             f"vmax {rd(USB + 'voltage_max')} imax {rd(USB + 'current_max')} type {rd(USB + 'usb_type')} | "
-            f"bat {rd(BAT + 'capacity')}% {num(BAT + 'current_now', 1e6):+.2f}A {num(BAT + 'temp', 10):.1f}C")
+            f"wls {num(WLS + 'voltage_now', 1e6):.2f}V {num(WLS + 'current_now', 1e6):.2f}A | "
+            f"bat {rd(BAT + 'capacity')}% {num(BAT + 'current_now', 1e6):+.2f}A {num(BAT + 'voltage_now', 1e6):.3f}V "
+            f"{num(BAT + 'temp', 10):.1f}C | dpms {rd(DPMS)}")
 
 
 if not os.path.isdir(SYSDEV):

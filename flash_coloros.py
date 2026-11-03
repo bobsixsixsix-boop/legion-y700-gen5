@@ -5,7 +5,8 @@ Stages (run in this order; each one logs to flash-logs/):
   plan     no device: check files, print every edl command that would run
   probe    read-only: storage info + all six GPTs (primary and backup) saved to flash-logs/<ts>/gpt/
   backup   read-only: device-unique partitions + current efisp -> flash-logs/<ts>/backup/
-  flash    WRITES: qfil with flash_lun{0..5}.xml + patch{0..5}.xml  (needs --efisp package|keep and --yes)
+  flash    WRITES: qfil with flash_lun{0..5}.xml + patch{0..5}.xml  (needs --efisp package|keep, --yes and a
+           backup run newer than the last flash run)
   verify   read-only: read back written partitions, compare sha256; kept slot-B partitions unchanged
            since the backup (boot_b = Android boot); parse the new LUN0 GPT
   setslot  WRITES GPT attributes: make slot _a active (only if the tablet does not boot on its own)
@@ -39,7 +40,7 @@ VERIFY = ["xbl_a", "abl_a", "boot_a", "init_boot_a", "vendor_boot_a", "vbmeta_a"
 # Android boot image the Linux side switches to (= the package's boot_a.img, README "boot_b").
 KEEP = ["abl_b", "boot_b"]
 KEEP_EXPECT = {"boot_b": "boot_a.img"}
-from prep_pkg import REQUIRED            # same list the package was prepared against
+from prep_pkg import REQUIRED, DEVICE_STATE   # same lists the package was prepared against
 
 
 def verify_items(efisp, with_super):
@@ -56,6 +57,13 @@ def verify_items(efisp, with_super):
 
 def ts():
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def latest(stage, sub=""):
+    """Newest flash-logs/<ts>-<stage> run that has the folder <sub> (names start with ts(), so they sort by time)."""
+    runs = sorted(r for r in os.listdir(LOGROOT) if r.endswith("-" + stage)
+                  and os.path.isdir(os.path.join(LOGROOT, r, sub))) if os.path.isdir(LOGROOT) else []
+    return runs[-1] if runs else None
 
 
 class Run:
@@ -171,14 +179,18 @@ def check_patched(stop):
 
 def check_flash_set(raw):
     """The flash XMLs must carry every REQUIRED label with an existing, non-empty file of the declared size
-    (the package is a dump: non-sparse files are exactly num_partition_sectors x 4096). Independent of
-    prep_pkg.py: a stale or hand-edited list fails here, not on the tablet."""
+    (the package is a dump: non-sparse files are exactly num_partition_sectors x 4096), and must not write
+    prep_pkg.DEVICE_STATE (another device's calibration/identity cannot be undone) or slot B (kept: the way
+    back to Android). Independent of prep_pkg.py: a stale or hand-edited list fails here, not on the tablet."""
     import xml.etree.ElementTree as ET
     seen, problems = set(), []
     for x in raw:
         for p in ET.parse(os.path.join(IMG, x)).getroot().iter("program"):
             lab, fn = p.get("label"), p.get("filename")
             if not fn:
+                continue
+            if lab in DEVICE_STATE or lab.endswith("_b"):
+                problems.append(f"{x}:{lab}: must never be written ({'device-unique state' if lab in DEVICE_STATE else 'slot B is kept'})")
                 continue
             f = os.path.join(IMG, fn)
             if not os.path.exists(f):
@@ -263,6 +275,11 @@ def stage_flash(a):
     problems = check_flash_set(raw)
     if problems:
         sys.exit("flash set incomplete, nothing written:\n  " + "\n  ".join(problems))
+    # the backup is the only copy of the device-unique partitions and what verify compares slot B with: one from
+    # before an earlier flash (flash-logs/20261011-*-backup) says nothing about the tablet now (10-31 audit A5)
+    b, f = latest("backup", "backup"), latest("flash")
+    if not b or (f and b[:15] < f[:15]):
+        sys.exit(f"no backup since the last flash ({f or 'none'}), nothing written: run the backup stage first")
     r = Run("flash", False)
     rc, text = r.edl("qfil", ",".join(raw), ",".join(patch), IMG, check=False)
     errs = [l for l in text.splitlines() if "error" in l.lower() or "failed" in l.lower()]
@@ -281,16 +298,23 @@ def stage_verify(a):
     if absent:
         # the flash XMLs are built by prep_pkg.py; a label missing there means it was never written
         print("NOT IN FLASH XMLS (never written):", ", ".join(absent))
-    written_keep = sorted(set(KEEP) & {p for p, _, _ in items})
+    # every label the flash XMLs write, not just items: verify_items keeps only VERIFY labels, so a KEEP label there
+    # could never show up (README R03 says it fails verify; 10-31 review)
+    import xml.etree.ElementTree as ET
+    listed = {p.get("label") for x in xmls(a.efisp or "package")[0]
+              for p in ET.parse(os.path.join(IMG, x)).getroot().iter("program") if p.get("filename")}
+    written_keep = sorted(set(KEEP) & listed)
     if written_keep:
         print("KEEP labels found in the flash XMLs (they must never be written):", ", ".join(written_keep))
     bad = len(absent) + len(written_keep)
     # kept partitions: unchanged since the backup, and boot_b still the Android boot image
-    backups = sorted(b for b in os.listdir(LOGROOT) if b.endswith("-backup") and os.path.isdir(os.path.join(LOGROOT, b, "backup"))) if os.path.isdir(LOGROOT) else []
-    bdir = os.path.join(LOGROOT, backups[-1], "backup") if backups else None
+    b = latest("backup", "backup")
+    bdir = os.path.join(LOGROOT, b, "backup") if b else None
     for part in KEEP:
         out = os.path.join(d, part + ".img")
-        r.edl("r", part, out, "--lun=0")
+        # no --lun, like the backup stage: abl_b/boot_b live on LUN4, and edl given --lun=N searches only LUN N
+        # ("Couldn't detect partition", exit 1 -> the whole verify stopped here; 10-31 audit, test-flash-verify.py)
+        r.edl("r", part, out)
         got = sha(out)
         ref = os.path.join(bdir, part + ".img") if bdir else None
         if ref and os.path.exists(ref):

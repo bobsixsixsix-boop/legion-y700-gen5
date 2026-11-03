@@ -14,7 +14,8 @@
 #  5 (2026-10-21, informational) the keyboard up for Kate, then the cards by the shortcut and closed again:
 #    prints what the keyboard does (designed: stays behind the cards, still up for Kate afterwards)
 # No arguments: all cases. Cases 1 and 3 need Telegram open on the left half (they tap at fixed
-# coordinates); 2, 4 and 5 tap nothing: `gate-special.sh 2 4 5` is safe next to the owner's windows.
+# coordinates; case 1's search field is Telegram 7.3's, with the window at 10,10 780x900 like
+# gate-matrix.sh places it, 2026-10-30); 2, 4 and 5 tap nothing: `gate-special.sh 2 4 5` is safe next to the owner's windows.
 # Run as root on the tablet; case 1 needs y700-vtouch running. Moves the screen: tell the owner first.
 K=/usr/local/libexec
 U=(sudo -u user env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus)
@@ -49,7 +50,7 @@ fi
 if want 1; then
 echo "== 1 long press on Telegram's search field while the keyboard is up in Kate"
 vt "tap 1102 285 80"; sleep 1.2; echo "   keyboard after tapping Kate's editor: $(st)"
-vt "down 190 55"; sleep 0.55; echo "   550 ms into the press on Telegram: $(st)  (want true: no slide-out)"
+vt "down 316 96"; sleep 0.55; echo "   550 ms into the press on Telegram: $(st)  (want true: no slide-out)"
 vt "up"; sleep 0.8; echo "   after the lift: $(st)  (want true: v2-show)"; gatelog 3
 fi
 

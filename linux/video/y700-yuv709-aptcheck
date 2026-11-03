@@ -17,7 +17,10 @@
 #   - 26.0.x, the "not Chrome" test passes (nv12m works, pass-through is fine) but a Chrome one fails: the shim does not
 #     do what it should on this Mesa, so its line is taken out of /etc/ld.so.preload (install-yuv709-shim.sh
 #     --uninstall; new Chrome processes start without it, BT.601), owner notified. Undo: fix, rerun the installer.
-#   - anything else (nv12m itself does not work, gcc missing, ...): cannot tell, nothing changed, owner notified.
+#   - the new library breaks a system program once it is in /etc/ld.so.preload (installer exit 4): the installer has
+#     already taken its line out again; logged, owner notified (10-31 audit: this used to be reported as "nothing changed").
+#   - anything else (nv12m itself does not work, gcc missing, the new library fails the LD_PRELOAD try on system
+#     programs, ...): cannot tell, nothing changed (the installer tries before it replaces), owner notified.
 # Cheap when nothing changed (one dpkg-query and a readlink against a stamp). Never fails the apt run: always exits 0.
 # --force checks even if the stamp matches; --stamp only records the current versions (the installer, after its tests).
 # For tests: Y700_YUV_DRYRUN=1 (no uninstall, no notification, no stamp), Y700_YUV_INSTALLER / Y700_YUV_STAMP /
@@ -65,6 +68,11 @@ if [ $rc -eq 5 ] && echo "$out" | grep -q '^ok   not Chrome'; then
 	else bash "$INSTALLER" --uninstall 2>&1 | while IFS= read -r l; do log "  $l"; done; fi
 	log "the shim does not behave on this Mesa (nv12m itself works): taken out of $PRE, Chrome processes started from now on run without it (BT.601). Re-check the layout (README), fix yuv709-shim.c, rerun the installer"
 	notify "Chrome 视频颜色垫片已摘掉" "新版 Mesa 下垫片自测不过，为免改错参数已从 ld.so.preload 摘掉（之后启动的 Chrome 回到 BT.601）。journalctl -t y700-yuv709 看详情。"
+	stamp; exit 0
+fi
+if [ $rc -eq 4 ]; then
+	log "the rebuilt shim made a system program fail once in $PRE: the installer took its line out again, Chrome processes started from now on run without it (BT.601). See the FAIL lines above, fix, rerun the installer"
+	notify "Chrome 视频颜色垫片已摘掉" "新版 Mesa 下重装的垫片让系统程序出错，安装脚本已把它从 ld.so.preload 摘掉（之后启动的 Chrome 回到 BT.601）。journalctl -t y700-yuv709 看详情。"
 	stamp; exit 0
 fi
 log "installer exit $rc, cannot tell whether the shim still fits (nothing changed): $(echo "$out" | tail -n 3 | tr '\n' ' ')"

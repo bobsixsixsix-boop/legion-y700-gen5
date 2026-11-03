@@ -1,0 +1,20 @@
+[package]
+name = "y700-kmsg-watch"
+version = "0.1.0"
+edition = "2021"
+description = "y700: start the Wi-Fi / display watchdogs when the kernel logs their error line"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (.cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/display/autobright. libc only: poll(2) and CLOCK_MONOTONIC are all the
+# standard library lacks.
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-kmsg-watch"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

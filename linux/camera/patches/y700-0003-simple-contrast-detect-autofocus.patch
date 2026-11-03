@@ -1,0 +1,336 @@
+Description: pipeline: simple: add contrast-detect autofocus
+ AfMode (manual, auto, continuous), AfTrigger and AfState for sensors with
+ a focus lens: a coarse scan of the lens range in ten steps, then a fine
+ scan around the best coarse position, driven by the FocusFoM of the
+ software ISP statistics. Continuous mode rescans when the FoM drops below
+ 65% of the locked value for three measurements.
+ .
+ Patch 3/4 of the libcamera autofocus series of iceland-mainline
+ 990a0597, a cherry-pick of commit
+ 1b79c8179ad9d1842c4fbb38ec8ba1e87d7d35e7. Regenerated against
+ 0.7.0-1ubuntu2 so that it applies without fuzz; the added code is
+ unchanged.
+Author: Osilvfe <64585305+Osilvfe@users.noreply.github.com>
+Origin: other, https://github.com/mzakamin-hub/iceland-mainline/blob/990a0597cab555bcdadb90d39f1d241198de07de/packaging/libcamera/0003-pipeline-simple-add-contrast-detect-autofocus.patch
+Forwarded: no
+Last-Update: 2026-10-28
+---
+ src/libcamera/pipeline/simple/simple.cpp | 241 +++++++++++++++++++++--
+ 1 file changed, 221 insertions(+), 20 deletions(-)
+
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 6932abf..74a9c07 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include <algorithm>
+ #include <iterator>
++#include <limits>
+ #include <list>
+ #include <map>
+ #include <memory>
+@@ -293,6 +294,8 @@ public:
+ 			 Transform transform = Transform::Identity);
+ 	void imageBufferReady(FrameBuffer *buffer);
+ 	void clearIncompleteRequests();
++	int handleFocusControls(Request *request);
++	void updateAutoFocus(Request *request, const ControlList &metadata);
+ 
+ 	unsigned int streamIndex(const Stream *stream) const
+ 	{
+@@ -344,6 +347,8 @@ public:
+ 	std::unique_ptr<CameraSensor> sensor_;
+ 	CameraLens *focusLens_;
+ 	int32_t focusPosition_;
++	int32_t focusMinimum_;
++	int32_t focusMaximum_;
+ 	V4L2VideoDevice *video_;
+ 	V4L2Subdevice *frameStartEmitter_;
+ 
+@@ -365,6 +370,30 @@ public:
+ 	SimpleFrames frameInfo_;
+ 
+ private:
++	enum class AfScanStage {
++		Idle,
++		Coarse,
++		Fine,
++	};
++
++	int moveFocus(int32_t position);
++	int startAutoFocus();
++	void cancelAutoFocus();
++	void advanceAutoFocus(int32_t focusFoM);
++	void writeFocusMetadata(Request *request);
++
++	int32_t afMode_;
++	int32_t afState_;
++	AfScanStage afScanStage_;
++	int32_t afScanPosition_;
++	int32_t afScanEnd_;
++	int32_t afScanStep_;
++	int32_t afCoarseStep_;
++	int32_t afBestPosition_;
++	int32_t afBestFoM_;
++	int32_t afLockedFoM_;
++	unsigned int afLowFocusFrames_;
++
+ 	void tryPipeline(unsigned int code, const Size &size);
+ 	static std::vector<const MediaPad *> routedSourcePads(MediaPad *sink);
+ 
+@@ -473,7 +502,12 @@ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+ 				   unsigned int numStreams,
+ 				   MediaEntity *sensor)
+ 	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr),
+-	  focusLens_(nullptr), focusPosition_(0)
++	  focusLens_(nullptr), focusPosition_(0), focusMinimum_(0),
++	  focusMaximum_(0), afMode_(controls::AfModeManual),
++	  afState_(controls::AfStateIdle), afScanStage_(AfScanStage::Idle),
++	  afScanPosition_(0), afScanEnd_(0), afScanStep_(0), afCoarseStep_(0),
++	  afBestPosition_(0), afBestFoM_(std::numeric_limits<int32_t>::min()),
++	  afLockedFoM_(0), afLowFocusFrames_(0)
+ {
+ 	/*
+ 	 * Find the shortest path from the camera sensor to a video capture
+@@ -683,16 +717,23 @@ int SimpleCameraData::init()
+ 			ControlInfoMap::Map controlsMap(controlInfo_.begin(),
+ 							 controlInfo_.end());
+ 			const ControlValue manual(controls::AfModeManual);
++			const ControlValue triggerStart(controls::AfTriggerStart);
+ 			const ControlValue idle(controls::AfStateIdle);
+ 
+ 			controlsMap.emplace(&controls::AfMode,
+-					    ControlInfo(manual, manual, manual));
++					    ControlInfo(controls::AfModeValues,
++							manual));
++			controlsMap.emplace(&controls::AfTrigger,
++					    ControlInfo(controls::AfTriggerValues,
++							triggerStart));
+ 			controlsMap.emplace(&controls::AfState,
+-					    ControlInfo(idle, idle, idle));
++					    ControlInfo(controls::AfStateValues, idle));
+ 			controlsMap.emplace(&controls::draft::FocusAbsolute,
+ 					    focus->second);
+ 			controlInfo_ = ControlInfoMap(std::move(controlsMap),
+ 						  controls::controls);
++			focusMinimum_ = focus->second.min().get<int32_t>();
++			focusMaximum_ = focus->second.max().get<int32_t>();
+ 			focusPosition_ = focus->second.def().get<int32_t>();
+ 		}
+ 	}
+@@ -714,6 +755,179 @@ int SimpleCameraData::init()
+ 	return 0;
+ }
+ 
++int SimpleCameraData::moveFocus(int32_t position)
++{
++	position = std::clamp(position, focusMinimum_, focusMaximum_);
++	int ret = focusLens_->setFocusPosition(position);
++	if (ret < 0) {
++		LOG(SimplePipeline, Error)
++			<< "Failed to move focus lens to " << position << ": " << ret;
++		return ret;
++	}
++
++	focusPosition_ = position;
++	return 0;
++}
++
++int SimpleCameraData::startAutoFocus()
++{
++	afCoarseStep_ = std::max(1, (focusMaximum_ - focusMinimum_ + 9) / 10);
++	afScanStage_ = AfScanStage::Coarse;
++	afScanPosition_ = focusMinimum_;
++	afScanEnd_ = focusMaximum_;
++	afScanStep_ = afCoarseStep_;
++	afBestPosition_ = focusPosition_;
++	afBestFoM_ = std::numeric_limits<int32_t>::min();
++	afLowFocusFrames_ = 0;
++
++	int ret = moveFocus(afScanPosition_);
++	if (ret < 0) {
++		afScanStage_ = AfScanStage::Idle;
++		afState_ = controls::AfStateFailed;
++		return ret;
++	}
++
++	afState_ = controls::AfStateScanning;
++	return 0;
++}
++
++void SimpleCameraData::cancelAutoFocus()
++{
++	afScanStage_ = AfScanStage::Idle;
++	afState_ = controls::AfStateIdle;
++	afLowFocusFrames_ = 0;
++}
++
++void SimpleCameraData::advanceAutoFocus(int32_t focusFoM)
++{
++	if (afScanStage_ == AfScanStage::Idle) {
++		if (afMode_ != controls::AfModeContinuous ||
++		    afState_ != controls::AfStateFocused || afLockedFoM_ <= 0)
++			return;
++
++		if (static_cast<int64_t>(focusFoM) * 100 <
++		    static_cast<int64_t>(afLockedFoM_) * 65)
++			afLowFocusFrames_++;
++		else {
++			afLowFocusFrames_ = 0;
++			afLockedFoM_ = std::max(afLockedFoM_, focusFoM);
++		}
++
++		if (afLowFocusFrames_ >= 3)
++			startAutoFocus();
++		return;
++	}
++
++	if (focusFoM > afBestFoM_) {
++		afBestFoM_ = focusFoM;
++		afBestPosition_ = afScanPosition_;
++	}
++
++	if (afScanPosition_ < afScanEnd_) {
++		afScanPosition_ = std::min(afScanEnd_,
++					   afScanPosition_ + afScanStep_);
++		if (moveFocus(afScanPosition_) < 0) {
++			afScanStage_ = AfScanStage::Idle;
++			afState_ = controls::AfStateFailed;
++		}
++		return;
++	}
++
++	if (afScanStage_ == AfScanStage::Coarse) {
++		const int32_t coarseBest = afBestPosition_;
++		afScanStage_ = AfScanStage::Fine;
++		afScanPosition_ = std::max(focusMinimum_,
++					   coarseBest - afCoarseStep_);
++		afScanEnd_ = std::min(focusMaximum_,
++				      coarseBest + afCoarseStep_);
++		afScanStep_ = std::max(1, afCoarseStep_ / 4);
++		afBestFoM_ = std::numeric_limits<int32_t>::min();
++		afBestPosition_ = coarseBest;
++		if (moveFocus(afScanPosition_) < 0) {
++			afScanStage_ = AfScanStage::Idle;
++			afState_ = controls::AfStateFailed;
++		}
++		return;
++	}
++
++	afScanStage_ = AfScanStage::Idle;
++	afLockedFoM_ = std::max(0, afBestFoM_);
++	if (moveFocus(afBestPosition_) < 0) {
++		afState_ = controls::AfStateFailed;
++		return;
++	}
++
++	afState_ = afLockedFoM_ > 0 ? controls::AfStateFocused
++					    : controls::AfStateFailed;
++	LOG(SimplePipeline, Info)
++		<< "Autofocus selected native position " << afBestPosition_
++		<< " with FoM " << afLockedFoM_;
++}
++
++void SimpleCameraData::writeFocusMetadata(Request *request)
++{
++	ControlList &metadata = request->_d()->metadata();
++	metadata.set(controls::AfMode, afMode_);
++	metadata.set(controls::AfState, afState_);
++	metadata.set(controls::draft::FocusAbsolute, focusPosition_);
++}
++
++int SimpleCameraData::handleFocusControls(Request *request)
++{
++	if (!focusLens_)
++		return 0;
++
++	const auto &mode = request->controls().get(controls::AfMode);
++	if (mode && *mode != afMode_) {
++		afMode_ = *mode;
++		cancelAutoFocus();
++		if (afMode_ == controls::AfModeContinuous) {
++			int ret = startAutoFocus();
++			if (ret < 0)
++				return ret;
++		}
++	}
++
++	const auto &trigger = request->controls().get(controls::AfTrigger);
++	if (trigger && afMode_ == controls::AfModeAuto) {
++		if (*trigger == controls::AfTriggerStart &&
++		    afState_ != controls::AfStateScanning) {
++			int ret = startAutoFocus();
++			if (ret < 0)
++				return ret;
++		} else if (*trigger == controls::AfTriggerCancel) {
++			cancelAutoFocus();
++		}
++	}
++
++	const auto &position =
++		request->controls().get(controls::draft::FocusAbsolute);
++	if (position && afMode_ == controls::AfModeManual) {
++		int ret = moveFocus(*position);
++		if (ret < 0)
++			return ret;
++	}
++
++	writeFocusMetadata(request);
++	return 0;
++}
++
++void SimpleCameraData::updateAutoFocus(Request *request,
++				       const ControlList &metadata)
++{
++	const int32_t framePosition =
++		request->_d()->metadata()
++			.get(controls::draft::FocusAbsolute)
++			.value_or(focusPosition_);
++	const auto &focusFoM = metadata.get(controls::FocusFoM);
++	if (focusFoM && afMode_ != controls::AfModeManual)
++		advanceAutoFocus(*focusFoM);
++
++	writeFocusMetadata(request);
++	request->_d()->metadata().set(controls::draft::FocusAbsolute,
++				    framePosition);
++}
++
+ /*
+  * Generate a list of supported pipeline configurations for a sensor media bus
+  * code and size.
+@@ -1070,6 +1284,7 @@ void SimpleCameraData::metadataReady(uint32_t frame, const ControlList &metadata
+ 		return;
+ 
+ 	info->request->_d()->metadata().merge(metadata);
++	updateAutoFocus(info->request, metadata);
+ 	info->metadataProcessed = true;
+ 	tryCompleteRequest(info->request);
+ }
+@@ -1760,23 +1975,9 @@ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+ 	SimpleCameraData *data = cameraData(camera);
+ 	int ret;
+ 
+-	if (data->focusLens_) {
+-		const auto &position =
+-			request->controls().get(controls::draft::FocusAbsolute);
+-		if (position) {
+-			ret = data->focusLens_->setFocusPosition(*position);
+-			if (ret < 0)
+-				return ret;
+-
+-			data->focusPosition_ = *position;
+-		}
+-
+-		ControlList &metadata = request->_d()->metadata();
+-		metadata.set(controls::AfMode, controls::AfModeManual);
+-		metadata.set(controls::AfState, controls::AfStateIdle);
+-		metadata.set(controls::draft::FocusAbsolute,
+-			     data->focusPosition_);
+-	}
++	ret = data->handleFocusControls(request);
++	if (ret < 0)
++		return ret;
+ 
+ 	std::map<const Stream *, FrameBuffer *> buffers;
+ 	bool metadataRequired = false;

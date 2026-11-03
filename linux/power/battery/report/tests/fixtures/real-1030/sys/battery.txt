@@ -1,0 +1,10 @@
+status=Discharging
+capacity=76
+charge_full=8394000
+charge_full_design=9000000
+cycle_count=18
+charge_control_end_threshold=100
+/sys/class/power_supply/qcom-battmgr-usb/online=0
+/sys/class/power_supply/qcom-battmgr-wls/online=0
+/sys/class/power_supply/ucsi-source-psy-pmic_glink.ucsi.01/online=0
+/sys/class/power_supply/ucsi-source-psy-pmic_glink.ucsi.02/online=0

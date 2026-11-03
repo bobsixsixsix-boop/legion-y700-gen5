@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=电池
+Comment=电量曲线、谁用了电
+Exec=/usr/local/bin/y700-battery
+Icon=battery
+Terminal=false
+Categories=Settings;HardwareSettings;

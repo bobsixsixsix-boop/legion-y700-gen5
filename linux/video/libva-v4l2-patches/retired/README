@@ -1,0 +1,23 @@
+Retired local patches of the VA-API driver (radxa-pkg/qcom-va-driver, formerly libva-v4l2). libva-v4l2-update.sh
+applies only ../*.patch; nothing in this directory is applied by anything.
+
+0001-decoder-do-not-gray-a-hidden-VP9-frame-on-its-Iris-no-show-buffer.patch   (retired 10-28)
+  What it did: on a kernel with the error-timestamp patch (radxa 0004 = our 1051, y14) Iris returns the hidden half
+  of a VP9 superframe as an empty ERROR capture buffer carrying the picture's timestamp; upstream's pump() grayed the
+  picture on it ("replaced damaged picture") and discarded the real one. 0001 recognised that NOSHOW buffer and
+  kept waiting for the picture. Installed on y14 as 2de1857 = upstream 6d03c3f + 0001 (10-23; upstream re-committed
+  6d03c3f as 3dd2926 on 10-24 with the same files).
+  Why retired: upstream fixed the cause in the kernel instead. radxa 0005 (our 1052, y15) recycles the NOSHOW
+  buffer, so it never reaches userspace as an error; qcom-va-driver v1.1.x (35eff37) relies on that and has no
+  userspace fallback. On a y15 (recycle mode) kernel 0001 is not needed, and it is harmless there.
+  It does not apply after upstream a6cc17b (AV1 Main decoding rewrote Decoder::pump): git apply --check passes on
+  3dd2926 and fails on a6cc17b and on 35eff37 (checked 10-28 on Win11 against archive extracts).
+  Still the fix for: y14 (errts mode) with a driver from before a6cc17b - 6d03c3f / 3dd2926 + 0001 is the build to
+  go back to there. Put it back into /root/libva-v4l2-patches/ only together with such a commit; with v1.1.x on y14
+  every hidden VP9 frame is gray (vp9-hidden-check 7 of 7, 10-28) and libva-v4l2-update.sh's GUARD refuses the
+  build without a local patch.
+  On the tablet (it was installed there as /root/libva-v4l2-patches/0001-*.patch): move it aside before the first
+  v1.1.x run, into the same layout as here, so it stays at hand for such a y14 rollback build:
+    cd /root/libva-v4l2-patches && mkdir -p retired && mv 0001-*.patch retired/
+  libva-v4l2-update.sh applies only *.patch directly in that directory; if 0001 is still there it refuses before
+  master moves, on a recycle kernel or for a commit from a6cc17b on (printing the same mv).

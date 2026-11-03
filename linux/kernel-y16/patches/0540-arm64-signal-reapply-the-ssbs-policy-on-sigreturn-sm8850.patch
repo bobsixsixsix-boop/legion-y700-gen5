@@ -1,0 +1,89 @@
+From ad19d3c24daf809fd4f3f6ff2ac93896dc22079a Mon Sep 17 00:00:00 2001
+From: Armada <noreply@armada.local>
+Date: Thu, 22 Oct 2026 14:48:04 +0000
+Subject: [PATCH] arm64: signal: reapply the SSBS policy on sigreturn
+
+rt_sigreturn takes PSTATE.SSBS from the signal frame. Wine's arm64 signal
+code writes a Windows CONTEXT.Cpsr into that frame, and contexts built from
+x64 flags or from a longjmp never carry the bit, so the thread resumes with
+speculative store bypass disabled and every thread it creates inherits
+that. Qualcomm Oryon cores slow down considerably in that state.
+
+On native rt_sigreturn, reapply the task's effective Spectre-v4 policy
+instead of the frame's bit. Enabled on Oryon by default (y700: also SM8850's part 0x002); ssbd_sigreturn= on
+the command line forces it on or off.
+
+Originally from: armada-os/armada (patch 0540)
+y700 patch file: 0540-arm64-signal-reapply-the-ssbs-policy-on-sigreturn-sm8850.patch
+---
+ arch/arm64/kernel/signal.c | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/arch/arm64/kernel/signal.c b/arch/arm64/kernel/signal.c
+index 6a06a4e35..628da04c4 100644
+--- a/arch/arm64/kernel/signal.c
++++ b/arch/arm64/kernel/signal.c
+@@ -22,6 +22,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/pkeys.h>
+ 
++#include <asm/cputype.h>
+ #include <asm/daifflags.h>
+ #include <asm/debug-monitors.h>
+ #include <asm/elf.h>
+@@ -34,6 +35,7 @@
+ #include <asm/ptrace.h>
+ #include <asm/syscall.h>
+ #include <asm/signal32.h>
++#include <asm/spectre.h>
+ #include <asm/traps.h>
+ #include <asm/vdso.h>
+ 
+@@ -1016,6 +1018,35 @@ static int parse_user_sigframe(struct user_ctxs *user,
+ 	return -EINVAL;
+ }
+ 
++/* Wine returns through signal frames that lack PSTATE.SSBS. */
++static int ssbd_sigreturn __ro_after_init = -1;
++
++static int __init parse_ssbd_sigreturn(char *str)
++{
++	bool val;
++
++	if (kstrtobool(str, &val))
++		return -EINVAL;
++	ssbd_sigreturn = val;
++	return 0;
++}
++early_param("ssbd_sigreturn", parse_ssbd_sigreturn);
++
++static int __init ssbd_sigreturn_init(void)
++{
++	static const struct midr_range oryon[] = {
++		MIDR_ALL_VERSIONS(MIDR_QCOM_ORYON_X1),
++		/* y700: SM8850 (TB323FU) Oryon reports implementer 0x51 part 0x002 */
++		MIDR_ALL_VERSIONS(MIDR_CPU_MODEL(ARM_CPU_IMP_QCOM, 0x002)),
++		{}
++	};
++
++	if (ssbd_sigreturn < 0)
++		ssbd_sigreturn = is_midr_in_range_list(oryon);
++	return 0;
++}
++arch_initcall(ssbd_sigreturn_init);
++
+ static int restore_sigframe(struct pt_regs *regs,
+ 			    struct rt_sigframe __user *sf,
+ 			    struct user_access_state *ua_state)
+@@ -1043,6 +1074,8 @@ static int restore_sigframe(struct pt_regs *regs,
+ 	fpsimd_save_and_flush_current_state();
+ 
+ 	err |= !valid_user_regs(&regs->user_regs, current);
++	if (err == 0 && ssbd_sigreturn > 0)
++		spectre_v4_enable_task_mitigation(current);
+ 	if (err == 0)
+ 		err = parse_user_sigframe(&user, sf);
+ 
+-- 
+2.53.0
+

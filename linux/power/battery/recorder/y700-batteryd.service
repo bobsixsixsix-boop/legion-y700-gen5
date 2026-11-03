@@ -1,0 +1,30 @@
+# y700-batteryd: the battery page's resident recorder (linux/power/battery/DESIGN.md section 1), a user unit of
+# user installed by linux/power/battery/install.sh to ~/.config/systemd/user/. Ledger: ~/.local/state/y700-battery/.
+[Unit]
+Description=y700: battery page recorder (cgroup CPU, clusters, GPU, wake-ups, flightrec energy -> ~/.local/state/y700-battery)
+# not tied to the graphical session: it records with the screen off and through a session restart
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/y700-batteryd
+Slice=background.slice
+# lowest CPU and I/O priority; RSS is ~3 MB, the cap only stops a leak
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+Nice=10
+MemoryMax=64M
+# one kept-open cpu.stat fd per tracked cgroup (~120 here)
+LimitNOFILE=4096
+# lets the kernel fold the 300 s / 1800 s poll timeout into another wake-up
+TimerSlackNSec=10s
+# 评审修订: RestartSec=30 alone never meets systemd's default limit (5 starts in 10 s), so a lasting fault would start it
+# every 30 s all night; the steps stretch the delay to 1 h. A second instance (the lock is held) exits 0: no restart.
+Restart=on-failure
+RestartSec=30
+RestartSteps=5
+RestartMaxDelaySec=1h
+# TERM: one last snapshot + fdatasync
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

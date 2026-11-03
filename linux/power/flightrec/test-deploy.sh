@@ -7,6 +7,10 @@
 #   second  Rust over Rust: y700-flightrec.py is a symlink to the good binary; a bad build must leave the good binary
 #           (the old deploy.sh backed up the binary through the symlink and restored the bad one)
 #   good    a good build over the good one is installed and kept
+#   busy    a CX knob is on: `bash deploy.sh src` started in its dir changes nothing (busy-wait) and queues a retry;
+#           the retry, run from / like the transient unit 30 min later, installs the good build (busy-retry; the old
+#           deploy.sh queued the relative "deploy.sh" and "src", which bash cannot find from /: exit 127, nothing
+#           deployed, the deploy log stuck at "retrying in 30 min" - 10-19 audit B6)
 H=$(cd "$(dirname "$0")" && pwd)
 D=${1:-$H/deploy.sh}
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -22,7 +26,13 @@ case "$1" in
 esac
 exit 0
 EOF
-printf '#!/bin/sh\nexit 0\n' >"$T/bin/systemd-run"; printf '#!/bin/sh\nexit 0\n' >"$T/bin/sleep"
+# the retry timer: keeps the command it would run 30 min later (busy runs it from /, a system unit's working dir)
+cat >"$T/bin/systemd-run" <<'EOF'
+#!/bin/bash
+while [ $# -gt 0 ]; do case $1 in --unit) shift 2 ;; -*) shift ;; *) break ;; esac; done
+printf '%s\n' "$@" >"$Y700_FR_ROOT/queued"
+EOF
+printf '#!/bin/sh\nexit 0\n' >"$T/bin/sleep"
 chmod +x "$T"/bin/*
 # $1 = name; good recorders write HEADER/MODE/sample and answer --once, the bad one writes nothing and fails --once
 recorder() {
@@ -59,4 +69,9 @@ run() { Y700_FR_ROOT=$T/r PATH="$T/bin:$PATH" bash "$D" "$T/src" >/dev/null 2>&1
 setup first;  recorder rust-bad bad >"$T/src/y700-flightrec"; chmod +x "$T/src/y700-flightrec"; run; check first python
 setup second; recorder rust-bad bad >"$T/src/y700-flightrec"; chmod +x "$T/src/y700-flightrec"; run; check second rust-v1
 setup second; recorder rust-v2 good >"$T/src/y700-flightrec"; chmod +x "$T/src/y700-flightrec"; run; check good rust-v2
+setup second; recorder rust-v2 good >"$T/src/y700-flightrec"; chmod +x "$T/src/y700-flightrec"
+K=$T/r/sys/module/cpuidle_psci_domain/parameters/allow_cluster_off; echo Y >"$K"; cp "$D" "$T/deploy.sh"
+(cd "$T" && Y700_FR_ROOT=$T/r PATH="$T/bin:$PATH" bash deploy.sh src >/dev/null 2>&1); check busy-wait rust-v1
+rm "$K"; q=(); [ -e "$T/r/queued" ] && mapfile -t q <"$T/r/queued"
+(cd / && Y700_FR_ROOT=$T/r PATH="$T/bin:$PATH" "${q[@]}" >/dev/null 2>&1); check busy-retry rust-v2
 [ $fails = 0 ] && echo "ALL PASS" || { echo "$fails FAILED"; exit 1; }

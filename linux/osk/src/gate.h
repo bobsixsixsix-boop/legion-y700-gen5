@@ -28,10 +28,12 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
 #include <QStringList>
+#include <functional>
 
 class QTimer;
 
@@ -63,9 +65,31 @@ public:
     void lost();                              // the effect went silent where it always speaks
     void ensureLoaded();
 
+    // For X11 clients (Steam), which have no text-input: Osk decides from fcitx5's Show/Hide and the
+    // last touch ANYWHERE - the tap rules above skip "exe|" windows, and Steam is one ("steam|": no
+    // desktop file), like this keyboard and the panels.
+    struct Touch {
+        QString win, wid;
+        qint64 downAt = -100000, upAt = -100000;   // m_clock ms; upAt < downAt: the finger is still down
+        bool tap = false;                     // one finger, short, small travel, not a frame, screen on
+        bool down() const { return upAt < downAt; }
+    };
+    Touch lastTouch() const { return m_recent.isEmpty() ? Touch() : m_recent.last(); }
+    // the touch behind something that happened at t (m_clock ms): the last one pressed before it
+    Touch touchBefore(qint64 t) const;
+    qint64 now() const { return m_clock.elapsed(); }
+    // 1: a window KWin manages (an app's toplevel or dialog), 0: not (layer-shell: this keyboard, panels,
+    // the control centre, the dock), -1: KWin has not answered yet. Asked on the first touch of a window.
+    int managed(const QString &wid) const { return wid.isEmpty() ? 0 : m_managed.value(wid, -1); }
+    // asks KWin now: is that window still there and not minimized? (done runs in ctx's thread, later)
+    void stillThere(const QString &wid, QObject *ctx, const std::function<void(bool)> &done);
+    // the DPMS files screenOff() reads, under drmDir (/sys/class/drm; tests/gate-dpms-test.cpp)
+    static QStringList panelDpms(const QString &drmDir);
+
 signals:
     void showWanted(const QString &reason);
     void aliveChanged(bool alive);
+    void touchEnded();                        // a finger lifted anywhere (a single tap: it is lastTouch())
 
 private slots:
     void onEvent(const QString &json);
@@ -75,7 +99,9 @@ private:
     struct Down {
         QString win, wid;
         QPointF pos;
-        bool ignore = false;                  // keyboard / panel / frame / multi-finger / screen off
+        qint64 at = 0;                        // m_clock ms at the press
+        bool hard = false;                    // frame / multi-finger / screen off / no window: never a tap
+        bool ignore = false;                  // hard, or keyboard / panel ("exe|", also X11 apps like Steam)
         bool activated = false;               // the text-input focus moved during this touch
         bool showHere = false;                // a v1/v2 show request from this window during the touch
         bool v3EnabledHere = false;           // a client enable (not KWin's focus re-send) in this window
@@ -89,6 +115,7 @@ private:
         qint64 at = 0;                        // m_clock ms at the lift
     };
     void setAlive(bool a);
+    void lookUp(const QString &win, const QString &wid);
     void want(const QString &wid, const QString &reason);
     bool near(const QPointF &p, const QRectF &cursor) const;
     bool screenOff() const;
@@ -96,6 +123,8 @@ private:
 
     QHash<int, Down> m_down;
     Tap m_tap;
+    QList<Touch> m_recent;                    // the last few touches anywhere, oldest first
+    QHash<QString, int> m_managed;            // wid -> managed(): 1 / 0 / -1 asking
     QString m_textWid, m_confirmedWid;
     bool m_alive = false;
     bool m_checking = false;                  // an isEffectLoaded/loadEffect round trip is in flight

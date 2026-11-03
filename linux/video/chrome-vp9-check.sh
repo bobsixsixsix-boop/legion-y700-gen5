@@ -1,7 +1,16 @@
 #!/bin/bash
-# chrome-vp9-check.sh: VP9 hidden frames through Chrome's own VA-API path (libva-v4l2 + local patch 0001), ROOT on the
-# tablet, 2026-10-23. Run detached:  systemd-run --unit=y700-vp9chrome --collect -p StandardOutput=file:/root/X.log \
+# chrome-vp9-check.sh: VP9 hidden frames (and with CODEC=vp9,av1 an 8-bit AV1 Main clip too) through Chrome's own VA-API
+# path (the VA-API driver: qcom-va-driver, formerly libva-v4l2; 10-23 with local patch 0001), ROOT on the tablet,
+# 2026-10-23. Run detached:  systemd-run --unit=y700-vp9chrome --collect -p StandardOutput=file:/root/X.log \
 #   bash /root/chrome-vp9-check.sh     (not a y700-cx-* unit name: cx-auto would take it for an experiment and disarm)
+#   Environment goes in as -E VAR=value (systemd-run does not pass the caller's), e.g. -E CODEC=vp9,av1.
+# CODEC=vp9 (default), av1 or vp9,av1: which clips the webcodecs and video parts use. av1 = /root/iris-restart/
+# av1-main-8bit.ivf (vaapi-check.sh makes it once the driver lists VAProfileAV1Profile0): 1080p30, 90 frames, libaom
+# with lookahead - hidden frames and show_existing ones like the VP9 -sef clips; its hidden / show_existing frames are
+# read with FFmpeg's trace_headers (av1-main-8bit.frames next to the clips). The same evidence as for VP9: a platform
+# decoder, frame count, no gray frame, content against FFmpeg's (libdav1d) and Chrome's software (dav1d) decode, the
+# Y-plane exact check, paused seeks to show_existing frames, and the trace (no "replaced" / "discarding" / sync
+# timeout; one hidden VA picture per hidden frame).
 # YT_URL=<watch page> picks the YouTube video (default below), YT_URL= (empty) skips the YouTube part. ONLY=webcodecs
 # (or video, youtube, a comma list) runs only those parts. CHROME_EXTRA="<flags>" adds Chrome flags, for diagnosis only
 # (e.g. --disable-accelerated-video-decode for a software <video>: the checks still expect hardware and FAIL).
@@ -21,8 +30,9 @@
 #   to Chrome's stderr, which this sorts by test part). No sound (no PipeWire in that runtime dir). Chrome's own
 #   background traffic is switched off (--disable-background-networking and friends; Chrome may still look things up
 #   now and then), the clips come from a local http.server; only the YouTube part loads pages from the internet. The
-#   Y700 video-state extension comes in through /usr/share/google-chrome/extensions (a local CRX; no-av1.js: YouTube
-#   serves VP9, not AV1); its native host is not in the throwaway profile, so the panel's refresh rate is not touched.
+#   Y700 video-state extension comes in through /usr/share/google-chrome/extensions (a local CRX; no-av1.js decides
+#   whether YouTube serves VP9 or AV1, see youtube below); its native host is not in the throwaway profile, so the
+#   panel's refresh rate is not touched.
 #   Refuses to start while a power experiment / measurement unit (cx-auto's list) or a Chrome video power run is up.
 # Parts (chrome-vp9-check.py does them over DevTools):
 #   webcodecs  vp9-p0 / -sef / vp9-p2-10bit / -sef (IVF) decoded with WebCodecs twice, prefer-software (libvpx, the
@@ -35,7 +45,10 @@
 #              BT.709 (fitted 10-23: 0.3 mean / 1 max; every other 601/709 x limited/full combination leaves >= 3). So
 #              the hardware frame holds libvpx's bytes. The BT.601 is Chrome's EGL hint; with yuv709-shim.c preloaded
 #              (CHROME_ENV) the YUV -> RGB step is BT.709, so a BT.709 -> RGB -> BT.709 model is accepted too (the line
-#              counts the frames each one explained). A 10-bit hardware frame is opaque to copyTo, so 10-bit relies
+#              counts the frames each one explained). A sample whose model RGB left 0..255 (out-of-gamut YUV at a
+#              sharp coloured edge, clipped) may differ by 2 (10-29: 3 such samples in the 90 AV1 frames, while the
+#              bitstream Iris got from Chrome was byte for byte FFmpeg's, bit-exact against dav1d; README "视频硬解"
+#              10-29). A 10-bit hardware frame is opaque to copyTo, so 10-bit relies
 #              on the thumbnails: the per-frame difference (<= 6) only catches gray; a wrong picture that is not gray
 #              (a hidden frame, a neighbour, a stale surface) is caught by the nearest-frame test: each hardware
 #              thumbnail must be no farther (+0.5) from its own software frame than from the 2 on each side (testsrc2
@@ -55,15 +68,25 @@
 #              shows hardware-decoded video with the BT.601 matrix (its EGL hint, README "视频硬解": Chrome 硬解画面按
 #              BT.601 上色); with yuv709-shim.c 2.1 / 4.8, BT.709 like the software path (1.9 / 4.6).
 #   youtube    a YouTube page (muted, 25 s, then 3 seeks of 8 s): decoder, served codec, gray frames, trace counts.
+#   AV1 (CODEC=...av1): webcodecs and video as above on av1-main-8bit (IVF / WebM remux; WebCodecs codec av01.0.08M.08,
+#              software = Chrome's dav1d; the <video> seeks go to up to 8 of the clip's show_existing frames, 30 in
+#              the Win11-made clip of 10-28).
 # PASS needs, per part: a platform (hardware) decoder; decoded tokens > 0; VP9 invisible references = the clip's hidden
-# frames (parsed from its packets; 7 per clip); no-show CAPTURE = invisible references (every wrapped hidden frame got
-# its NOSHOW buffer matched; on a kernel without iris 1051, y13 and older, no-show must be 0 instead - LIBVA_EXPECT_ERRTS
-# =0|1 overrides the guess from uname -r); 0 "replaced damaged picture", 0 "no picture after no-show", 0 "discarding
-# completed token", 0 "sync timeout"; no gray output frame; webcodecs: hardware frame count = software count, the
-# per-frame thumbnail difference <= 6, the nearest-frame test and (8-bit) the Y planes as above; video: no show_existing
-# frame unseen, the paused seeks as above (their trace: the same 4 lines 0, no-show = invisible); youtube: the gray hook drew at least half the frames decoded since it was set. Then, with Chrome gone,
-# the whole log once more (what no part's window covered, Chrome's exit included): none of those 4 lines.
-# YouTube unreachable / served AV1 = SKIP (not a FAIL); a YouTube video without hidden frames = SKIP of that claim.
+# frames (parsed from its packets; 7 per clip); no-show CAPTURE lines by the kernel's NOSHOW mode (block "NOSHOW mode"
+# below, the same in libva-v4l2-update.sh and vp9-hidden-check.sh): errts (y14, iris 1051: the NOSHOW buffer comes back
+# as an error with the frame's timestamp) = invisible references, every wrapped hidden frame got its NOSHOW buffer
+# matched by 0001; gray (y13 and older: timestamp 0) and recycle (y15 on, 1052: the kernel requeues it, userspace never
+# sees it; upstream v1.1.x relies on that) = 0. IRIS_NOSHOW_MODE=gray|errts|recycle overrides the guess from uname -r,
+# LIBVA_EXPECT_ERRTS=0|1 (the older switch) still means gray|errts. AV1: no no-show line in any mode, AV1 hidden VA
+# pictures = the clip's hidden frames. Then, all codecs: 0 "replaced damaged picture", 0 "no picture after no-show",
+# 0 "discarding completed token", 0 "sync timeout"; no gray output frame; webcodecs: hardware frame count = software
+# count, the per-frame thumbnail difference <= 6, the nearest-frame test and (8-bit) the Y planes as above; video: no
+# show_existing frame unseen, the paused seeks as above (their trace: the same 4 lines 0, no-show as above); youtube:
+# the gray hook drew at least half the frames decoded since it was set. Then, with Chrome gone, the whole log once more
+# (what no part's window covered, Chrome's exit included): none of those 4 lines.
+# YouTube unreachable / served neither VP9 nor AV1 = SKIP (not a FAIL); YouTube serves VP9 while the extension's
+# no-av1.js hides AV1 (v1.5) and 8-bit AV1 once v1.6 lets it through on a hardware decoder - both are checked, the
+# trace by the codec served; a YouTube video without hidden frames = SKIP of that claim.
 # First an INFO line: what this Chrome says it decodes (canPlayType, MSE, mediaCapabilities; powerEfficient = hardware).
 # 10-23 on y14: 45 PASS, 0 FAIL with the installed 2de1857 (6d03c3f + 0001); the negative control (6d03c3f, LIBVA_DRV
 # above) FAILs 20 checks and the whole log: gray at exactly the show_existing frames (3/16/33/48/63/78/88, p2 93) in
@@ -80,8 +103,15 @@ LAST=/root/chrome-vp9-check-last
 [ -s "$PY" ] || { echo "FAIL missing $PY"; exit 2; }
 LIBVA_DRV=${LIBVA_DRV:-}
 [ -z "$LIBVA_DRV" ] || [ -s "$LIBVA_DRV" ] || { echo "FAIL LIBVA_DRV=$LIBVA_DRV does not exist"; exit 2; }
-for f in vp9-p0.webm vp9-p0-sef.ivf vp9-p2-10bit.webm vp9-p2-10bit-sef.ivf; do
-	[ -s $D/$f ] || { echo "FAIL missing $D/$f (run /root/vaapi-check.sh once, it generates the clips)"; exit 2; }
+CODEC=${CODEC:-vp9}; AV1=av1-main-8bit
+# the rule of chrome-vp9-check.py --codec: every comma-separated item is vp9 or av1, no empty one ("vp9," fails here,
+# not after the clips are prepared)
+[[ $CODEC =~ ^(vp9|av1)(,(vp9|av1))*$ ]] || { echo "FAIL CODEC=$CODEC: a comma list of vp9, av1"; exit 2; }
+clips=()
+[[ ,$CODEC, != *,vp9,* ]] || clips+=(vp9-p0.webm vp9-p0-sef.ivf vp9-p2-10bit.webm vp9-p2-10bit-sef.ivf)
+[[ ,$CODEC, != *,av1,* ]] || clips+=($AV1.ivf)
+for f in "${clips[@]}"; do
+	[ -s $D/$f ] || { echo "FAIL missing $D/$f (run /root/vaapi-check.sh once, it generates the clips; $AV1.ivf only when the driver lists VAProfileAV1Profile0)"; exit 2; }
 done
 EXEC=$(sed -n 's/^Exec=//p' "$DESK" | head -1 | sed 's/ %[uU]$//')
 case $EXEC in *google-chrome*) ;; *) echo "FAIL no Chrome Exec= line in $DESK"; exit 2 ;; esac
@@ -104,11 +134,23 @@ for port in $P $HP; do
 	ss -ltn | awk '{print $4}' | grep -q ":$port\$" && { echo "FAIL port $port in use"; exit 2; }
 done
 
-# the kernel's NOSHOW buffer: with iris 1051 (y14 on) it carries the hidden frame's timestamp (as vp9-hidden-check.sh)
-kr=$(uname -r)
-if [ -n "${LIBVA_EXPECT_ERRTS:-}" ]; then errts=$LIBVA_EXPECT_ERRTS
-elif [[ $kr =~ -y([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -le 13 ]; then errts=0
-else errts=1; fi
+# ---- NOSHOW mode (the same block in libva-v4l2-update.sh, vp9-hidden-check.sh and chrome-vp9-check.sh)
+noshow_mode() {   # sets kr, mode (gray|errts|recycle, else unknown and returns 1) and why
+	local n
+	kr=$(uname -r); mode=; why=
+	if [ -n "${IRIS_NOSHOW_MODE:-}" ]; then mode=$IRIS_NOSHOW_MODE; why="IRIS_NOSHOW_MODE=$mode"
+	elif [ -n "${LIBVA_EXPECT_ERRTS:-}" ]; then
+		why="LIBVA_EXPECT_ERRTS=$LIBVA_EXPECT_ERRTS"
+		case $LIBVA_EXPECT_ERRTS in 0) mode=gray ;; 1) mode=errts ;; esac
+	elif [[ $kr =~ -y([0-9]+)$ ]]; then
+		n=$((10#${BASH_REMATCH[1]})); why="$kr is y$n"
+		if [ $n -le 13 ]; then mode=gray; elif [ $n -eq 14 ]; then mode=errts; else mode=recycle; fi
+	else why="$kr has no -yN suffix"; fi
+	case $mode in gray|errts|recycle) return 0 ;; esac
+	mode=unknown; return 1
+}
+noshow_mode || { echo "FAIL cannot tell the kernel's NOSHOW mode ($why): set IRIS_NOSHOW_MODE=gray|errts|recycle"; exit 2; }
+echo "      kernel NOSHOW mode: $mode ($why); codecs: $CODEC"
 
 T=$(mktemp -d /tmp/y700-cvp9-XXXXXX) && [ -d "$T" ] || { echo "FAIL mktemp"; exit 2; }
 mkdir -p "$T/run" "$T/home" "$T/kconfig" "$T/kdata" "$T/prof" "$T/www"
@@ -137,6 +179,7 @@ trap cleanup EXIT
 # 1. the clips: IVF for WebCodecs (the -sef ones are IVF already), WebM for <video> (the -sef ones remuxed: their
 #    1-byte show_existing_frame packets stay packets of their own)
 for f in vp9-p0 vp9-p2-10bit; do
+	[[ ,$CODEC, == *,vp9,* ]] || continue
 	ffmpeg -v error -nostdin -y -i $D/$f.webm -map 0:v:0 -c copy -f ivf "$T/www/$f.ivf" &&
 	cp $D/$f.webm "$T/www/$f.webm" && cp $D/$f-sef.ivf "$T/www/$f-sef.ivf" &&
 	ffmpeg -v error -nostdin -y -i $D/$f-sef.ivf -map 0:v:0 -c copy -f webm "$T/www/$f-sef.webm" ||
@@ -152,6 +195,26 @@ for f in vp9-p0 vp9-p2-10bit; do
 		done
 	done
 done
+# the AV1 clip: IVF as made, WebM remux; FFmpeg's reference thumbnails from libdav1d (FFmpeg's own av1 decoder needs a
+# hwaccel); its frames from trace_headers as vaapi-check.sh reads them: "H <n>" per hidden frame (show_frame=0), "E <k>"
+# per show_existing_frame (k = its 1-based output frame), "S <output frames>"
+if [[ ,$CODEC, == *,av1,* ]]; then
+	cp $D/$AV1.ivf "$T/www/$AV1.ivf" &&
+	ffmpeg -v error -nostdin -y -i $D/$AV1.ivf -map 0:v:0 -c copy -f webm "$T/www/$AV1.webm" ||
+		{ echo "FAIL cannot prepare the AV1 clip"; exit 1; }
+	for m in 709 601; do
+		ffmpeg -v error -nostdin -y -c:v libdav1d -i $D/$AV1.ivf -map 0:v:0 -an -fps_mode passthrough \
+			-vf scale=192:108:flags=area:in_color_matrix=bt$m:in_range=tv:out_range=pc,format=rgb24 \
+			-f rawvideo "$T/www/$AV1.ref${m/709/}.rgb" || { echo "FAIL cannot prepare the AV1 clip"; exit 1; }
+	done
+	ffmpeg -hide_banner -nostdin -i $D/$AV1.ivf -map 0:v:0 -c copy -bsf:v trace_headers -f null - 2>&1 \
+		| tr -d '\r' | awk '{for (i = 1; i < NF; i++) {
+			if ($i == "show_existing_frame" && $NF == 1) print "E", ++out
+			if ($i == "show_frame") {++sent; if ($NF == 0) print "H", sent; else ++out}}}
+			END {print "S", out + 0}' > "$T/www/$AV1.frames"
+	grep -q '^H ' "$T/www/$AV1.frames" && grep -qx 'S 90' "$T/www/$AV1.frames" \
+		|| { echo "FAIL $D/$AV1.ivf: no hidden frame or not 90 output frames in its headers ($(tr '\n' ' ' < "$T/www/$AV1.frames" | cut -c1-80))"; exit 1; }
+fi
 DRVENV=
 if [ -n "$LIBVA_DRV" ]; then
 	mkdir -p "$T/drv"; cp "$LIBVA_DRV" "$T/drv/v4l2_drv_video.so"
@@ -183,7 +246,7 @@ sudo -u $U env -i $BASE WAYLAND_DISPLAY="$SOCK" XDG_SESSION_TYPE=wayland XDG_CON
 	> "$T/chrome.log" 2>&1 &
 
 # 4. the tests
-python3 -I "$PY" --port $P --http $HP --log "$T/chrome.log" --out "$T/summary.json" --errts $errts \
+python3 -I "$PY" --port $P --http $HP --log "$T/chrome.log" --out "$T/summary.json" --mode $mode --codec "$CODEC" \
 	${YT_URL:+--youtube "$YT_URL"} ${ONLY:+--only "$ONLY"}
 rc=$?
 # which VA driver file the test Chrome really has mapped (its GPU / video processes; Chrome is still up here)
@@ -196,7 +259,7 @@ case $maps in
 esac
 # the whole trace, Chrome's exit included: the parts only see the bytes written while each ran
 stop_chrome
-all=$(grep -aoE 'decoded token=|no-show CAPTURE token=|VP9 invisible reference|replaced damaged picture|no picture after no-show|discarding completed token|sync timeout' \
+all=$(grep -aoE 'decoded token=|no-show CAPTURE token=|VP9 invisible reference|AV1 frame surface=|original-show=0|AV1 install reference|replaced damaged picture|no picture after no-show|discarding completed token|sync timeout' \
 	"$T/chrome.log" | sort | uniq -c | awk '{n = $1; $1 = ""; printf "%s%s %d", s, $0, n; s = ","}')
 echo "whole Chrome log:${all:- no libva-v4l2 trace}"
 if grep -aqE 'replaced damaged picture|no picture after no-show|discarding completed token|sync timeout' "$T/chrome.log"; then
@@ -204,6 +267,6 @@ if grep -aqE 'replaced damaged picture|no picture after no-show|discarding compl
 elif ! grep -aq 'decoded token=' "$T/chrome.log"; then
 	echo "FAIL  whole log: no libva-v4l2 trace at all (IRIS_VAAPI_DEBUG did not reach the driver?)"; rc=1
 else echo "PASS  whole log: no damaged / missing picture, no sync timeout"; fi
-echo "kernel $kr (errts $errts), installed libva-v4l2 $(cat /root/libva-v4l2.installed 2>/dev/null | head -1), installed driver sha256 $(sha256sum /usr/local/lib/aarch64-linux-gnu/dri/v4l2_drv_video.so | cut -c1-16)"
+echo "kernel $kr (NOSHOW mode $mode: $why), installed VA driver $(cat /root/libva-v4l2.installed 2>/dev/null | head -1), installed driver sha256 $(sha256sum /usr/local/lib/aarch64-linux-gnu/dri/v4l2_drv_video.so | cut -c1-16)"
 echo "Chrome $(/opt/google/chrome/chrome --version 2>/dev/null | awk '{print $3}'); logs in $LAST/"
 exit $rc

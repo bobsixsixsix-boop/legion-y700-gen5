@@ -6,7 +6,8 @@ and `run` are replaced by proxies that map "/..." paths into a temporary directo
 freshness is judged by ctime, which Windows cannot set) and answer systemctl / journalctl / dpkg from a scenario
 table. The real 03:41 crash log (linux/power/cx-collapse/crash-0341-lastkmsg.log) is the console / lastkmsg text.
     python -X utf8 -I tools/y700-checklist-selftest.py            (from the y700 repo; args: [checklist.py] [kmsg.log])
-Scenarios: warm reset after a crash, cold cut, panic record then a clean reboot, first run without checked_at,
+Scenarios: warm reset after a crash, cold cut, panic record then a clean reboot, a reset in an earlier boot since the
+last --save (10-31), first run without checked_at,
 knob left on with/without a y700-cx-exp unit, rawdump first/same/rewritten/erased/unreadable, recorder dead /
 stale / not installed, everything fine (exit 0), a check that raises (one WARN, run continues), systemd-pstore
 archived but no console/pmsg, systemctl unanswerable (fallback threshold, with and without a checked_at and after a
@@ -14,7 +15,10 @@ archived but no console/pmsg, systemctl unanswerable (fallback threshold, with a
 LIVI version baseline, the refresh-rate daemon's D-Bus status, the volume keys' kded6 wait and whether armed E3a
 actually reaches the system domain. The fake root's files are owned by root (st_uid 0) and keep Windows modes unless
 a scenario sets MODE / UID. 2026-10-16, CarPlay
-2026-10-17, refresh rate / volume keys / E3a effect 2026-10-18."""
+2026-10-17, refresh rate / volume keys / E3a effect 2026-10-18. The battery page (y700-batteryd's restarts against
+the baseline, the ledger's age and size, flightrec's energy line with torn reads, the report's diag) 2026-10-30. Kernel
+y16's SDI-disable line and the watchdog bark in a console tail 2026-11-01; kernel y17's boot-time e2fsck results per
+boot and the root's ext4 state 2026-11-01."""
 import builtins, contextlib, glob as realglob, hashlib, importlib.util, io, json, os as realos, re, shutil, struct, sys, tempfile, time, types
 
 HERE = realos.path.dirname(realos.path.abspath(__file__))
@@ -26,6 +30,7 @@ BOOT8, PREV8 = "e2b6380a", "baa113c4"
 BOOT_ID = "e2b6380a-0542-403a-a632-1b6c2be6e3a5"
 PREV_ID, CUR_ID = f"{PREV8}fe0f487ebfd5c6c625f3b791", f"{BOOT8}0542403aa6321f6b2ce6e3a5"
 KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
+LC_VER = "0.7.0-1ubuntu2+y700.1"                      # libcamera with our AF + lens patches (S30)
 CTIME, LINKS, S, MODE, UID = {}, {}, {}, {}, {}
 LIVI_SRC = realos.path.join(HERE, "..", "linux", "carplay", "livi")
 KDED6_WAIT = "/etc/systemd/user/plasma-kded6.service.d/y700-wait-tuned-sink.conf"
@@ -92,6 +97,9 @@ class OsProxy:
     def makedirs(self, p, exist_ok=False):
         realos.makedirs(tr(p), exist_ok=exist_ok)
 
+    def replace(self, a, b):
+        realos.replace(tr(a), tr(b))
+
     def uname(self):
         return types.SimpleNamespace(release=KERNEL)
 
@@ -106,11 +114,14 @@ class GlobProxy:
 
 
 FAILOPEN = {}                                         # path -> exception the next open() of it raises (S19)
+FLAKY = {}                                            # path -> the bytes successive open()s of it return (S33: torn reads)
 
 
 def fopen(p, mode="r", *a, **k):
     if p in FAILOPEN:
         raise FAILOPEN[p]
+    if FLAKY.get(p):
+        return io.BytesIO(FLAKY[p].pop(0))
     if "b" not in mode and "encoding" not in k:
         k["encoding"] = "utf-8"
     return builtins.open(tr(p), mode, *a, **k)
@@ -165,6 +176,37 @@ def fake_gpu_journal(c):
     return "\n".join(out[-int(re.search(r"\| tail -n (\d+)", c).group(1)):])
 
 
+# check_xft_dpi (10-29): the live Xwayland resource database as `xrdb -query; echo xrdb-rc=$?` prints it on 10-29 after
+# the fix, and the session env `systemctl --user show-environment` gives
+XRDB_GOOD = "*customization:\t-color\nXcursor.size:\t45\nXcursor.theme:\tbreeze_cursors\nXft.dpi:\t182\nxrdb-rc=0"
+SD_ENV = "DISPLAY=:0\nLANG=zh_CN.UTF-8\nWAYLAND_DISPLAY=wayland-0\nXAUTHORITY=/run/user/1000/xauth_qGEGkm\nXDG_SESSION_TYPE=wayland"
+
+
+# y700-battery-report --json as the checklist sees it (S33): the diag block of DESIGN.md 6b.a, everything below every
+# threshold; the rest of the document is not read by the checklist. The screen-off pair is like with like (10-30
+# review): the measured P25 of the >= 20 min screen-off segments and the model's power for the same segments, F_off
+# (147) + wakeups (~103 mW at 150/s) + a little CPU, so both near 250 mW - never F_off alone
+REPORT_DIAG = {"unexplained_median_7d": 0.08, "floor_off_learned_mw": 252.0, "floor_off_model_mw": 240.0, "coeff_age_days": 12,
+               "ledger_bytes": 2400000, "ledger_newest_age_s": 120, "energy_age_s": 4, "segments_flagged_7d": 0}
+
+
+def report_doc(coeffs=None, **diag):
+    d = dict(REPORT_DIAG)
+    d.update(diag)
+    return json.dumps({"v": 1, "now": int(NOW), "tz_offset_min": 540, "coeffs": coeffs or {"version": 2, "calibrated": True,
+                       "date": "2026-10-18", "source": "user"}, "diag": d}, ensure_ascii=False, separators=(",", ":"))
+
+
+def fake_run_rc(cmd, user=False, timeout=20):
+    """run_rc(): the report (check_battery_diag, 10-30) answers from S - stdout "report", exit status "report_rc"
+    (None = run_rc's backstop timeout), stderr "report_err" - and records who ran it, how, for how long"""
+    if "/usr/local/bin/y700-battery-report" in cmd:
+        S.setdefault("report_calls", []).append((cmd, user, timeout))
+        rc = S.get("report_rc", 0)
+        return rc, "" if rc is None else S.get("report", report_doc()), S.get("report_err", "")
+    return 0, fake_run(cmd, user, timeout), ""
+
+
 def fake_run(cmd, user=False, timeout=20):
     c = " ".join(cmd)
     if cmd[0] == "cat":
@@ -181,10 +223,22 @@ def fake_run(cmd, user=False, timeout=20):
     if c.startswith("journalctl --list-boots"):
         return (f"-1 {PREV_ID} Tue 2026-07-28 05:44:02 JST Thu 2026-10-16 03:41:05 JST\n"
                 f" 0 {CUR_ID} Tue 2026-07-28 05:44:02 JST Thu 2026-10-16 10:00:00 JST")
-    if c.startswith("journalctl -b -1 -n 300"):
-        return S.get("journal_tail", "kernel: something\nkernel: last line")
-    if c.startswith("journalctl -b -1 -n 1"):
-        return "2026-10-16T03:41:05+0900 baldur kernel: arm-scmi timed out"
+    m = re.match(r"journalctl -b (\S+) -n (300|1) ", c)
+    if m:                 # how a boot ended: S["journal_tails"] per boot id (S2x), else S["journal_tail"] (the previous boot's)
+        S.setdefault("ended_asked", []).append(m.group(1))
+        if m.group(2) == "1":
+            return "2026-10-16T03:41:05+0900 baldur kernel: arm-scmi timed out"
+        return S.get("journal_tails", {}).get(m.group(1), S.get("journal_tail", "kernel: something\nkernel: last line"))
+    if cmd[:3] == ["journalctl", "-k", "-b"] and "SDI disable: " in cmd:   # the download_mode check, y16's 1058 line (11-01)
+        S.setdefault("sdi_asked", []).append(c)
+        return S.get("sdi_log", "")
+    if cmd[:3] == ["journalctl", "-k", "-b"] and mod.FSCK_GREP in cmd:   # check_bootfsck (11-01): per boot id, "0" = this one
+        S.setdefault("fsck_asked", []).append(cmd[3])
+        return S.get("fsck_logs", {}).get(cmd[3], "")
+    if cmd[:3] == ["findmnt", "-no", "SOURCE"]:
+        return S.get("rootdev", "/dev/sda15")
+    if cmd[0] == "tune2fs":
+        return S.get("tune2fs", "Filesystem state:         clean\n")
     if c.startswith("systemctl show -a --timestamp=unix"):
         return S.get("pstore_show", "LoadState=loaded\nConditionResult=yes\nExecMainStartTimestamp=")
     if cmd[0] == "/usr/local/libexec/y700-kmsg-watch":
@@ -204,6 +258,8 @@ def fake_run(cmd, user=False, timeout=20):
     if cmd[:2] == ["systemctl", "list-units"]:
         return S.get("cx_units", "")
     if cmd[:3] == ["systemctl", "--user", "show"] and "NRestarts" in cmd:
+        return S.get("nrestarts", {}).get(cmd[-1], "0")
+    if cmd[:2] == ["systemctl", "show"] and "NRestarts" in cmd:   # system units (check_gamepad_screen, 11-03)
         return S.get("nrestarts", {}).get(cmd[-1], "0")
     if cmd[0] == "busctl" and "isScriptLoaded" in cmd and "y700-home" in cmd:
         return S.get("home_loaded", "b true")
@@ -226,6 +282,16 @@ def fake_run(cmd, user=False, timeout=20):
         return S.get("ts_edge", "y700-taskswitcher: bottom edge on")
     if cmd[0] == "sh" and "y700-taskswitcher: loaded" in c:
         return S.get("ts_build", "y700-taskswitcher: loaded 6.6.5-0ubuntu0.1+abc123")
+    if cmd[0] == "sh" and "app quit: StartUnit failed" in c:   # check_appquit (10-31): failures this boot
+        return S.get("aq_fails", "0")
+    if cmd[0] == "sh" and "-u y700-gamepad-screen" in c:   # check_gamepad_screen (11-01): failures this boot
+        return S.get("gs_fails", "0")
+    if cmd[0] == "sh" and "pulse event connection" in c:   # check_speaker_guard (11-03): its last word on the events
+        return S.get("sg_conn", "watching the default output, the speaker sinks and their streams")
+    if cmd[0] == "sh" and "-u y700-refresh-auto" in c:    # check_refresh_auto (11-03): its last word on KWin's events
+        return S.get("ra_kwin", "watching KWin screen events")
+    if cmd[0] == "sh" and "KWin screen events" in c:      # check_autobright (11-03): its last word on KWin's events
+        return S.get("ab_kwin", "watching KWin screen events")
     if cmd[0] == "sh" and "-u plasma-kded6" in c:        # y700-wait-tuned-sink's last line, from kded6's ExecStartPre
         return S.get("kded6_wait", "tuned sink is the default after 2.25 s")
     if cmd[0] == "sh" and "restarting plasma-kded6" in c:
@@ -234,8 +300,19 @@ def fake_run(cmd, user=False, timeout=20):
         return S.get("hud_fails", "0")
     if cmd[0] == "sh" and "offending task:" in c:        # gpu_hangs (10-23)
         return fake_gpu_journal(c)
+    if cmd[0] == "sh" and "dpkg --compare-versions" in c:   # check_libcamera: Ubuntu's candidate newer than ours (10-29)
+        return S.get("lc_newer", "")
     if cmd[0] == "sh":
         return "0"
+    if cmd[:2] == ["apt-mark", "showhold"]:
+        return S.get("holds", "gstreamer1.0-libcamera\nlibcamera-ipa\nlibcamera-tools\nlibcamera-v4l2\nlibcamera0.7")
+    if cmd[:4] == ["env", "LC_ALL=C", "apt-cache", "policy"]:
+        return S.get("lc_policy", f"libcamera0.7:\n  Installed: {LC_VER}\n  Candidate: {LC_VER}\n  Version table:\n")
+    if cmd[0] == "env" and cmd[-1] == "xrdb -query; echo xrdb-rc=$?":   # check_xft_dpi: the live Xwayland database (10-29)
+        S.setdefault("xrdb_calls", []).append(c)
+        return S.get("xrdb", XRDB_GOOD)
+    if cmd[:3] == ["systemctl", "--user", "show-environment"]:
+        return S.get("sd_env", SD_ENV)
     if cmd[0] == "gdbus" and "fyi.y700.RefreshAuto.status" in cmd:
         return S.get("refresh_status", refresh_status())
     if cmd[0] == "gdbus" and "org.kde.Solid.PowerManagement.PolicyAgent.HasInhibition" in cmd:
@@ -257,7 +334,8 @@ def fake_run(cmd, user=False, timeout=20):
     return ""
 
 
-mod.run = fake_run
+mod.run, mod.run_rc = fake_run, fake_run_rc
+mod.mono_s = lambda: S.get("mono", 5000.0)            # CLOCK_MONOTONIC: no clock_gettime on Windows (S33)
 
 
 def rawdump_image(kmsg, rst=b"\x01\x00\x00\x00\x40\x00\x00\x00", pon=b"\x80\x00\x00\x01" * 4):
@@ -278,10 +356,11 @@ def rawdump_image(kmsg, rst=b"\x01\x00\x00\x00\x40\x00\x00\x00", pon=b"\x80\x00\
 def base_tree(download_mode="off", aco="N", aso="N", recorder=True):
     """A tablet where every legacy check passes; the crash-forensics inputs are added per scenario."""
     shutil.rmtree(ROOT, ignore_errors=True)
-    CTIME.clear(); LINKS.clear(); S.clear(); MODE.clear(); UID.clear()
+    CTIME.clear(); LINKS.clear(); S.clear(); MODE.clear(); UID.clear(); FLAKY.clear()
     put("/proc/sys/kernel/random/boot_id", BOOT_ID + "\n")
     put("/proc/uptime", "5000.00 30000.00\n")
     put("/sys/module/qcom_scm/parameters/download_mode", download_mode + "\n")
+    put("/sys/module/printk/parameters/time", "Y\n")
     put("/sys/module/cpuidle_psci_domain/parameters/allow_cluster_off", aco + "\n")
     if aso is not None:
         put("/sys/module/cpuidle_psci_domain/parameters/allow_system_off", aso + "\n")
@@ -375,6 +454,26 @@ check("03:41 tail is 3 lines", len(tail) == 3)
 check("03:41 classified as SCMI/RPMh bus hang", any("SCMI" in w for w in why), why)
 check("03:41 classified with DPU timeout", any("DPU" in w for w in why), why)
 
+# ---- unit level: the 10-31 21:04 console (die() printed the SEA, CPU0 stopped mid-register-dump; chronic DPU/GMU noise before)
+SEA_TEXT = "\n".join(["[drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000"] +
+                     ["platform 3d6c000.gmu: delay in fenced register write (0x8c1)"] * 9 +
+                     ["Internal error: synchronous external abort: 0000000096001610 [#1]  SMP",
+                      "CPU: 0 UID: 0 PID: 0 Comm: swapper/0 Tainted: G   M       O        7.3.0-tb323fu-t52-y15 #4 PREEMPT",
+                      "pc : msm_mdss_irq+0x68/0xf0", "lr : generic_handle_domain_irq+0x48/0x78",
+                      "x11: 0000000000000000 x10: ffff0008005bfaa0 x9 : ffffad938f"])
+why = mod.classify_console(SEA_TEXT); print("classify(10-31):", why)
+check("10-31 SEA named first, before the DPU noise", why and "SEA" in why[0] and any("DPU" in w for w in why[1:]), why)
+check("10-31 MDSS irq named", any("msm" in w.lower() or "MDSS" in w for w in why), why)
+check("10-31 not called an Oops that panics", not any("oops=panic" in w for w in why), why)
+
+# ---- unit level: the 11-02 15:15 console (boot 447a621b): DPU noise, the battery firmware times out twice, then the reset
+BATT_TEXT = "\n".join(["[89301.663054] [drm:dpu_encoder_phys_vid_wait_for_commit_done:583] [dpu error]vblank timeout: 400000",
+                       "[89317.877387] power_supply qcom-battmgr-bat: driver failed to report `status' property: -110",
+                       "[89318.926843] power_supply qcom-battmgr-bat: driver failed to report `capacity' property: -110"])
+why = mod.classify_console(BATT_TEXT); print("classify(11-02):", why)
+check("11-02 battery firmware silence named first, before the DPU noise",
+      why and "电池固件" in why[0] and any("DPU" in w for w in why[1:]) and not any("SCMI" in w for w in why), why)
+
 # ---- S1 warm reset after a crash: console + pmsg archived this boot, recorder active, stale dmesg records ignored
 base_tree(); archived(this_boot=True); state()
 put(f"/var/log/y700-flightrec/flightrec-{PREV8}.log", REC_LOG, mtime=NOW - 5000)
@@ -407,6 +506,48 @@ S["journal_tail"] = "Reached target reboot.target"
 rc, out = run_main(); show("S3b no checked_at", out)
 check("S3b INFO listing, not WARN", has(out, "INFO", "历史内核 panic/oops 转储") and not has(out, "WARN", "panic/oops 转储"))
 
+# ---- S3c-e every boot since the last --save ended (10-31 audit C2): the check runs once a day and looked only at the
+# previous boot, so a reset in the boot the last --save ran in, then a clean reboot, then the daily run never told it
+SAVED_ID, MID1_ID, MID2_ID = "5afe5afe" + "2" * 24, "0ddba11a" + "1" * 24, "c0ffee00" + "3" * 24
+CLEAN_TAIL = "systemd-shutdown[1]: Syncing filesystems\nReached target reboot.target"
+
+
+def boots_json(*ids):
+    """journalctl --list-boots -o json for these boots, oldest first, the last one this boot (index 0)"""
+    return json.dumps([{"index": i + 1 - len(ids), "boot_id": b, "first_entry": int((NOW - 80 * 86400) * 1e6),
+                        "last_entry": int((NOW - (len(ids) - 1 - i) * 5000) * 1e6)} for i, b in enumerate(ids)])
+
+
+base_tree(); archived(); state(boot8=SAVED_ID[:8])
+S["boots_json"] = boots_json(SAVED_ID, MID1_ID, MID2_ID, PREV_ID, CUR_ID)
+S["journal_tail"] = CLEAN_TAIL                         # the previous boot's (and MID1's): clean
+S["journal_tails"] = {SAVED_ID: "kernel: arm-scmi timed out", MID2_ID: "kernel: something"}
+put(f"/var/log/y700-flightrec/flightrec-{SAVED_ID[:8]}.log", REC_LOG)
+rc, out = run_main(save=True); show("S3c reset in the last --save's boot and in a later one, then clean reboots", out)
+check("S3c a reset in the last --save's boot -> WARN naming it, with its recorder's last UFS line",
+      has(out, "WARN", f"开机 -4（{SAVED_ID[:8]}，上次体检以来、上一次之前的）没有正常结束") and has(out, "WARN", "UFS 份最后一行 at=03:41:02"),
+      [l for l in out if "开机" in l])
+check("S3c a reset in a later boot without a recorder log -> its own WARN, no UFS part",
+      any(l.startswith("WARN") and f"开机 -2（{MID2_ID[:8]}" in l and "UFS" not in l for l in out))
+check("S3c the clean ones -> one OK for the earlier clean boot, the previous boot's own OK; exit 10",
+      has(out, "OK", "上一次之前的 1 次开机都是正常关机/重启的") and has(out, "OK", "上一次开机是正常关机/重启的") and rc == 10)
+check("S3c each boot asked once by its id, oldest first", list(dict.fromkeys(S["ended_asked"])) == [SAVED_ID, MID1_ID, MID2_ID, PREV_ID],
+      S["ended_asked"])
+saved = json.loads(builtins.open(tr(mod.STATE), encoding="utf-8").read())
+S["ended_asked"] = []
+rc, out = run_main()
+check("S3d the next run in the same boot (the --save above) -> no boot reported again",
+      saved.get("boot8") == BOOT8 and saved.get("prev_boot") == PREV_ID and not S["ended_asked"]
+      and not any("没有正常结束" in l or "正常关机/重启" in l for l in out), (saved.get("boot8"), S["ended_asked"]))
+base_tree(); archived(); state(boot8="0badf00d")
+S["boots_json"] = boots_json(MID2_ID, PREV_ID, CUR_ID)
+S["journal_tail"] = CLEAN_TAIL
+S["journal_tails"] = {MID2_ID: "kernel: something"}
+rc, out = run_main()
+check("S3e the last --save's boot no longer in journald's list -> the previous boot only, as before",
+      list(dict.fromkeys(S.get("ended_asked", []))) == [PREV_ID] and has(out, "OK", "上一次开机是正常关机/重启的")
+      and not has(out, "WARN", "没有正常结束"), S.get("ended_asked"))
+
 # ---- S4 knob left on without a unit / with a unit / no y10 knob
 base_tree(aco="Y"); archived(); state(prev_boot=PREV_ID)
 S["journal_tail"] = "Reached target reboot.target"
@@ -418,6 +559,10 @@ check("S4b INFO experiment running, no WARN", has(out, "INFO", "CX 实验 y700-c
 base_tree(aco="N", aso=None); archived(); state(prev_boot=PREV_ID)
 rc, out = run_main()
 check("S4c no y10 knob -> OK with 无", has(out, "OK", "allow_system_off=无"))
+check("S4d printk time on -> OK", has(out, "OK", "内核日志带时间戳"))
+put("/sys/module/printk/parameters/time", "N\n")
+rc, out = run_main()
+check("S4e printk time off (initramfs default) -> WARN, exit 10", has(out, "WARN", "内核日志没有时间戳") and rc == 10, rc)
 
 # ---- S5 rawdump: first seen -> INFO + baseline; same -> OK; rewritten -> WARN with tail + regs; erased; unreadable
 base_tree(); archived(); state(prev_boot=PREV_ID)
@@ -515,6 +660,12 @@ put("/etc/systemd/system/y700-wifi-watchdog.timer.d/y700-safety.conf", "[Timer]\
 rc, out = run_main()
 check("S11f enabled with the 15-min safety drop-in -> OK", has(out, "OK", "安全网") and rc == 0,
       [l for l in out if l.startswith(("WARN", "CHANGED"))])
+put("/usr/local/libexec/y700-kmsg-watch", "\x7fELF\x02\x01\x01")
+rc, out = run_main()
+check("S11g the Rust binary -> no rollback WARN", not has(out, "WARN", "Python 版") and rc == 0, out)
+put("/usr/local/libexec/y700-kmsg-watch", "#!/usr/bin/python3\n")
+rc, out = run_main()
+check("S11h the Python version back -> WARN", has(out, "WARN", "y700-kmsg-watch 跑的是 Python 版") and rc == 10, out)
 base_tree(); archived(); state(prev_boot=PREV_ID)
 rc, out = run_main()
 check("S11e not installed: the timers are still checked", has(out, "OK", "y700-wifi-watchdog.timer active"))
@@ -568,6 +719,76 @@ out = ts(ts_build="")
 check("S12m no loaded line -> WARN", has(out, "WARN", "没有记录"))
 out = ts(kread={"navigationPanelEnabled": ""})
 check("S12n plasmamobilerc nav panel not off -> WARN", has(out, "WARN", "navigationPanelEnabled"))
+# ---- S12aq1-5 a swiped-away card quits its app (taskswitcher/appquit.py, 10-31): WARN only, silent when all is well
+AQ = {"/home/user/.local/share/kwin/effects/y700-taskswitcher/contents/ui/AppQuit.qml": "QtObject {}\n",
+      "/usr/local/libexec/y700-appquit": "#!/usr/bin/env python3\n",
+      "/home/user/.config/systemd/user/y700-appquit@.service": "[Service]\n"}
+out = ts()
+check("S12aq1 effect without AppQuit.qml (older build) -> no line", not any("划走卡片" in l for l in out), out)
+out = ts(files=AQ)
+check("S12aq2 all installed, no failures -> no line", not any("划走卡片" in l for l in out), out)
+out = ts(files={k: v for k, v in AQ.items() if "libexec" not in k})
+check("S12aq3 script missing -> WARN", has(out, "WARN", "/usr/local/libexec/y700-appquit 不在"), out)
+out = ts(files=AQ, aq_fails="2")
+check("S12aq4 two failures this boot -> WARN", has(out, "WARN", "失败了 2 次"), out)
+out = ts(files=AQ, aq_fails="ERROR timed out")
+check("S12aq5 the journal read fails -> no line", not any("划走卡片" in l for l in out), out)
+# ---- S12gs1-6 the G9 screen-off service (linux/gamepad/screen, 11-01; Rust 11-03): WARN when its error line loops,
+# when it restarts itself (a panic) and when the Python version is back
+GS = {"/usr/local/libexec/y700-gamepad-screen": b"\x7fELF\x02\x01\x01" + b"\0" * 57}
+out = ts(gs_fails="4008")
+check("S12gs1 not installed -> no line", not any("G9 息屏" in l for l in out), out)
+out = ts(files=GS)
+check("S12gs2 installed, no failures -> no line", not any("G9 息屏" in l for l in out), out)
+out = ts(files=GS, gs_fails="4008")
+check("S12gs3 4008 failures this boot (11-01 before the fix) -> WARN", has(out, "WARN", "报错 4008 次"), out)
+out = ts(files=GS, gs_fails="ERROR timed out")
+check("S12gs4 the journal read fails -> no line", not any("G9 息屏" in l for l in out), out)
+out = ts(files=GS, nrestarts={"y700-gamepad-screen": "6"})
+check("S12gs5 6 automatic restarts -> WARN", has(out, "WARN", "自动重启了 6 次"), out)
+out = ts(files={"/usr/local/libexec/y700-gamepad-screen": "#!/usr/bin/python3\n"})
+check("S12gs6 the Python version back -> WARN", has(out, "WARN", "不是编译好的 Rust 程序"), out)
+# ---- S12sg1-8 the speaker guard (Rust 11-03): WARN when the bash version is back, when it restarts itself (a panic) and
+# when its last word on pipewire-pulse's events is a lost or missing connection (it then checks every 2 s)
+SG = {"/usr/local/libexec/y700-speaker-guard": b"\x7fELF\x02\x01\x01" + b"\0" * 57}
+LOST = "pulse event connection lost (failed to fill whole buffer); checking every 2 s until it is back"
+out = ts(sg_conn=LOST, nrestarts={"y700-speaker-guard.service": "9"})
+check("S12sg1 not installed -> no line", not any("扬声器守护" in l for l in out), out)
+out = ts(files=SG)
+check("S12sg2 started, connected -> no line", not any("扬声器守护" in l for l in out), out)
+out = ts(files=SG, sg_conn=LOST)
+check("S12sg3 the event connection lost and not back -> WARN", has(out, "WARN", "扬声器守护收不到 pipewire-pulse 的事件"), out)
+out = ts(files=SG, sg_conn="no pulse event connection (No such file or directory (os error 2)); checking every 2 s until there is one")
+check("S12sg4 never connected -> WARN", has(out, "WARN", "正每 2 秒查一次"), out)
+out = ts(files=SG, sg_conn="pulse event connection back")
+check("S12sg5 lost and back again -> no line", not any("扬声器守护" in l for l in out), out)
+out = ts(files=SG, nrestarts={"y700-speaker-guard.service": "6"})
+check("S12sg6 6 automatic restarts -> WARN", has(out, "WARN", "扬声器守护自动重启了 6 次"), out)
+out = ts(files={"/usr/local/libexec/y700-speaker-guard": "#!/bin/bash\n"})
+check("S12sg7 the bash version back -> WARN", has(out, "WARN", "扬声器守护") and has(out, "WARN", "不是编译好的 Rust 程序"), out)
+out = ts(files=SG, sg_conn="ERROR timed out")
+check("S12sg8 the journal read fails -> no line", not any("扬声器守护" in l for l in out), out)
+# ---- S12ab1-8 automatic brightness (Rust 11-03): WARN when it is on but not running, when the Python version is back,
+# when it restarts itself (a panic) and when its last word on KWin's screen events is the sysfs fallback
+AB_UNIT = "/home/user/.config/systemd/user/y700-autobright.service"
+AB = {AB_UNIT: "[Service]\nExecStart=/usr/local/libexec/y700-autobright\n"}
+AB_ON = {"sleep.target": "masked", "y700-autobright.service": "enabled", "y700-flightrec": ""}
+out = ts(files=AB)
+check("S12ab1 switched off -> no line", not any("自动亮度" in l for l in out), out)
+out = ts(files=AB, enabled=AB_ON)
+check("S12ab2 on, running, KWin events -> OK", has(out, "OK", "自动亮度在跑"), out)
+out = ts(files=AB, enabled=AB_ON, active={"y700-autobright.service": "activating"})
+check("S12ab3 on but not running -> WARN", has(out, "WARN", "自动亮度开着但服务是 activating"), out)
+out = ts(files={AB_UNIT: "[Service]\nExecStart=/usr/bin/python3 %h/.local/bin/y700-autobright\n"}, enabled=AB_ON)
+check("S12ab4 the Python version back -> WARN", has(out, "WARN", "自动亮度跑的是 Python 版"), out)
+out = ts(files=AB, enabled=AB_ON, nrestarts={"y700-autobright.service": "6"})
+check("S12ab5 6 automatic restarts -> WARN", has(out, "WARN", "自动亮度自动重启了 6 次"), out)
+out = ts(files=AB, enabled=AB_ON, ab_kwin="no KWin screen events (the compositor closed the connection); checking the screen every second")
+check("S12ab6 KWin's events lost and not back -> WARN", has(out, "WARN", "自动亮度收不到 KWin 的熄屏事件"), out)
+out = ts(files=AB, enabled=AB_ON, ab_kwin="KWin screen events back")
+check("S12ab7 lost and back again -> OK", has(out, "OK", "自动亮度在跑") and not has(out, "WARN", "自动亮度"), out)
+out = ts(files=AB, enabled=AB_ON, ab_kwin="ERROR timed out")
+check("S12ab8 the journal read fails -> OK", has(out, "OK", "自动亮度在跑"), out)
 
 # ---- S21a-d the control centre's gestures (10-21): pull-down strip unit, y700-edge (back key), fake_input desktop file
 CC_UNIT = "/home/user/.config/systemd/user/y700-cc-pull.service"
@@ -723,7 +944,13 @@ check("S12s keyboard binary replaced, old one running -> WARN says y700-osk-ctl 
       and has(out, "WARN", "y700-osk-ctl restart"), out)
 out = stale_exe("/usr/libexec/tb323fu-helperd")
 check("S12t another replaced binary -> WARN without the keyboard hint", has(out, "WARN", "旧二进制")
-      and not has(out, "WARN", "y700-osk-ctl"), out)
+      and not has(out, "WARN", "y700-osk-ctl") and not has(out, "WARN", "别单独重启"), out)
+out = stale_exe("/usr/lib/systemd/systemd-logind")
+check("S12t3 logind left on the old binary (postinst never restarts it) -> WARN says wait for a reboot",
+      has(out, "WARN", "systemd-logind 别单独重启") and has(out, "WARN", "等下次整机重启"), out)
+out = stale_exe("/usr/bin/wireplumber")
+check("S12t4 wireplumber on the old binary -> WARN says don't restart it alone (pro-audio)",
+      has(out, "WARN", "wireplumber 别单独重启") and has(out, "WARN", "pro-audio"), out)
 out = stale_exe("/usr/local/bin/y700-shellbar")
 check("S12t2 shellbar built (install.sh --no-start) but the old one still up -> WARN says systemctl --user restart",
       has(out, "WARN", "旧二进制") and has(out, "WARN", "systemctl --user restart y700-shellbar") and not has(out, "WARN", "y700-osk-ctl"), out)
@@ -1119,7 +1346,19 @@ check("S15d a video holding 60 Hz -> OK", has(out, "OK", "视频要 60 Hz") and 
 base_tree(); archived(); state(prev_boot=PREV_ID); S["active"]["y700-refresh-auto.service"] = "failed"
 rc, out = run_main()
 check("S15e unit failed -> WARN, status not read", has(out, "WARN", "刷新率跟随视频的守护是 failed") and not has(out, "WARN", "D-Bus"))
-
+# Rust since 11-03: the Python version back, a panic's restarts, KWin's screen events lost -> WARN (status still read)
+RA_UNIT = "/home/user/.config/systemd/user/y700-refresh-auto.service"
+RA = {RA_UNIT: "[Service]\nExecStart=/usr/local/libexec/y700-refresh-auto\n"}
+out = ts(files=RA)
+check("S15f Rust, KWin events -> OK only", has(out, "OK", "刷新率守护在跑") and not has(out, "WARN", "刷新率"), out)
+out = ts(files={RA_UNIT: "[Service]\nExecStart=/usr/bin/python3 %h/.local/bin/y700-refresh-auto\n"})
+check("S15g the Python version back -> WARN", has(out, "WARN", "刷新率守护跑的是 Python 版") and has(out, "OK", "刷新率守护在跑"), out)
+out = ts(files=RA, nrestarts={"y700-refresh-auto.service": "6"})
+check("S15h 6 automatic restarts -> WARN", has(out, "WARN", "刷新率守护自动重启了 6 次"), out)
+out = ts(files=RA, ra_kwin="no KWin screen events (the compositor closed the connection); checking the screen every second while below the base")
+check("S15i KWin's events lost and not back -> WARN", has(out, "WARN", "刷新率守护收不到 KWin 的熄屏事件"), out)
+out = ts(files=RA, ra_kwin="KWin screen events back")
+check("S15j lost and back again -> no WARN", not has(out, "WARN", "刷新率"), out)
 # ---- S16 volume keys (linux/audio): kded6 must have waited for the Lenovo tuning sink; no drop-in, a timed-out or
 # missing wait, or the guard having had to restart kded6 -> WARN; the owner's own default kept -> OK
 rc, out = fine()
@@ -1455,6 +1694,18 @@ check("S27c failed user units -> WARN naming both", has(out, "WARN", "用户 app
 rc, out = fine(failed_user="ERROR timed out after 20 seconds")
 check("S27d user scope unanswerable -> INFO, not WARN, not OK",
       has(out, "INFO", "查不了用户的失败服务") and not has(out, "WARN", "失败的服务") and not has(out, "OK", "没有失败的"))
+# 11-03: the two that WARNed were KDE app launches (a pairing wizard that exits 1 on success, a shortcut pressed too fast)
+LAUNCH = "app-%s@%s.service loaded failed failed x"
+apps_failed = "\n".join([LAUNCH % ("bluedevil\\x2dwizard", "296d9d1b42104c94ad369b517f20118d")]
+                        + [LAUNCH % ("kbd\\x2dbattery\\x2dnotify", f"{i:032x}") for i in range(12)])
+rc, out = fine(failed_user=apps_failed)
+check("S27e only KDE app launches failed -> one INFO per app with counts, OK, no WARN, exit 0",
+      has(out, "INFO", "bluedevil-wizard ×1、kbd-battery-notify ×12") and has(out, "OK", "没有失败的系统或用户服务")
+      and not has(out, "WARN", "失败的服务") and rc == 0)
+rc, out = fine(failed_user=apps_failed + "\nbar.service loaded failed failed bar")
+check("S27f an app launch next to a real failed unit -> the real one still WARNs, the launch stays INFO",
+      has(out, "WARN", "有失败的服务：用户 bar.service") and not has(out, "WARN", "bluedevil")
+      and has(out, "INFO", "bluedevil-wizard ×1") and rc == 10)
 
 # ---- S28 GPU hangs across boots since the last --save (10-23: the daily run was stuck from 10-20 and the 10-19 hangs, in
 # an earlier boot, were never reported by the this-boot-only check). The kernel lines are the 10-19 ones (y12), shortened.
@@ -1497,6 +1748,21 @@ check("S28c hangs before checked_at -> not reported, OK", has(out, "OK", "以来
 rc, out = gpu(CHATGPT_1019, gpu_journal="sh: 1: journalctl: not found\nrc=127")
 check("S28d journal unavailable -> INFO, neither OK nor WARN", has(out, "INFO", "查不了上次体检") and has(out, "INFO", "journalctl: not found")
       and not has(out, "OK", "GPU 没有卡死") and not has(out, "WARN", "GPU 卡死") and rc == 0, gpu_lines(out))
+# 10-31 audit C4: the --save after a failed read moved checked_at on, and the window's hangs were never seen again
+base_tree(); archived(); state(prev_boot=PREV_ID)
+S["kernel_journal"], S["gpu_journal"] = list(CHATGPT_1019), "sh: 1: journalctl: not found\nrc=127"
+run_main(save=True)
+saved = json.loads(builtins.open(tr(mod.STATE), encoding="utf-8").read())
+S.pop("gpu_journal")
+rc, out = run_main(save=True)
+check("S28d2 a failed read, --save, then a working journal -> the window still starts at the old checked_at: WARN, exit 10",
+      saved.get("gpu_since") == NOW - 86400 and saved["checked_at"] > NOW - 60 and has(out, "WARN", "GPU 卡死 4 次")
+      and has(out, "WARN", f"上次体检（{time.strftime('%m-%d %H:%M', time.localtime(NOW - 86400))}）以来") and rc == 10,
+      (saved.get("gpu_since"), gpu_lines(out)))
+saved = json.loads(builtins.open(tr(mod.STATE), encoding="utf-8").read())
+rc, out = run_main()
+check("S28d3 after a read that worked the window moves on -> no gpu_since saved, those hangs not reported again",
+      "gpu_since" not in saved and has(out, "OK", "以来 GPU 没有卡死"), (saved.get("gpu_since"), gpu_lines(out)))
 rc, out = gpu(gpu_journal="Failed to open journal directory: Permission denied\nrc=1")
 check("S28e exit 1 with an error said -> INFO (exit 1 alone is \"nothing matched\")", has(out, "INFO", "Permission denied")
       and not has(out, "OK", "GPU 没有卡死"), gpu_lines(out))
@@ -1655,8 +1921,8 @@ rc, out = nolock(PDRC_GOOD.replace("LockBeforeTurnOffDisplay=false\nTurnOffDispl
 check("S29c AC set to lock -> WARN names AC only", has(out, "WARN", "：AC 熄屏前锁屏没关（README") and rc == 10, nolock_lines(out))
 rc, out = nolock(PDRC_GOOD.replace("[Battery][Display]\nDimDisplayIdleTimeoutSec=120\n", "[Battery][Display]\nDimDisplayWhenIdle=false\n")
                  .replace("TurnOffDisplayIdleTimeoutSec=300\n", "TurnOffDisplayWhenIdle=false\n"))
-check("S29d battery dim and off disabled outright -> no timeout to pin, OK", has(out, "OK", "熄屏不锁屏：") and rc == 0,
-      f"rc={rc} {nolock_lines(out)}")
+check("S29d battery dim and off disabled outright -> WARN names both as never (11-01: the screen then stays on)",
+      has(out, "WARN", "：Battery 闲置不变暗、不熄屏（「从不」：KDE 电量页打开时会这样写）（README") and rc == 10, nolock_lines(out))
 rc, out = nolock(PDRC_GOOD.replace("TurnOffDisplayIdleTimeoutSec=300\n", ""))
 check("S29e battery off timeout missing -> WARN names that one only", has(out, "WARN", "：Battery 闲置熄屏时间没写死（平板模式下会缩短）（README")
       and rc == 10, nolock_lines(out))
@@ -1688,6 +1954,594 @@ rc, out = nolock(PDRC_GOOD.replace("LockBeforeTurnOffDisplay=false\nTurnOffDispl
                           "[Battery][Display]\nDimDisplayIdleTimeoutSec=120\nLockBeforeTurnOffDisplay="))
 check("S29l =1 and an empty value are not off -> WARN names AC and Battery", has(out, "WARN", "：AC 熄屏前锁屏没关；Battery 熄屏前锁屏没关（README")
       and rc == 10, nolock_lines(out))
+# 11-01: the file KDE's power page left on 10-30 20:12 (it saves [AC]'s "never" into all three profiles on open)
+NEVER_DISP = ("DimDisplayIdleTimeoutSec=0\nDimDisplayWhenIdle=false\nLockBeforeTurnOffDisplay=false\n"
+              "TurnOffDisplayIdleTimeoutSec=0\nTurnOffDisplayWhenIdle=false\n\n")
+rc, out = nolock("".join(f"[{p}][Display]\n{NEVER_DISP}[{p}][SuspendAndShutdown]\nAutoSuspendAction=0\nPowerButtonAction=128\n\n"
+                         for p in ("AC", "Battery", "LowBattery")))
+show("S29m the file KDE's power page wrote", out)
+check("S29m all three profiles never -> WARN names Battery and LowBattery, not AC (AC never is the plan)",
+      has(out, "WARN", "：Battery 闲置不变暗、不熄屏（「从不」：KDE 电量页打开时会这样写）；LowBattery 闲置不变暗、不熄屏（")
+      and not has(out, "WARN", "：AC ") and rc == 10, nolock_lines(out))
+rc, out = nolock(PDRC_GOOD.replace("[LowBattery][Display]\n", "[LowBattery][Display]\nTurnOffDisplayWhenIdle=false\n"))
+check("S29n low battery screen-off never, its dim pinned -> WARN names that one only",
+      has(out, "WARN", "：LowBattery 闲置不熄屏（「从不」") and not has(out, "WARN", "不变暗") and rc == 10, nolock_lines(out))
+
+# ---- S30a-k libcamera with our rear AF + lens power patches, held (10-29, linux/camera/): version, 0005's string in the
+# library, the hold, Ubuntu's candidate, and the rear lens powered while the rear sensor is not streaming
+LC_LIB = "/usr/lib/aarch64-linux-gnu/libcamera.so.0.7"
+LC_LENS, LC_REAR = "/sys/bus/i2c/devices/5-000c/power/runtime_status", "/sys/bus/i2c/devices/5-0056/power/runtime_status"
+LC_GOOD_LIB = b"\x7fELF\x02\x01\x01" + b"\0" * 32 + b"Failed to open the focus lens, autofocus disabled: " + b"\0" * 32
+LC_LISTS = "/var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_resolute-security_main_binary-arm64_Packages"
+def lc(lib=LC_GOOD_LIB, lens="suspended\n", rear="suspended\n", installed=True, ver=LC_VER, sleep_to=None, lists_days=2, **kw):
+    SLEPT.clear()
+    time.sleep = (lambda s: (SLEPT.append(s), put(LC_LENS, sleep_to))) if sleep_to else SLEPT.append
+    try:
+        base_tree(); archived(); state(prev_boot=PREV_ID)
+        for path, data in ((LC_LIB, lib), (LC_LENS, lens), (LC_REAR, rear),
+                           ("/root/libcamera-y700/install-state.txt", "libcamera0.7 0.7.0-1ubuntu2\n" if installed else None)):
+            if data is not None:
+                put(path, data)
+        if lists_days is not None:
+            put(LC_LISTS, "Package: libcamera0.7\n", mtime=NOW - lists_days * 86400)
+        S["pkgs"] = {"libcamera0.7": ver}
+        S.update(kw)
+        return run_main()
+    finally:
+        time.sleep = real_sleep
+def lc_lines(out):
+    return [l for l in out if "libcamera" in l]
+rc, out = lc()
+check("S30a our build, marked, held, no newer candidate, lens off -> OK", has(out, "OK", f"libcamera {LC_VER} 带着对焦和镜头补丁、hold 着")
+      and has(out, "OK", "（apt 列表 2 天前刷新）；镜头 suspended") and not has(out, "WARN", "libcamera") and SLEPT == [], lc_lines(out))
+rc, out = lc(lists_days=40)
+check("S30l apt lists 40 days old -> WARN (a new libcamera would not show)", has(out, "WARN", "apt 列表 40 天没刷新")
+      and not has(out, "OK", "带着对焦") and rc == 10, lc_lines(out))
+rc, out = lc(lists_days=None)
+check("S30m no apt lists -> WARN", has(out, "WARN", "apt 列表不在"), lc_lines(out))
+rc, out = lc(installed=False, ver="0.7.0-1ubuntu2")
+check("S30b never installed here (no install-state.txt) -> no libcamera line", lc_lines(out) == [], lc_lines(out))
+rc, out = lc(ver="0.7.0-1ubuntu2")
+check("S30c Ubuntu's build back -> WARN, exit 10", has(out, "WARN", "libcamera0.7 是 0.7.0-1ubuntu2，不是我们编的 +y700 版") and rc == 10,
+      lc_lines(out))
+rc, out = lc(lib=b"\x7fELF\x02\x01\x01" + b"\0" * 64)
+check("S30d library without 0005's string -> WARN", has(out, "WARN", "没有补丁 0005 的字符串") and not has(out, "OK", "带着对焦"), lc_lines(out))
+rc, out = lc(lib=None)
+check("S30e library missing -> WARN (no string)", has(out, "WARN", "没有补丁 0005 的字符串"), lc_lines(out))
+rc, out = lc(holds="libcamera-ipa\nlibcamera-tools")
+check("S30f libcamera0.7 not held -> WARN", has(out, "WARN", "libcamera0.7 没 hold") and rc == 10, lc_lines(out))
+rc, out = lc(lc_policy="libcamera0.7:\n  Installed: 0.7.0-1ubuntu2+y700.1\n  Candidate: 0.7.0-1ubuntu2.1\n", lc_newer="newer")
+check("S30g Ubuntu's 0.7.0-1ubuntu2.1 behind the hold -> WARN names it", has(out, "WARN", "Ubuntu 出了 0.7.0-1ubuntu2.1，被 hold 挡住了")
+      and rc == 10, lc_lines(out))
+rc, out = lc(lens="active\n")
+check("S30h lens powered, rear sensor idle, still after 2 s -> WARN leak", has(out, "WARN", "镜头却上着电：0005 修的漏电回来了")
+      and SLEPT == [2] and rc == 10, f"slept {SLEPT} {lc_lines(out)}")
+rc, out = lc(lens="active\n", sleep_to="suspended\n")
+check("S30i lens off again after 2 s (a CameraManager starting) -> OK", has(out, "OK", "镜头 suspended") and SLEPT == [2]
+      and not has(out, "WARN", "libcamera"), f"slept {SLEPT} {lc_lines(out)}")
+rc, out = lc(lens="active\n", rear="active\n")
+check("S30j rear camera streaming -> OK, no wait", has(out, "OK", "镜头 active（后摄正在出流）") and SLEPT == [], f"slept {SLEPT} {lc_lines(out)}")
+rc, out = lc(lens=None)
+check("S30k lens runtime_status missing -> WARN", has(out, "WARN", "读不到 /sys/bus/i2c/devices/5-000c/power/runtime_status"), lc_lines(out))
+
+# ---- S31a-p X11 apps' scale (10-29, README "Steam 字太小"): Xft.dpi in the live Xwayland database and in ~/.Xresources
+# equals int(kwinrc [Xwayland] Scale x 96); a running Steam drew at the scale its GPU log's display line says
+XRES, STEAM_GPU_LOG = "/home/user/.Xresources", "/home/user/.local/share/Steam/logs/webhelper_gpu.txt"
+def steam_log(scale):
+    return (f"[2026-10-29 19:41:02] GPU process started\n[2026-10-29 19:41:03] Display[33] bounds=[0,0 1608x1008], "
+            f"workarea=[0,28 1608x589], scale={scale}\n[2026-10-29 19:41:04] ThreadSetForceDeviceScaleFactors 1.89062 x 1\n")
+def xft(scale="1.9", xres="! y700 (10-29)\nXft.dpi: 182\n", xwayland=True, steam=None, log=None, **kw):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    S["kread"] = {"Scale": scale} if scale is not None else {}
+    S["pids"] = {k: v for k, v in (("Xwayland", "4242" if xwayland else ""), ("steam", "222707" if steam else ""))}
+    if xres is not None:
+        put(XRES, xres)
+    if log is not None or steam:
+        put(STEAM_GPU_LOG, log if log is not None else steam_log(steam))
+    S.update(kw)
+    return run_main()
+def xft_lines(out):
+    return [l for l in out if "X11 程序缩放" in l]
+rc, out = xft(steam="1.89062")
+check("S31a live db + ~/.Xresources 182, Steam at 1.89 -> OK, xrdb run with the session's DISPLAY/XAUTHORITY",
+      has(out, "OK", "X11 程序缩放：实时库和 ~/.Xresources 的 Xft.dpi 都是 182（= Xwayland 缩放 1.9 × 96），Steam 按 1.89062 倍画")
+      and not has(out, "WARN", "X11") and S["xrdb_calls"] == [
+          "env DISPLAY=:0 XAUTHORITY=/run/user/1000/xauth_qGEGkm sh -c xrdb -query; echo xrdb-rc=$?"],
+      f"{xft_lines(out)} {S.get('xrdb_calls')}")
+rc, out = xft(xrdb="*customization:\t-color\nxrdb-rc=0")
+check("S31b live db lost Xft.dpi (10-29) -> WARN names the kcminit fix, exit 10",
+      has(out, "WARN", "实时库里没有 Xft.dpi（要 182），之后打开的 Steam 会画小") and has(out, "WARN", "kcminit kcm_fonts_init kcm_style_init")
+      and rc == 10, xft_lines(out))
+rc, out = xft(xrdb=XRDB_GOOD.replace("182", "96"))
+check("S31c live db says 96 -> WARN", has(out, "WARN", "实时库里 Xft.dpi 是 96（要 182）") and rc == 10, xft_lines(out))
+rc, out = xft(xres=None)
+check("S31d no ~/.Xresources -> WARN (no backstop)", has(out, "WARN", "~/.Xresources 里没有 Xft.dpi") and rc == 10, xft_lines(out))
+rc, out = xft(xres="! y700\nXcursor.size: 45\n")
+check("S31e ~/.Xresources without the line -> WARN", has(out, "WARN", "~/.Xresources 里没有 Xft.dpi"), xft_lines(out))
+rc, out = xft(xres="Xft.dpi: 154\n")
+check("S31f ~/.Xresources 154 after a scale change -> WARN names both", has(out, "WARN", "~/.Xresources 写的 Xft.dpi 是 154，显示缩放 1.9 要 182")
+      and rc == 10, xft_lines(out))
+rc, out = xft(scale="1.75", xres="Xft.dpi: 168\n", xrdb=XRDB_GOOD.replace("182", "168"))
+check("S31g scale 1.75 -> wants 168 -> OK", has(out, "OK", "都是 168（= Xwayland 缩放 1.75 × 96）"), xft_lines(out))
+rc, out = xft(scale=None, xres=None)
+check("S31h no kwinrc [Xwayland] Scale (kreadconfig6 says 'true') -> no line", xft_lines(out) == [], xft_lines(out))
+rc, out = xft(scale="", xres=None)
+check("S31i empty Scale -> no line", xft_lines(out) == [], xft_lines(out))
+rc, out = xft(scale="1", xres=None, xrdb="*customization:\t-color\nxrdb-rc=0")
+check("S31j scale 1 -> no line (1x without Xft.dpi is right)", xft_lines(out) == [], xft_lines(out))
+rc, out = xft(xwayland=False)
+check("S31k Xwayland not running -> OK on the file, xrdb never run (it would start Xwayland)",
+      has(out, "OK", "~/.Xresources 的 Xft.dpi 是 182（= Xwayland 缩放 1.9 × 96），Xwayland 没在跑，实时库没查")
+      and "xrdb_calls" not in S, xft_lines(out))
+rc, out = xft(sd_env="WAYLAND_DISPLAY=wayland-0\nXDG_SESSION_TYPE=wayland")
+check("S31l no DISPLAY in the session env -> INFO + OK on the file, no xrdb", has(out, "INFO", "读不到 Xwayland 的资源库")
+      and has(out, "OK", "~/.Xresources 的 Xft.dpi 是 182") and "xrdb_calls" not in S, xft_lines(out))
+rc, out = xft(xrdb="xrdb-rc=1")
+check("S31m xrdb cannot connect -> INFO, not a WARN", has(out, "INFO", "读不到 Xwayland 的资源库") and not has(out, "WARN", "X11"),
+      xft_lines(out))
+rc, out = xft(steam="1")
+check("S31n Steam running at 1x -> WARN restart Steam, exit 10", has(out, "WARN", "正在跑的 Steam 按 1 倍画（它启动时库里还没有 Xft.dpi）")
+      and rc == 10, xft_lines(out))
+rc, out = xft(log=steam_log("1"))
+check("S31o Steam not running, old 1x log -> OK without a Steam part", has(out, "OK", "都是 182")
+      and not any("Steam 按" in l for l in out), xft_lines(out))
+rc, out = xft(steam="1.89062", log="[2026-10-29] GPU process started\n")
+check("S31p Steam running, no display line in the log -> OK without a Steam part", has(out, "OK", "都是 182")
+      and not any("Steam 按" in l for l in out), xft_lines(out))
+
+# ---- S32a-j Steam's UI on the GPU with zink's render-pass tracking off (10-30, README "Steam 界面花屏"): the launcher
+# (the repo's own file) exports ZINK_DEBUG=norp, and the running steamwebhelper browser process (no --type=) has it in
+# its environment; or it runs with --disable-gpu (Y700_STEAM_UI=cpu)
+STEAM_LAUNCHER = "/home/user/.local/bin/steam-arm64"
+STEAM_WH = "/home/user/.local/share/Steam/steamrtarm64/steamwebhelper"
+REPO_LAUNCHER = builtins.open(realos.path.join(HERE, "..", "linux", "games", "steam-arm64"), "rb").read()
+WH_BROWSER = ["--enable-features=PlatformHEVCDecoderSupport,V4L2VideoDecode"]
+WH_CPU = WH_BROWSER + ["--disable-gpu-compositing", "--disable-gpu"]
+WH_ENV = ["HOME=/home/user", "GTK_IM_MODULE=fcitx", "ZINK_DEBUG=norp", "MANGOHUD=1"]
+def scpu(launcher=REPO_LAUNCHER, procs=((227015, WH_BROWSER, WH_ENV), (227026, ["--type=zygote"], WH_ENV))):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    if launcher is not None:
+        put(STEAM_LAUNCHER, launcher)
+    for pid, args, env in procs:
+        put(f"/proc/{pid}/cmdline", "\0".join([STEAM_WH] + list(args)) + "\0")
+        if env is not None:
+            put(f"/proc/{pid}/environ", "\0".join(env) + "\0")
+        LINKS[f"/proc/{pid}/exe"] = STEAM_WH
+    return run_main()
+def scpu_lines(out):
+    return [l for l in out if "Steam 界面" in l or "Steam 启动器" in l]
+GPU_OK = "Steam 界面走 GPU、关了 zink 的渲染通道跟踪（启动器带 ZINK_DEBUG=norp"
+rc, out = scpu()
+check("S32a repo launcher, browser process with ZINK_DEBUG=norp -> OK", has(out, "OK", GPU_OK + "，正在跑的也是）")
+      and not has(out, "WARN", "Steam 界面"), scpu_lines(out))
+rc, out = scpu(launcher=REPO_LAUNCHER.replace(b"*) export ZINK_DEBUG=norp ;;", b"*) ;;"))
+check("S32b launcher without the export (still named in its comments) -> WARN, exit 10",
+      has(out, "WARN", "~/.local/bin/steam-arm64 不带 ZINK_DEBUG=norp") and rc == 10, scpu_lines(out))
+rc, out = scpu(procs=((227015, WH_BROWSER, WH_ENV[:2]), (227026, ["--type=zygote"], WH_ENV[:2])))
+check("S32c running browser process on the GPU without ZINK_DEBUG -> WARN restart Steam",
+      has(out, "WARN", "正在跑的 Steam 界面走 GPU 但没关 zink 的渲染通道跟踪") and rc == 10, scpu_lines(out))
+rc, out = scpu(procs=((227015, WH_BROWSER, ["ZINK_DEBUG=rp"]),))
+check("S32d ZINK_DEBUG=rp (a substring of norp) -> still WARN", has(out, "WARN", "没关 zink 的渲染通道跟踪"), scpu_lines(out))
+rc, out = scpu(procs=((227015, WH_BROWSER, ["ZINK_DEBUG=nobgc,norp"]),))
+check("S32e ZINK_DEBUG with norp in a list -> OK", has(out, "OK", GPU_OK + "，正在跑的也是）"), scpu_lines(out))
+rc, out = scpu(procs=((227015, WH_CPU, WH_ENV[:2]),))
+check("S32f running with --disable-gpu (Y700_STEAM_UI=cpu) -> OK, CPU drawing", has(out, "OK", "Steam 界面由 CPU 绘制（Y700_STEAM_UI=cpu")
+      and not has(out, "WARN", "Steam 界面"), scpu_lines(out))
+rc, out = scpu(procs=((227015, WH_CPU[:2], WH_ENV[:2]),))
+check("S32g only --disable-gpu-compositing, no norp -> WARN (not the switch's --disable-gpu)",
+      has(out, "WARN", "没关 zink 的渲染通道跟踪"), scpu_lines(out))
+rc, out = scpu(procs=())
+check("S32h Steam not running -> OK on the launcher alone", has(out, "OK", GPU_OK + "）"), scpu_lines(out))
+rc, out = scpu(procs=((227026, ["--type=zygote"], WH_ENV[:2]), (227015, WH_BROWSER, None)))
+check("S32i zygote without norp, browser environ unreadable -> OK on the launcher alone", has(out, "OK", GPU_OK + "）")
+      and not has(out, "WARN", "Steam 界面"), scpu_lines(out))
+rc, out = scpu(launcher=None)
+check("S32j no launcher -> no line", scpu_lines(out) == [], scpu_lines(out))
+
+# ---- S33a-z the battery page (10-30, linux/power/battery/DESIGN.md section 7): y700-batteryd (a systemd user unit of user)
+# running with no automatic restart since the last --save, its ledger written within 40 min and at most 20 MiB with the
+# foreground logs (16 MiB + a day's growth before the next prune), flightrec's energy line at most 60 s old by
+# CLOCK_MONOTONIC (taken when two reads agree), and the report's diag (coefficients to recalibrate: INFO while they are
+# the uncalibrated priors, WARN once calibrated; a timeout is INFO, an exit with no output WARN). Silent where the page
+# is not installed
+BATTERYD = "/home/user/.config/systemd/user/y700-batteryd.service"
+LEDGER = "/home/user/.local/state/y700-battery"
+ENERGY = "/run/y700-flightrec/energy"
+REPORT = "/usr/local/bin/y700-battery-report"
+BD = "y700-batteryd.service"
+
+
+def energy_line(t_ms=4995000, boot=BOOT8):
+    """acc.rs render() with a newline: t= and lbt= CLOCK_MONOTONIC ms, every number 13 wide, lb signed."""
+    zeros = " ".join(f"{k}={0:013}" for k in ("n", "ton", "toff", "don", "doff", "dton", "dtoff", "chg", "tchg", "tz",
+                                              "tzero", "gap", "bl"))
+    return f"v1 boot={boot} t={t_ms:013} {zeros} lb={412:+013} lbt={t_ms:013} dpms=Off pw=dis\n"
+
+
+def big(path, size, mtime):
+    real = tr(path)
+    realos.makedirs(realos.path.dirname(real), exist_ok=True)
+    with builtins.open(real, "wb") as f:
+        f.truncate(size)
+    realos.utime(real, (mtime, mtime))
+
+
+def batt(unit=True, ledger=True, ledger_age=100, energy=True, report=True, save=False, base=None, bd_state=None,
+         uptime=None, bigs=(), rep=None, prev_age=86400, **kw):
+    """A tablet with the battery page installed and healthy; each argument breaks one thing. base: the baseline's
+    "batteryd" entry; ledger_age / prev_age: how long ago this boot's / the previous boot's part was written; bigs:
+    (path, size) of extra files; rep: the report's stdout; kw goes to the scenario table S."""
+    base_tree(); archived()
+    state(prev_boot=PREV_ID, **({} if base is None else {"batteryd": base}))
+    if unit:
+        put(BATTERYD, "[Unit]\nDescription=y700 battery page recorder\n")
+    if ledger:
+        put(f"{LEDGER}/boots.txt", f"{PREV8}\n{BOOT8}\n")
+        put(f"{LEDGER}/lock", "")
+        put(f"{LEDGER}/b-{PREV8}.jsonl", '{"k":"H"}\n', mtime=NOW - prev_age)
+        put(f"{LEDGER}/b-{BOOT8}.jsonl", '{"k":"S"}\n', mtime=time.time() - ledger_age)   # NOW is the selftest's start
+        put(f"{LEDGER}/fg-{BOOT8}.log", "fg\n", mtime=NOW - 30)
+    if energy:
+        put(ENERGY, energy_line() if energy is True else energy)
+    if report:
+        put(REPORT, "#!/usr/bin/python3 -I\n")
+    if bd_state:
+        S["active"][BD] = bd_state
+    if uptime is not None:
+        put("/proc/uptime", f"{uptime:.2f} 1.00\n")
+    for p, size in bigs:
+        big(p, size, NOW - 86400)
+    if rep is not None:
+        S["report"] = rep
+    S.update(kw)
+    return run_main(save)
+
+
+def batt_lines(out):
+    return [l for l in out if any(w in l for w in ("电池页", "batteryd", "电量累计", "y700-flightrec/energy"))]
+
+
+def saved_batteryd():
+    return json.load(builtins.open(tr(mod.STATE), encoding="utf-8")).get("batteryd", "absent")
+
+
+check("S33 energy fixture is acc.rs's 321 bytes + newline", len(energy_line()) == 322, len(energy_line()))
+rc, out = batt(unit=False)
+check("S33a no y700-batteryd unit -> no line, report not run, exit 0",
+      batt_lines(out) == [] and "report_calls" not in S and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(save=True); show("S33b battery page healthy", out, pref=("OK", "WARN", "INFO"))
+check("S33b all fine -> four OK lines, exit 0",
+      has(out, "OK", "y700-batteryd 在跑，本次开机没有自动重启过") and has(out, "OK", "s 前写过，账本加前台日志共 0.0 MiB（≤20 MiB）")
+      and has(out, "OK", "飞行记录器的电量累计 5 s 前更新过") and has(out, "OK", "电池页系数不用重标（7 天里没算清的中位数 8 %")
+      and rc == 0, (rc, batt_lines(out)))
+check("S33b report run as user under coreutils timeout, with a backstop",
+      S.get("report_calls") == [(["timeout", "30", REPORT, "--json"], True, 40)], S.get("report_calls"))
+check("S33b --save keeps NRestarts with this boot", saved_batteryd() == {"boot8": BOOT8, "nrestarts": 0}, saved_batteryd())
+rc, out = batt(save=True, nrestarts={BD: "2"})
+check("S33c restarts but no baseline -> INFO into the baseline, exit 0",
+      has(out, "INFO", "y700-batteryd 本次开机已自动重启 2 次：记入基线") and rc == 0
+      and saved_batteryd() == {"boot8": BOOT8, "nrestarts": 2}, (rc, batt_lines(out), saved_batteryd()))
+rc, out = batt(base={"boot8": BOOT8, "nrestarts": 2}, nrestarts={BD: "5"})
+check("S33d same boot, NRestarts 2 -> 5 -> WARN 3, exit 10",
+      has(out, "WARN", "y700-batteryd 自上次体检以来自动重启了 3 次（本次开机共 5 次）") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(base={"boot8": BOOT8, "nrestarts": 2}, nrestarts={BD: "2"})
+check("S33e same boot, NRestarts unchanged -> OK, exit 0",
+      has(out, "OK", "自上次体检以来没有自动重启（本次开机共 2 次）") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(base={"boot8": "deadbeef", "nrestarts": 7}, nrestarts={BD: "1"})
+check("S33f another boot's baseline (7) and 1 now -> WARN 1", has(out, "WARN", "自动重启了 1 次（本次开机共 1 次）"),
+      batt_lines(out))
+rc, out = batt(base={"boot8": "deadbeef", "nrestarts": 7}, nrestarts={BD: "0"})
+check("S33g another boot's baseline and 0 now -> OK", has(out, "OK", "没有自动重启（本次开机共 0 次）") and rc == 0,
+      (rc, batt_lines(out)))
+rc, out = batt(base={"boot8": BOOT8, "nrestarts": 5}, nrestarts={BD: "1"})
+check("S33h counter reset this boot (5 -> 1: a manual restart) -> WARN 1 since",
+      has(out, "WARN", "自动重启了 1 次（本次开机共 1 次）"), batt_lines(out))
+rc, out = batt(bd_state="failed", ledger_age=9000)
+check("S33i y700-batteryd failed -> WARN, the stale ledger not WARNed again, exit 10",
+      has(out, "WARN", "y700-batteryd 是 failed（enabled）") and not has(out, "WARN", "没写入") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(save=True, base={"boot8": BOOT8, "nrestarts": 3}, nrestarts={BD: ""})
+check("S33j NRestarts unreadable -> INFO, baseline kept as it was",
+      has(out, "INFO", "读不到它的重启次数") and saved_batteryd() == {"boot8": BOOT8, "nrestarts": 3},
+      (batt_lines(out), saved_batteryd()))
+rc, out = batt(ledger_age=3000)
+check("S33k ledger last written 50 min ago -> WARN, exit 10",
+      has(out, "WARN", "电池页账本已 50 分钟没写入") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(ledger_age=time.time() - 1000)
+check("S33l this boot's part has a 1970 mtime, up 5000 s -> WARN (the previous boot's part is a day old)",
+      has(out, "WARN", "电池页账本已 24 小时没写入"), batt_lines(out))
+rc, out = batt(ledger_age=time.time() - 1000, uptime=3000)
+check("S33m the same, up 3000 s (the clock was just set) -> INFO", has(out, "INFO", "时钟还没对上")
+      and not has(out, "WARN", "没写入"), batt_lines(out))
+rc, out = batt(ledger_age=9 * 86400, prev_age=10 * 86400)
+check("S33m2 every part a week old -> WARN in days", has(out, "WARN", "电池页账本已 9 天没写入"), batt_lines(out))
+rc, out = batt(ledger=False)
+check("S33n no ledger part at all -> WARN", has(out, "WARN", "一份账本（b-*.jsonl）都没有"), batt_lines(out))
+rc, out = batt(bigs=((f"{LEDGER}/b-{PREV8}.1.jsonl", 21 << 20),))
+check("S33o ledger parts over 20 MiB -> WARN, exit 10",
+      has(out, "WARN", "电池页账本加前台日志共 21.0 MiB，超过 20 MiB（16 MiB 上限加一天的余量）") and rc == 10,
+      (rc, batt_lines(out)))
+rc, out = batt(bigs=((f"{LEDGER}/b-{PREV8}.1.jsonl", 17 << 20),))
+check("S33o2 17 MiB: over the 16 MiB cap until the next daily prune -> still OK, exit 0",
+      has(out, "OK", "s 前写过，账本加前台日志共 17.0 MiB（≤20 MiB）") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(bigs=((f"{LEDGER}/fg-{PREV8}.1.log", 21 << 20),))
+check("S33p foreground logs count too -> WARN", has(out, "WARN", "超过 20 MiB（16 MiB 上限加一天的余量）"), batt_lines(out))
+rc, out = batt(bigs=((f"{LEDGER}/b-{PREV8}.1.jsonl", 15 << 20), (f"{LEDGER}/boots.txt.tmp", 6 << 20)))
+check("S33q 15 MiB of parts and a 6 MiB file ledger.rs does not prune -> OK 15.0 MiB",
+      has(out, "OK", "s 前写过，账本加前台日志共 15.0 MiB") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(mono=5100.0)
+check("S33r energy line 105 s old while flightrec runs -> WARN, exit 10",
+      has(out, "WARN", "电量累计 /run/y700-flightrec/energy 已 105 s 没更新") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(mono=5055.0)
+check("S33s energy line 60 s old -> still OK (<= 60)", has(out, "OK", "电量累计 60 s 前更新过"), batt_lines(out))
+rc, out = batt(energy=False)
+check("S33t no energy file while flightrec runs (an old recorder) -> WARN", has(out, "WARN", "没有 /run/y700-flightrec/energy"),
+      batt_lines(out))
+base_tree(); archived(); state(prev_boot=PREV_ID); put(BATTERYD, "[Unit]\n"); S["active"]["y700-flightrec"] = "inactive"
+rc, out = run_main()
+check("S33u flightrec not running -> no energy line (the recorder's own line says it)",
+      not any("电量累计" in l or "y700-flightrec/energy" in l for l in out), batt_lines(out))
+rc, out = batt(energy=energy_line(boot=PREV8))
+check("S33v energy line of another boot -> WARN", has(out, "WARN", f"是另一次开机的（boot={PREV8}"), batt_lines(out))
+rc, out = batt(energy="v2 something else\n")
+check("S33w energy line not v1 -> WARN", has(out, "WARN", "认不出"), batt_lines(out))
+
+
+def torn(*reads):
+    """batt() with the energy file's successive reads given (the first open()s return these, in order)."""
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    put(BATTERYD, "[Unit]\n"); put(f"{LEDGER}/b-{BOOT8}.jsonl", "{}\n", mtime=NOW - 100); put(ENERGY, energy_line())
+    FLAKY[ENERGY] = [r.encode() for r in reads]
+    return run_main()
+
+
+rc, out = torn(energy_line(t_ms=1000), energy_line(), energy_line())
+check("S33x a torn first read, then two equal ones -> the agreed (fresh) line, OK",
+      has(out, "OK", "电量累计 5 s 前更新过") and FLAKY[ENERGY] == [], (batt_lines(out), FLAKY[ENERGY]))
+rc, out = torn(energy_line(t_ms=1000), energy_line(), energy_line(t_ms=1000), energy_line())
+check("S33x2 no two reads agree in 4 -> INFO, no verdict", has(out, "INFO", "连读 4 次都不一样")
+      and not has(out, "WARN", "电量累计") and not has(out, "OK", "电量累计"), batt_lines(out))
+RECAL = "电池页系数要重标："
+PRIORS = {"version": 1, "calibrated": False, "date": None, "source": "package"}   # coeffs-v1.json as shipped
+rc, out = batt(rep=report_doc(unexplained_median_7d=0.3))
+check("S33y 7-day unexplained median 30 % -> WARN recalibrate, exit 10",
+      has(out, "WARN", RECAL + "7 天里各放电段「没算清」的中位数 30 %（>20 %）") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(unexplained_median_7d=0.2))
+check("S33y2 median exactly 20 % -> OK", has(out, "OK", "电池页系数不用重标（7 天里没算清的中位数 20 %") and rc == 0,
+      (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(floor_off_learned_mw=336.0))
+check("S33z calibrated, learned 336 mW vs the model's 240 for the same segments (40 %) -> WARN recalibrate, exit 10",
+      has(out, "WARN", RECAL + "账本里学到的熄屏功率 336 mW，模型对同样这些段算出 240 mW（差 40 %，>25 %）（系数 v2。")
+      and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(floor_off_learned_mw=170.0))
+check("S33z2 calibrated, learned 170 mW, 29 % below the model -> WARN too", has(out, "WARN", "差 29 %") and rc == 10,
+      (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(floor_off_learned_mw=290.0))
+check("S33z3 calibrated, like with like within 25 % (290 vs 240, 21 %) -> OK, exit 0",
+      has(out, "OK", "熄屏功率学到 290 mW、模型算 240 mW") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(coeffs=PRIORS, floor_off_learned_mw=369.0, coeff_age_days=None))
+check("S33z3b uncalibrated priors, learned 369 mW (real-1030's first screen-off window) vs 240 (54 %) -> INFO, exit 0",
+      has(out, "INFO", RECAL + "账本里学到的熄屏功率 369 mW，模型对同样这些段算出 240 mW（差 54 %，>25 %）"
+                       "（系数 v1，还是没标定的先验值：标定前只提示、不报警。")
+      and not has(out, "WARN", RECAL) and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(coeff_age_days=120))
+check("S33z4 coefficients 120 days old -> WARN recalibrate", has(out, "WARN", RECAL + "系数是 120 天前定的（>90 天）"),
+      batt_lines(out))
+rc, out = batt(rep=report_doc(coeff_age_days=90))
+check("S33z5 coefficients exactly 90 days old -> OK", has(out, "OK", "系数 90 天") and rc == 0, (rc, batt_lines(out)))
+ALL3 = dict(unexplained_median_7d=0.5, floor_off_learned_mw=480.0, coeff_age_days=91)
+rc, out = batt(rep=report_doc(coeffs=dict(PRIORS, date="2026-07-31"), **ALL3))
+w = [l for l in out if RECAL in l]
+check("S33z6 all three on the uncalibrated priors -> one INFO naming each and the priors, no WARN, exit 0",
+      len(w) == 1 and w[0].startswith("INFO") and rc == 0
+      and all(s in w[0] for s in ("中位数 50 %", "差 100 %", "91 天前", "系数 v1，还是没标定的先验值")), (rc, w))
+rc, out = batt(rep=report_doc(**ALL3))
+w = [l for l in out if RECAL in l]
+check("S33z6b the same three on calibrated coefficients -> one WARN naming each, exit 10",
+      len(w) == 1 and w[0].startswith("WARN") and rc == 10 and "先验值" not in w[0]
+      and all(s in w[0] for s in ("中位数 50 %", "差 100 %", "91 天前", "系数 v2")), (rc, w))
+rc, out = batt(rep=report_doc(unexplained_median_7d=None, floor_off_learned_mw=None, coeff_age_days=None))
+check("S33z7 a report too young to judge (nulls) -> OK, not enough data", has(out, "OK", "电池页系数不用重标（数据还不够判断；系数 v2）")
+      and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(rep=report_doc(segments_flagged_7d=3))
+check("S33z8 flagged segments recorded, not judged", has(out, "OK", "7 天里 3 段标了「模型偏高」") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(rep=json.dumps({"v": 1, "error": "报表出错：FileNotFoundError: 找不到系数文件"}, ensure_ascii=False), report_rc=2)
+check("S33z9 the report's error document (exit 2) -> WARN with its reason",
+      has(out, "WARN", "电池页报表出错：报表出错：FileNotFoundError: 找不到系数文件") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(rep="", report_rc=124)
+check("S33z10 no output, coreutils timeout's 124 (it prints only at the end) -> INFO, exit 0",
+      has(out, "INFO", "电池页报表 30 s 内没出结果（timeout 到点停了它）") and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(report_rc=None)
+check("S33z11 run_rc()'s own backstop timeout -> INFO, exit 0", has(out, "INFO", "30 s 内没出结果（40 s 的后备超时到了）")
+      and rc == 0, (rc, batt_lines(out)))
+rc, out = batt(rep="", report_rc=1, report_err="Traceback (most recent call last):\n  File \"/usr/local/bin/y700-battery-report\""
+               ", line 28, in <module>\nModuleNotFoundError: No module named 'y700_battery.ranges'\n")
+check("S33z11b python died before cli.main (exit 1, nothing on stdout) -> WARN with the exit code and the last stderr line",
+      has(out, "WARN", "电池页报表没输出就退出了（退出码 1：ModuleNotFoundError: No module named 'y700_battery.ranges'）")
+      and not has(out, "INFO", "没出结果") and rc == 10, (rc, batt_lines(out)))
+rc, out = batt(rep="", report_rc=127, report_err="timeout: failed to run command '/usr/local/bin/y700-battery-report': "
+                                                 "No such file or directory")
+check("S33z11c could not be started (127) -> WARN", has(out, "WARN", "（退出码 127：timeout: failed to run command") and rc == 10,
+      (rc, batt_lines(out)))
+rc, out = batt(rep="", report_rc=126)
+check("S33z11d exit 126 with an empty stderr -> WARN says so", has(out, "WARN", "（退出码 126：stderr 也是空的）"),
+      batt_lines(out))
+rc, out = batt(rep="Traceback (most recent call last):")
+check("S33z12 output not JSON -> WARN", has(out, "WARN", "电池页报表的输出不是 JSON"), batt_lines(out))
+rc, out = batt(rep=json.dumps({"v": 1, "now": 1}))
+check("S33z13 JSON without diag -> WARN", has(out, "WARN", "没有 diag 块"), batt_lines(out))
+rc, out = batt(report=False)
+check("S33z14 report not installed -> not run, no coefficient line, the rest still checked",
+      "report_calls" not in S and not any("系数" in l for l in out) and has(out, "OK", "y700-batteryd 在跑")
+      and rc == 0, (rc, batt_lines(out)))
+orig = mod.read_agreed
+mod.read_agreed = lambda p, tries=4: 1 / 0
+rc, out = batt()
+mod.read_agreed = orig
+check("S33z15 a battery check that raises -> one guard WARN, the next battery check still runs",
+      has(out, "WARN", "检查「电池页电量累计」出错") and has(out, "OK", "电池页系数不用重标"), batt_lines(out))
+
+# ---- S34a-c y700-cx-auto disabled: the owner's own --disable is INFO (exit 0), the daemon's fail-safe after a reset is
+# WARN (exit 10). The maintainer's daily job (not published) relies on this since 10-31: it no longer notifies on the status page's
+# cx_disabled=yes when the checklist ran. The two reason lines are what linux/power/cx-auto/src/main.rs writes
+def cx_auto(disabled=None):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    put("/etc/systemd/system/y700-cx-auto.service", "[Unit]\n")
+    if disabled:
+        put("/var/lib/y700/cx-auto.disabled", disabled)
+    return run_main()
+rc, out = cx_auto("2026-10-31 09:00:00 the owner: y700-cx-auto --disable\n")
+check("S34a the owner's --disable -> INFO, exit 0", has(out, "INFO", "CX 自动省电已被手动停用") and not has(out, "WARN", "CX 自动省电")
+      and rc == 0, (rc, [l for l in out if l.startswith(("WARN", "CHANGED"))]))
+rc, out = cx_auto("2026-10-31 03:00:00 the previous boot ended while armed (armed at: 02:10) - a reset? not arming again\n")
+check("S34b the fail-safe after a reset -> WARN, exit 10", has(out, "WARN", "CX 自动省电已停用：") and rc == 10, rc)
+rc, out = cx_auto()
+check("S34c not disabled, running -> OK", has(out, "OK", "CX 自动省电在跑") and rc == 0, rc)
+
+# ---- S35a-c the baseline file (10-31 audit C6; 10-19 audit C7): STATE was truncated and rewritten in place, so a reset
+# or a full disk mid-write left an empty or half file, and a baseline that does not parse was taken for a first run (INFO,
+# exit 0: a day's CHANGED gone, nobody told)
+for bad in ("", '{"pkgs": {"kwin-wayland": "1.'):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    put(mod.STATE, bad)
+    rc, out = run_main()
+    check(f"S35a a baseline that does not parse ({len(bad)} B) -> WARN 基线坏了, not INFO 第一次运行, exit 10",
+          has(out, "WARN", "checklist-state.json 坏了") and not has(out, "INFO", "第一次运行") and rc == 10,
+          (rc, [l for l in out if "基线" in l or "第一次" in l]))
+
+
+class DiskFull:
+    """json for main() whose dump writes half the baseline and then fails like a full disk"""
+    def __getattr__(self, n):
+        return getattr(json, n)
+
+    @staticmethod
+    def dump(obj, f, **kw):
+        f.write(json.dumps(obj, **kw)[:40])
+        raise OSError(28, "No space left on device")
+
+
+base_tree(); archived(); state(prev_boot=PREV_ID)
+before = builtins.open(tr(mod.STATE), encoding="utf-8").read()
+mod.json = DiskFull()
+try:
+    run_main(save=True)
+    raised = None
+except OSError as e:
+    raised = e
+finally:
+    mod.json = json
+check("S35b the disk fills mid --save -> the run fails (exit 1 at the top) and the old baseline is still there, whole",
+      raised is not None and builtins.open(tr(mod.STATE), encoding="utf-8").read() == before, raised)
+base_tree(); archived(); state(prev_boot=PREV_ID)
+rc, out = run_main(save=True)
+rc, out = run_main()
+check("S35c a --save that works -> no .tmp left, the next run compares against it",
+      not realos.path.exists(tr(mod.STATE + ".tmp")) and not has(out, "INFO", "第一次运行") and not has(out, "WARN", "坏了"),
+      [l for l in out if "基线" in l or "第一次" in l])
+
+# ---- S36 (11-01) kernel y16: the download_mode line reads 1058's "SDI disable" line; the watchdog bark names a bite
+why = mod.classify_console("systemd[1]: Started foo.service\nkernel: watchdog0: pretimeout event\n")
+check("S36a the bark line in a console tail is named as a watchdog bite", bool(why) and "看门狗" in why[0], why)
+KERNEL = "7.3.0-tb323fu-t52-y16"
+for name, log, kind, sub in (("SDI off", "qcom_scm firmware:scm: download mode off, SDI disable: 0", "OK", "SDI 也关了"),
+                             ("SDI not off", "qcom_scm firmware:scm: download mode off, SDI disable: -22", "WARN", "SDI 没关掉"),
+                             ("no line", "", "WARN", "1058 没生效")):
+    base_tree(); archived(); state(prev_boot=PREV_ID); S["sdi_log"] = log
+    rc, out = run_main()
+    check(f"S36b y16, {name} -> {kind} {sub}", has(out, kind, sub) and not has(out, "OK", "转储模式已退出（"),
+          [l for l in out if "转储" in l or "SDI" in l])
+base_tree(download_mode="full"); archived(); state(prev_boot=PREV_ID)
+S["sdi_log"] = "qcom_scm firmware:scm: download mode off, SDI disable: 0"
+rc, out = run_main()
+check("S36c y16, download_mode still full after 5000 s -> its WARN, the SDI line not even read",
+      has(out, "WARN", "download_mode 是 full") and not has(out, "OK", "SDI") and not S.get("sdi_asked"), S.get("sdi_asked"))
+KERNEL = "7.3.0-tb323fu-t52-y15"
+base_tree(); archived(); state(prev_boot=PREV_ID)
+rc, out = run_main()
+check("S36d y15, no SDI line -> the old OK, no SDI WARN", has(out, "OK", "转储模式已退出（") and not has(out, "WARN", "SDI"),
+      [l for l in out if "转储" in l or "SDI" in l])
+KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
+
+# ---- S37 (11-01) kernel y17: the initramfs's e2fsck of the roots, every boot since the last --save and this one, and
+# the root's ext4 state. The journal's answer per boot: its "Linux version" line, then the matching lines in order
+Y16K, Y17K = "7.3.0-tb323fu-t52-y16", "7.3.0-tb323fu-t52-y17"
+MARKED = "Filesystem state:         clean with errors\nFS Error count:           1\n"
+W_ERR = "EXT4-fs (sda15): warning: mounting fs with errors, running e2fsck is recommended"
+
+
+def fsck_log(rel, *rcs, between=(), after=(), what=None):
+    """journalctl -k -b ID -g FSCK_GREP for one boot: the journal-only result, `between`, the full result, `after`
+    (rcs: one or two exits; what: the full run's text)"""
+    w = {0: "clean", 1: "errors fixed", 4: "ERRORS LEFT, needs e2fsck -f by hand", 8: "e2fsck could not check it", 32: "stopped"}
+    out = [f"Linux version {rel} (root@x) (clang version 18.1.3) #1 SMP PREEMPT"]
+    for k, rc in enumerate(rcs):
+        out.append(f" fsck baldur-root (/dev/sda15): exit {rc} ({what if what and k == len(rcs) - 1 else w[rc]}), {k + 1} s")
+        if k == 0:
+            out += list(between)
+    return "\n".join(out + list(after))
+
+
+def fsck_case(logs, ids, kernel=Y17K, saved=None, tune=None):
+    global KERNEL
+    KERNEL = kernel
+    base_tree(); archived(); state(prev_boot=PREV_ID, boot8=(saved or ids[0])[:8])
+    S["sdi_log"] = "qcom_scm firmware:scm: download mode off, SDI disable: 0"
+    S["boots_json"] = boots_json(*ids)
+    S["journal_tail"] = CLEAN_TAIL
+    S["fsck_logs"] = logs
+    if tune is not None:
+        S["tune2fs"] = tune
+    rc, out = run_main()
+    KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
+    return rc, out, [l for l in out if "磁盘检查" in l or "ext4" in l or "e2fsck" in l]
+
+
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, MID1_ID, CUR_ID))
+show("S37a y17, every boot clean", fl)
+check("S37a two clean y17 boots since the --save -> one OK for both, the root's state OK, no WARN about them",
+      has(out, "OK", "开机磁盘检查：2 次开机") and has(out, "OK", "ext4 状态 clean") and not any(l.startswith("WARN") for l in fl)
+      and SAVED_ID not in S["fsck_asked"][:1], (fl, S.get("fsck_asked")))
+rc, out, fl = fsck_case({SAVED_ID: fsck_log(Y16K), "0": fsck_log(Y17K, 0, 1, between=[W_ERR])}, (SAVED_ID, CUR_ID))
+check("S37b the first y17 boot after a y16 one repairs the old mark (its remount,rw complained before the full check) "
+      "-> INFO 头一次, no WARN", has(out, "INFO", "头一次带开机磁盘检查") and not any(l.startswith("WARN") for l in fl), fl)
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, 0, 1)}, (SAVED_ID, MID1_ID, CUR_ID))
+check("S37c a repair after a checked boot -> WARN 修了根分区, exit 10", has(out, "WARN", "的磁盘检查修了根分区") and rc == 10, fl)
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 1), "0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, MID1_ID, CUR_ID), saved=MID1_ID)
+check("S37d a repair in the boot the last --save ran in -> not reported again, this boot's OK",
+      not has(out, "WARN", "修了根分区") and not has(out, "INFO", "头一次") and has(out, "OK", "开机磁盘检查：1 次开机"), fl)
+for name, rcs, what, sub in (("errors left", (0, 4), None, "有修不了的错误"), ("stopped", (0, 32), None, "没做完"),
+                             ("clean at the limit", (0, 0), "clean at the 600 s limit", "没做完"),
+                             ("fixed at the limit", (0, 1), "errors fixed at the 600 s limit", "没做完"),
+                             ("could not check", (0, 8), None, "没做完")):
+    rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, *rcs, what=what)}, (SAVED_ID, MID1_ID, CUR_ID))
+    check(f"S37e {name} -> WARN {sub}", has(out, "WARN", sub) and rc == 10, fl)
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K), "0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, MID1_ID, CUR_ID))
+check("S37f an earlier y17 boot with no result line -> WARN naming that boot", any(l.startswith("WARN") and MID1_ID[:8] in l
+      and "没有磁盘检查的结果行" in l for l in fl) and has(out, "OK", "开机磁盘检查：1 次开机"), fl)
+rc, out, fl = fsck_case({"0": ""}, (SAVED_ID, CUR_ID))
+check("S37f this boot's log lost its Linux version line and has no result -> its kernel from uname, WARN",
+      has(out, "WARN", f"本次开机跑的是 {Y17K}") and not has(out, "OK", "开机磁盘检查"), fl)
+rc, out, fl = fsck_case({"0": fsck_log(Y17K) + "\n fsck baldur-root (/dev/sda15): no e2fsck in this image, not checked"},
+                        (SAVED_ID, CUR_ID))
+check("S37g no e2fsck in the image -> WARN 没有 e2fsck (not the no-result one)", has(out, "WARN", "initramfs 里没有 e2fsck")
+      and not has(out, "WARN", "没有磁盘检查的结果行"), fl)
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, 0, 0, after=[
+    "EXT4-fs error (device sda15): ext4_lookup:1820: inode #2: comm ls: deleted inode referenced: 12"])}, (SAVED_ID, MID1_ID, CUR_ID))
+check("S37h an ext4 error after the full check -> WARN 检查完以后, not counted clean", has(out, "WARN", "检查完以后内核又报了根分区的 ext4 问题 1 次")
+      and has(out, "OK", "开机磁盘检查：1 次开机"), fl)
+rc, out, fl = fsck_case({"0": fsck_log(Y16K)}, (SAVED_ID, CUR_ID), kernel=Y16K, tune=MARKED)
+check("S37i y16, the root still marked -> WARN naming the state and the count, this kernel does not check; no fsck lines",
+      has(out, "WARN", "ext4 状态是「clean with errors」，记着 1 次错误：这个内核开机不查") and not has(out, "OK", "开机磁盘检查")
+      and not has(out, "WARN", "结果行"), fl)
+rc, out, fl = fsck_case({MID1_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, MID1_ID, CUR_ID), tune=MARKED)
+check("S37j y17, marked during this boot -> WARN, the next boot's e2fsck -p fixes it",
+      has(out, "WARN", "下次开机 initramfs 的 e2fsck -p 会修"), fl)
+rc, out, fl = fsck_case({PREV_ID: fsck_log(Y17K, 0, 0), "0": fsck_log(Y17K, 0, 1)}, (PREV_ID, CUR_ID), saved=CUR_ID)
+check("S37l a repair at this boot, the last --save already ran in it -> not reported again (11-01 review), rc 0",
+      not any(l.startswith("WARN") for l in fl) and rc == 0 and "0" not in S.get("fsck_asked", []), (rc, fl, S.get("fsck_asked")))
+rc, out, fl = fsck_case({"0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, CUR_ID), tune="")
+check("S37k tune2fs says nothing -> INFO, neither OK nor WARN", has(out, "INFO", "读不到根分区") and not has(out, "WARN", "ext4 状态"), fl)
+KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print(f"\n{len(FAILS)} failures", FAILS)

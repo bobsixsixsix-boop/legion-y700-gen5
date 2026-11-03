@@ -10,7 +10,7 @@
 # the next attempt waits 10 minutes; after one that failed, 3 minutes, and from the third failure in a
 # row 10 minutes (the journal keeps the reason; exit 1 makes the unit show as failed).
 # Needs the y700 modprobe install rules (/etc/modprobe.d/y700-ath12k.conf), which pick the right module.
-# The user's radio switch is respected: a Wi-Fi the user turned off is not turned back on.
+# The user's radio switch is never touched: a Wi-Fi the user turned off stays off.
 # Leaves Wi-Fi alone while CarPlay's access point (LIVI's livi-wifi-ap.service, linux/carplay) has it.
 STAMP=/run/y700-wifi-watchdog.last      # "<epoch> ok" | "<epoch> fail <consecutive failures>"
 now=$(date +%s)
@@ -29,14 +29,17 @@ wait=600; [ "$state" = fail ] && [ "$fails" -lt 3 ] && wait=180
 [ $((now - last)) -ge $wait ] || { echo "stuck TX ($n flush failures) but last reload ($state) was $((now - last)) s ago, waiting"; exit 0; }
 echo "$now fail $((fails + 1))" > "$STAMP"      # provisional: rewritten as ok below when every step checked out
 echo "ath12k TX path stuck ($n flush failures in 3 min): reloading the driver"
-radio=$(nmcli -t -f WIFI radio 2>/dev/null)      # enabled | disabled: restored as it was
+radio=$(nmcli -t -f WIFI radio 2>/dev/null)      # enabled | disabled: only for the messages below
 err=""
-if [ "$radio" = enabled ]; then nmcli radio wifi off 2>/dev/null || err="$err; radio off failed"; sleep 2; fi
+# No `nmcli radio wifi off` ... `on` around the reload any more (2026-10-31 audit): NetworkManager saves that switch
+# and restores it at boot, so a hard reset, a shutdown or a hang in between (this unloads a stuck firmware; on 10-13
+# the WLAN firmware took the whole SoC down once) left Wi-Fi off after the reboot - what happened to the 10-13 15:56
+# experiment script (README). Unloading the driver takes the interface away and NM lets go of it by itself; it takes
+# the new one and reconnects, or keeps it off if the user's switch is off (y700-carplay-ap-settle reloads the same way).
 modprobe -r ath12k_wifi7 2>/dev/null; modprobe -r ath12k 2>/dev/null
 if lsmod | grep -qE '^ath12k(_wifi7)? '; then err="$err; module still loaded after modprobe -r"; fi
 if ! modprobe ath12k_wifi7 2>/dev/null && ! modprobe ath12k 2>/dev/null; then err="$err; modprobe failed"; fi
 sleep 5
-if [ "$radio" = enabled ]; then nmcli radio wifi on 2>/dev/null || err="$err; radio on failed"; fi
 # the device must come back under NetworkManager (the firmware load takes a few seconds)
 i=0; while ! nmcli -t -f DEVICE,TYPE device 2>/dev/null | grep -q ':wifi$'; do
 	i=$((i + 1)); [ $i -ge 15 ] && { err="$err; no wifi device after reload"; break; }; sleep 1

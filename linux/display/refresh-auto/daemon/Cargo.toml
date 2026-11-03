@@ -1,0 +1,22 @@
+[package]
+name = "y700-refresh-auto"
+version = "0.1.0"
+edition = "2021"
+description = "y700: panel refresh rate follows the video (30/60 Hz for fullscreen 30/60 fps video, base 120 Hz otherwise)"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (.cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/display/autobright. No D-Bus, Wayland or JSON crate: zbus would pull in some
+# 300 packages, and each protocol is needed only this far - a few calls, three
+# signals, one exported object and logind's fd (src/dbus.rs, src/obj.rs), KWin's DPMS events (src/wl.rs), and Python's
+# json module as far as the config, the status reply and kscreen-doctor -j go (src/json.rs).
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-refresh-auto"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

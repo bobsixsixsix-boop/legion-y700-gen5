@@ -1,6 +1,7 @@
 #!/bin/sh
 # sb-bed.sh SCENARIO OUT: the status bar / dock (y700-shellbar) in a throwaway headless KWin, 1600x1002 like the
-# tablet, with a wallpaper (sb-wall.py), the control centre and the installed task switcher effect (so the B+ hook
+# tablet (SB_SIZE=WxH for another size, say 1002x1600 = the tablet upright; the scenario reads it as SB_W / SB_H),
+# with a wallpaper (sb-wall.py), the control centre and the installed task switcher effect (so the B+ hook
 # runs as the next login will run it). Plays SCENARIO and leaves screenshots, the KWin log and the shellbar log in
 # OUT. Nothing touches the real session (own D-Bus, config, data and runtime dirs), so it can run while the tablet
 # is in use. Built after linux/gesture/tests/ts-bed.sh; SCENARIO gets the same helpers:
@@ -17,10 +18,15 @@
 #                          control centre's notification centre watches the same server)
 # fake-sni.py (10-23, tray.sh: a StatusNotifierWatcher and fake tray items on the bed's bus) is copied along into
 # $T/bin when it is there, not started: a scenario starts it itself (python3 "$T/bin/fake-sni.py" >> "$LOG" 2>&1 &)
+# fake-osk.py (10-30, kbtile.sh: the keyboard's D-Bus name on the bed's bus) likewise. A scenario that taps the 「键盘」
+# tile must start it first: the bed's XDG_DATA_DIRS reach ~user/.local/share, so a call to the keyboard's name with
+# nobody owning it would start the real y700-osk inside the bed (D-Bus activation)
 # SB_BAR=PATH: another build of y700-shellbar (its QML comes from its prefix: cmake -DCMAKE_INSTALL_PREFIX=/opt/y700-next),
 # so a new bar is tried here before the live one is replaced.
 # SB_CC=PATH: another build of y700-control-center (say one installed with -DCMAKE_INSTALL_PREFIX=/opt/y700-next;
 # its QML comes from that prefix), so a new control centre is tried here before the live one is replaced.
+# Y700_BATTERY_REPORT=FILE (10-30, batpage.sh): a canned report the battery page shows instead of running the real
+# one, passed to the scenario and so to the control centre and the page its battery pill opens (see env -i below).
 # Do not tap app icons in a scenario: y700-shellbar starts apps in the REAL user manager (systemd-run --user).
 # Prints SBBED_OK or SBBED_FAIL. Run as root (switches to user).
 set -u
@@ -32,9 +38,28 @@ WALL=${SB_WALL:-/usr/share/wallpapers/Next/contents/images/5120x2880.png}
 CC=${SB_CC:-/usr/local/bin/y700-control-center}
 BAR=${SB_BAR:-/usr/local/bin/y700-shellbar}
 [ -x "$BAR" ] || { echo "SBBED_FAIL: $BAR not installed"; exit 1; }
+SIZE=${SB_SIZE:-1600x1002}
+case $SIZE in
+    [1-9]*x[1-9]*) case $SIZE in *[!0-9x]* | *x*x*) SIZE=bad ;; esac ;;
+    *) SIZE=bad ;;
+esac
+[ "$SIZE" != bad ] || { echo "SBBED_FAIL: SB_SIZE=${SB_SIZE:-} is not WxH"; exit 1; }
+SBW=${SIZE%x*}; SBH=${SIZE#*x}
 mkdir -p "$OUT"; rm -f "$OUT"/*.png "$OUT"/log "$OUT"/shellbar.log
 T=$(mktemp -d /tmp/y700-sbbed-XXXXXX)
-mkdir -p "$T/config" "$T/data/kwin/effects" "$T/run" "$T/bin"
+mkdir -p "$T/config" "$T/data/kwin/effects" "$T/run" "$T/bin" "$T/cache" "$T/state"
+# XDG_CACHE_HOME / XDG_STATE_HOME are the bed's own (10-30, the battery page): a page the scenario or the control
+# centre's battery pill opens (batpage.sh, battcap.sh c4-c6) must neither read the owner's ledger
+# (~/.local/state/y700-battery) nor write its last.json into the owner's cache. Every other entry of the owner's
+# cache and state is linked in, so what the bed's programs found there before (the shellbar's and the control
+# centre's QML caches, Mesa's shader cache, KDE's state files) is as warm as before: a cold shader cache would change
+# the first frames dock-glass.sh measures. Only y700-battery stays out, both ways.
+for d in cache:.cache state:.local/state; do
+    for e in "/home/$U/${d#*:}"/* "/home/$U/${d#*:}"/.[!.]* "/home/$U/${d#*:}"/..?*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        [ "${e##*/}" = y700-battery ] || ln -s "$e" "$T/${d%%:*}/"
+    done
+done
 [ -f "$FX/contents/ui/main.qml" ] && cp -r "$FX" "$T/data/kwin/effects/y700-taskswitcher"
 # as the real session (taskswitcher/install.sh): y700-home (installed system-wide, so it loads here too) gives up
 # the bottom edge. Without this its own edge minimizes the app on a short swipe before the task switcher sees it.
@@ -51,14 +76,15 @@ printf '[General]\nnavigationPanelEnabled=false\nconvergenceModeEnabled=true\n' 
   || { echo "SBBED_FAIL: could not build ftouch"; rm -rf "$T"; exit 1; }
 cp "$GT/tests/ts-app.py" "$HERE/sb-wall.py" "$HERE/sb-notifyd.py" "$T/bin/"
 [ -f "$HERE/fake-sni.py" ] && cp "$HERE/fake-sni.py" "$T/bin/"
+[ -f "$HERE/fake-osk.py" ] && cp "$HERE/fake-osk.py" "$T/bin/"
 cp "$SCEN" "$T/scenario.sh"
 cp "$WALL" "$T/wall.png"
 chmod 700 "$T/run"
 cat > "$T/inner.sh" <<'IN'
 set -u
-T=$1; OUT=$2; CC=$3; BAR=$4; SOCK=y700-sbbed-$$; LOG=$OUT/log
+T=$1; OUT=$2; CC=$3; BAR=$4; SB_W=${5:-1600}; SB_H=${6:-1002}; SOCK=y700-sbbed-$$; LOG=$OUT/log
 KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1 \
-    kwin_wayland --virtual --no-lockscreen --width 1600 --height 1002 --socket $SOCK >> "$LOG" 2>&1 &
+    kwin_wayland --virtual --no-lockscreen --width $SB_W --height $SB_H --socket $SOCK >> "$LOG" 2>&1 &
 KPID=$!
 echo $KPID > "$T/kwin.pid"
 trap 'kill $KPID 2>/dev/null; pkill -P $$ 2>/dev/null' EXIT
@@ -120,11 +146,17 @@ exit $FAIL
 IN
 chown -R $U:$U "$T" "$OUT"
 # env -i: the scenario sees nothing of the caller's environment but what is listed. GLASS_FRAMES / CAPSEQ are
-# dock-glass.sh's knobs (empty = its defaults); a new scenario knob goes here too, or it is silently dead
+# dock-glass.sh's knobs (empty = its defaults); a new scenario knob goes here too, or it is silently dead.
+# Y700_BATTERY_REPORT (batpage-run.sh): the control centre inherits it, so the page its pill opens (batpage.sh p8)
+# reads the canned report too instead of running the real one against the bed. Passed only when set and not empty:
+# an empty one would still be "set" to the page (fixture mode on a file named ""). XDG_CACHE_HOME / XDG_STATE_HOME:
+# see above
 sudo -u $U env -i HOME=/home/$U PATH=/usr/bin:/bin LANG=zh_CN.UTF-8 XDG_RUNTIME_DIR="$T/run" \
     XDG_CONFIG_HOME="$T/config" XDG_DATA_HOME="$T/data" GLASS_FRAMES="${GLASS_FRAMES:-}" CAPSEQ="${CAPSEQ:-}" \
+    XDG_CACHE_HOME="$T/cache" XDG_STATE_HOME="$T/state" \
+    ${Y700_BATTERY_REPORT:+"Y700_BATTERY_REPORT=$Y700_BATTERY_REPORT"} \
     XDG_DATA_DIRS=/home/$U/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share:/home/$U/.local/share \
-    timeout 180 dbus-run-session -- sh "$T/inner.sh" "$T" "$OUT" "$CC" "$BAR"
+    timeout 180 dbus-run-session -- sh "$T/inner.sh" "$T" "$OUT" "$CC" "$BAR" "$SBW" "$SBH"
 rc=$?
 if [ -f "$T/kwin.pid" ]; then
     kp=$(cat "$T/kwin.pid")

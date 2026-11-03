@@ -75,12 +75,20 @@ quint32 now32() { return quint32(QDateTime::currentMSecsSinceEpoch() & 0xfffffff
 // ---------------- adaptor (fcitx5 -> us) ----------------
 ImPanelAdaptor::ImPanelAdaptor(Fcitx *parent) : QDBusAbstractAdaptor(parent), m_f(parent) {}
 
-void ImPanelAdaptor::ShowVirtualKeyboard() { emit m_f->showRequested(); }
+void ImPanelAdaptor::ShowVirtualKeyboard()
+{
+    if (m_f->takeModeEcho()) return;
+    emit m_f->showRequested();
+}
 void ImPanelAdaptor::HideVirtualKeyboard()
 {
     // a real key from key-helper flips fcitx5 to physical-keyboard mode, which sends Hide:
     // that one is ours, so re-assert the on-screen mode instead of hiding
-    if (m_f->inHelperEcho()) { QTimer::singleShot(30, m_f, &Fcitx::requestShow); return; }
+    if (m_f->inHelperEcho()) {
+        emit m_f->echoHideSwallowed();
+        QTimer::singleShot(30, m_f, &Fcitx::requestShow);
+        return;
+    }
     emit m_f->hideRequested();
 }
 void ImPanelAdaptor::UpdateCandidateArea(const QStringList &c, bool hasPrev, bool hasNext, int, int cursorIndex)
@@ -102,6 +110,7 @@ Fcitx::Fcitx(QObject *parent) : QObject(parent)
         // fcitx5 (re)started: our addon may have appeared, the IM state is new (and back to English)
         m_restored = false;
         QTimer::singleShot(400, this, [this] { probeCommit(); queryIM(); });
+        QTimer::singleShot(1000, this, &Fcitx::restarted);   // its UI addons are up by then
     });
     m_rememberedIM = QSettings().value(QStringLiteral("im/last")).toString();
     probeCommit();
@@ -138,6 +147,25 @@ void Fcitx::requestShow()
 {
     auto m = QDBusMessage::createMethodCall(FCITX, VK_PATH, QStringLiteral("org.fcitx.Fcitx.VirtualKeyboard1"), QStringLiteral("ShowVirtualKeyboard"));
     QDBusConnection::sessionBus().asyncCall(m);
+}
+
+// fcitx5 sends Show/Hide on focus changes only in OnScreenKeyboard mode, and it is in physical-keyboard
+// mode when it starts and after this keyboard (re)started (2026-10-30: Steam's fields sent it FocusIn and
+// we heard nothing). requestShow() switches it, and every show() makes that call - but only Wayland
+// clients get the keyboard shown without fcitx5 (the gate's taps, the launcher), so a Steam field could
+// not bring it up until a Wayland field had. Switch now; fcitx5 answers with a Show that is ours.
+void Fcitx::enterOnScreenMode()
+{
+    m_modeClock.start();
+    requestShow();
+}
+
+bool Fcitx::takeModeEcho()
+{
+    if (!m_modeClock.isValid()) return false;
+    const bool echo = m_modeClock.elapsed() < 300;
+    m_modeClock.invalidate();               // one Show per request: a later one is for a field
+    return echo;
 }
 
 void Fcitx::requestHide()

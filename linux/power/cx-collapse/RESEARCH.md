@@ -95,7 +95,7 @@
 | 本机 | t47 在 ROW .104 开发；本机曾 OTA 到 ROW .187（换了 xbl/tz/hyp/aop/cpucp 等 54 个分区）→ t47 在其上 fbcon 切换后约 50 ms 整机挂死、7–8 s 看门狗复位（issue #9，Open，作者 1 条回复）；10-11 刷 ColorOS 17 后本机底层为国行 ZUXOS 2.0.12.088，t47 直接能启。**本机 tz/aop/cpucp/xbl 与上游作者机器不同版本；`allow_cluster_off=1` 从未在本机试过**（README:285 的数字是转述上游）。 | README:57,99,272,285,346 |
 | 本机 10-13 15:56 | 5 GHz 关联循环中整机硬复位（`failed to flush transmit queue` 后），当时簇态已被拒绝——WLAN 固件/MHI 拖死 SoC 后看门狗复位，**与簇空闲无关** | README Wi‑Fi 一节 |
 | 本机 10-15 03:41 | 5 个排查脚本同时 ssh 后掉线，卡 900E 到 11:04（73%→37%）。rawdump 的 `lastkmsg.log`：164 条 `arm-scmi.1 timed out in resp`、36 次 vblank timeout、17 次 GMU fenced write 延迟、ADC/battmgr -110——所有固件路径同时挂死 = AHB/NoC 总线挂死；头号嫌疑是读 `debugfs pcie@1c00000/link_transition_count`（5 个 PARF `readl_relaxed`），但同脚本还向 Wi‑Fi 固件发了命令，触发行已被刷出缓冲，**嫌疑最大、未查实**。与空闲复位无关。 | `crash-0341-lastkmsg.log`；README:845-850；`pcie-qcom.c:1829-1849` |
-| 本机 10-15 | `y700-dumpmode-off.timer` 开机 3 min 后关 download_mode → 静默复位 = 直接重启（前 3 分钟仍会卡 900E）；22:47 只读审计；PROTOCOL 与工具提交（738c086） | `linux/power/y700-dumpmode-off.*`；本目录 |
+| 本机 10-15 | `y700-dumpmode-off.timer` 开机 3 min 后关 download_mode → 静默复位 = 直接重启（前 3 分钟仍会卡 900E）（11-01 更正：y16 之前只对内核 panic 成立；SDI 没关，固件复位照样卡 900E，见 README「10-31 21:04 死机」；y16 起写 off 也关 SDI，见 README「内核 y16」）；22:47 只读审计；PROTOCOL 与工具提交（738c086） | `linux/power/y700-dumpmode-off.*`；本目录 |
 
 ### 2.2 两类事故要分开统计（两份研究都淡化了的关键细节）
 
@@ -156,10 +156,10 @@ vendor_boot blob 12（CanoeP v2，msm-id 0x295 v2.0 = 本机 SM8850P）与 dtbo 
 
 ### 2.6 复位源：为什么"静默"本身不区分假说
 
-- 本机 `qcom_wdt`：`pretimeout=0` → bark = bite = 30 s（`qcom-wdt.c:76-87`），bark 中断只做 `watchdog_notify_pretimeout` 且无 pretimeout governor（config 未开）→ **任何看门狗复位都没有 printk**。systemd 每 15 s 喂一次，所以 PID 1 卡死后 15–30 s 才 bite。
+- 本机 `qcom_wdt`：`pretimeout=0` → bark = bite = 30 s（`qcom-wdt.c:76-87`），bark 中断只做 `watchdog_notify_pretimeout` 且无 pretimeout governor（config 未开）→ **任何看门狗复位都没有 printk**。systemd 每 15 s 喂一次，所以 PID 1 卡死后 15–30 s 才 bite。（**11-01 更正**：y16 开了 `CONFIG_WATCHDOG_SYSFS` 后实测 `pretimeout` 是 1 s；咬测试时，咬之前 1 秒 pstore 控制台里有 `watchdog0: pretimeout event`——没有 governor 时内核默认就打这一行。所以内核还活着时的看门狗复位会留下这一行，体检靠它认（`tools/y700-checklist.py` 的 CRASH_SIGNS）；整机卡死时打不打得出来没测。见 `linux/kernel-y16/NOTES.md`。）
 - 0106 现场"CPU5-7 又跑了约 10 s 才复位"对不上 30 s：更像 TZ/hyp/AOP 侧看门狗、err-fatal 或 PS_HOLD。x1e-sleep 在 AOSD 下遇到的是每 ~61 min 一次 "Reset by PSHOLD" 硬复位（XBL 日志 Reset Type: Hard Reset），靳 QMP `{class: aoss_slp, res: sleep, val: disable}` 只禁 AOSD 规避。
 - **复位源其实已有现成取证通道却没用上**：03:41 的 rawdump 含 `RST_STAT.BIN` 与 `PMIC_PON.BIN`（`tools/rawdump-ls.py` 能导出），仓库只保存了 `lastkmsg.log`。应补导出并解码，作为"这台机复位源"的第一份样本（虽然那次是总线挂死不是空闲复位，但能校准解码）。IMEM `restart_reason`（0x14680000+0x65c）主线无驱动。PON 寄存器不要走 `regmap/*/registers` 全量 dump（PROTOCOL §4 禁区），只读小窗口或走 rawdump。
-- pstore：热重启（PSCI SYSTEM_RESET）后 ramoops 在、头部 1–2 字节 ECC 纠正（当日 5 次热重启全部验证）；长按冷切断后 6 区 uncorrectable 全丢。**固件发起的静默复位是否走热路径未知**——E1 第一次复位即知；飞行记录器因此写 pmsg + tmpfs + UFS 三份。
+- pstore：热重启（PSCI SYSTEM_RESET）后 ramoops 在、头部 1–2 字节 ECC 纠正（当日 5 次热重启全部验证）；长按冷切断后 6 区 uncorrectable 全丢。**固件发起的静默复位是否走热路径未知**——E1 第一次复位即知（11-01：10-31 那次固件复位后 pstore 还在，见 README「10-31 21:04 死机」）；飞行记录器因此写 pmsg + tmpfs + UFS 三份。
 
 ### 2.7 上游已修、在修、不会修
 
@@ -175,7 +175,7 @@ vendor_boot blob 12（CanoeP v2，msm-id 0x295 v2.0 = 本机 SM8850P）与 dtbo 
 
 ## 3. 推荐计划
 
-原则：每一步只改一个变量；无人值守一律 `download_mode=off`（开机 ≥4 min）；有人在场才临时 `full` 拿 rawdump；不读寄存器类 debugfs；一次只有一个代理上平板；设备掉线就停工作流（README:850 教训）。
+原则：每一步只改一个变量；无人值守一律 `download_mode=off`（开机 ≥4 min）；有人在场才临时 `full` 拿 rawdump（y16 起这样还拿不拿得到没试过，见 README「内核 y16」副作用）；不读寄存器类 debugfs；一次只有一个代理上平板；设备掉线就停工作流（README:850 教训）。
 
 ### 3.1 第 0 步：只读审计与文档合并（不碰内核，先做）
 
@@ -254,7 +254,7 @@ ss3 的收益由唤醒率决定（§1.4），这部分不依赖复位问题：ta
 
 1. 安卓（ColorOS 17）在本机熄屏不休眠时 `cxsd`/`aosd` 是否真的计数、驻留多少？任务前提来自 vendor DT 的能力，不是测量。作者若愿意回安卓一次，root 后 `cat /sys/kernel/debug/qcom_stats/{apss,cxsd,aosd}` 熄屏前后对比即可回答。
 2. 静默复位的复位源（PS_HOLD / APSS WDT / TZ 安全 WDT / PMIC 故障）？只有 `RST_STAT.BIN`/`PMIC_PON.BIN` 能答；0106 的"约 10 s"对不上 Linux 看门狗。
-3. 固件发起的静默复位后 DDR/ramoops 是否保留？E1 第一次复位即知。
+3. 固件发起的静默复位后 DDR/ramoops 是否保留？E1 第一次复位即知。11-01：一次样本，保留（见 README「10-31 21:04 死机」）。
 4. kaanapali Oryon v3 是否有 DC ZVA × CL5 问题？E2（x1e 序列）判别；若 kaanapali 的 cl5 保留 L2（"ret-pll-off"），机理可能不同。
 5. 上游 ROW .104 的复位在本机 088 固件上是否复现、频率如何？E1。
 6. 0106 现场为何 CPU0-4 卡在 retention 不醒：GIC redistributor ProcessorSleep 握手（内核做）与 GIC WakeRequest → 电源控制器（固件/硬件）之间丢在哪一层？安卓是否也以 `GICD_CTLR.DS=1` 运行？

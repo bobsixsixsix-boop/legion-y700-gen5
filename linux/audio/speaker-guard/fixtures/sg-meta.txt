@@ -1,0 +1,2 @@
+Found "default" metadata 44
+update: id:0 key:'default.configured.audio.sink' value:'{"name":"effect_input.y700_lenovo"}' type:'Spa:String:JSON'

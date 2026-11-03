@@ -48,7 +48,8 @@ def avb(p):
     d = open(p, "rb").read(256)
     if d[:4] != b"AVB0":
         return "no AVB0 header"
-    rb = struct.unpack_from(">Q", d, 96)[0]; fl = struct.unpack_from(">I", d, 104)[0]
+    # AvbVBMetaImageHeader: 96/104 are descriptors_offset/size; rollback_index is at 112, flags at 120 (fixed 11-01)
+    rb = struct.unpack_from(">Q", d, 112)[0]; fl = struct.unpack_from(">I", d, 120)[0]
     alg = struct.unpack_from(">I", d, 28)[0]
     return f"algo={alg} rollback_index={rb} flags={fl:#x}"
 

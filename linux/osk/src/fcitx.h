@@ -63,22 +63,26 @@ public:
     void restoreIMIfNeeded();                                     // once per fcitx5 run: switch to the remembered IM
     void requestShow();                   // tell fcitx5 the on-screen keyboard is up (OnScreenKeyboard mode)
     void requestHide();                   // user closed the keyboard
+    void enterOnScreenMode();             // OnScreenKeyboard mode without the keyboard: swallow fcitx5's Show back
     void clearAll();                      // 滑至此处清空: Ctrl+A, BackSpace on ONE ordered path (key-helper)
     void clearComposition();              // drop rime's pinyin (Escape through the VK backend)
     // debug hook experiments (tests/combo-probe.sh): one raw key-helper sequence "37d,52d,52u,37u", one VK backend event
     void rawHelper(const QString &seq);
     void rawKey(quint32 sym, quint32 code, quint32 state, bool release) { processKey(sym, code, state, release); }
     void setClientWithoutTextInput(bool x11) { m_noTextInput = x11; }
+    bool inputFocused() { return icFocused(); }   // fcitx5 has a focused input context (needs the addon)
     bool commitAvailable() const { return m_commitOk; }
     QString currentIM() const { return m_im; }
 
 signals:
     void showRequested();
     void hideRequested();
+    void echoHideSwallowed();             // a Hide taken for key-helper's echo: it may have been a real FocusOut too
     void candidatesChanged(const QStringList &list, bool hasPrev, bool hasNext, int cursor);
     void preeditChanged(const QString &text);
     void imChanged(const QString &im);
     void nameLost();
+    void restarted();                     // fcitx5 (re)appeared on the bus, in physical-keyboard mode
 
 private:
     friend class ImPanelAdaptor;
@@ -92,6 +96,7 @@ private:
     void probeCommit();
     void queryIM();
     bool inHelperEcho() const { return m_helperClock.isValid() && m_helperClock.elapsed() < 450; }
+    bool takeModeEcho();                  // the one Show fcitx5 answers enterOnScreenMode() with
 
     QString m_im;
     QString m_rememberedIM;               // last IM the owner picked (QSettings im/last), restored after fcitx5 restarts
@@ -101,4 +106,5 @@ private:
     quint64 m_serial = 0;
     bool m_serialOk = false;
     QElapsedTimer m_helperClock;          // fcitx5 sends Hide after a real key: ignore it shortly after ours
+    QElapsedTimer m_modeClock;            // enterOnScreenMode() asked: its Show is not for a field
 };

@@ -1,0 +1,64 @@
+From 817b75b6b093f1a22b93151d358d3b4d384e9649 Mon Sep 17 00:00:00 2001
+From: y700 workspace <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Sat, 31 Oct 2026 16:00:00 +0000
+Subject: [PATCH] firmware: qcom: scm: disable SDI when download mode is
+ switched off
+
+qcom_scm_probe() disables the Secure Debug Image (SDI) only when
+download mode is already off at probe time, or when the device tree
+marks it as enabled by default (qcom,sdi-enabled). Switching download
+mode off later, through the download_mode module parameter, only clears
+the download mode bits in TCSR. SDI stays armed: a watchdog bite or
+another reset that the firmware handles still enters the debug image,
+and the device waits in the dump mode screen instead of rebooting.
+
+Disable SDI as well when download mode is set to "off" after probe, and
+log the result of the SCM call. Setting it back to "full" or "mini"
+does not re-enable SDI; that takes a reboot.
+
+y700 (kernel y16): written here, not taken from upstream. On 2026-10-31
+msm_mdss_irq() took a synchronous external abort reading the
+MDSS interrupt status register. CPU0 stopped in the middle of the oops,
+panic() never ran, and the firmware reset the tablet into dump mode,
+where it stayed until it was forced off. download_mode
+had been "off" since three minutes after boot (y700-dumpmode-off
+service). The kernel command line still sets
+qcom_scm.download_mode=full (CONFIG_CMDLINE_FORCE), so probe leaves SDI
+armed and the first minutes after boot keep their dumps; with this
+change SDI is disabled when the service switches download mode off.
+The log line is "download mode off, SDI disable: <result>".
+
+y700 patch file: 1058-firmware-qcom-scm-disable-SDI-when-download-mode-is-switched-off.patch
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/firmware/qcom/qcom_scm.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9..8a4d5e9 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2735,8 +2735,18 @@ static int set_download_mode(const char *val, const struct kernel_param *kp)
+ 	download_mode = ret;
+ 	/* Pairs with smp_store_release() in qcom_scm_probe(). */
+ 	scm = smp_load_acquire(&__scm);
+-	if (scm)
++	if (scm) {
+ 		qcom_scm_set_download_mode(scm, download_mode);
++		/*
++		 * Probe disables SDI only when download mode is already off;
++		 * switched off later, a watchdog bite would still end in the
++		 * debug image and wait in dump mode.
++		 */
++		if (download_mode == QCOM_DLOAD_NODUMP) {
++			ret = qcom_scm_disable_sdi();
++			dev_info(scm->dev, "download mode off, SDI disable: %d\n", ret);
++		}
++	}
+ 
+ 	return 0;
+ }
+-- 
+2.55.0.windows.3
+

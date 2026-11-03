@@ -1,0 +1,21 @@
+[package]
+name = "y700-autobright"
+version = "0.1.0"
+edition = "2021"
+description = "y700: automatic screen brightness from the ambient light sensor, through KDE's brightness API"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (.cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/audio/speaker-guard. No D-Bus or Wayland crate: zbus would pull in some 300
+# packages, and the two protocols are needed only this far - a few method calls
+# and two signals (src/dbus.rs), and KWin's DPMS events (src/wl.rs).
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-autobright"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

@@ -6,8 +6,13 @@
 #      nv12m as the desktop user with Y700_YUV709=1 (stands in for Chrome): 1280x720 NV12 and 1920x1080 P010 with the 601
 #      hint must come out BT.709 and 640x480 stay BT.601; without Y700_YUV709 (not Chrome) 1280x720 must stay BT.601; a
 #      process with no libgallium calling it must get NULL back, not an abort
-#   2. installs /usr/local/lib/y700-yuv709.so as a NEW file + mv (running processes map the old inode)
-#   3. tries the library as an LD_PRELOAD on ls, sh, bash, python3, systemctl, sudo, sshd -t first
+#   2. tries the new library, still in the temp dir, as an LD_PRELOAD on ls, sh, bash, python3, systemctl, sudo,
+#      sshd -t (before step 3: with the line already in /etc/ld.so.preload the mv makes it live everywhere), with
+#      only this library's own line hidden from /etc/ld.so.preload: a missing or broken installed copy would otherwise
+#      fail every program here and the rerun meant to replace it could never get past this step; the other lines stay,
+#      so a broken other library stops the run here (exit 3, nothing changed) instead of in step 5, which would take
+#      out this library's healthy line (10-31 reviews)
+#   3. installs /usr/local/lib/y700-yuv709.so as a NEW file + mv (running processes map the old inode)
 #   4. adds its path to /etc/ld.so.preload (atomic mv, other lines such as y700-no-waitboost.so kept). Outside
 #      /opt/google/chrome/chrome the shim passes every call straight through.
 #   5. runs the same programs again WITHOUT LD_PRELOAD; if any fails or complains, the line is taken out again
@@ -77,8 +82,6 @@ t "not Chrome, 1280x720 NV12, 601 hint" "601 limited" "$(nv "" 1280x720)"
 t "Chrome, no libgallium loaded" "NULL" "$(iso env Y700_YUV709=1 $W/nogallium $W/y700-yuv709.so 2>/dev/null || true)"
 [ $bad = 0 ] || { echo "shim tests FAILED, not installing" >&2; exit 5; }
 
-install -m 755 $W/y700-yuv709.so $SO.new && mv -f $SO.new $SO
-
 CHECKS=("ls /" "sh -c true" "bash -c true" "python3 -c 1" "systemctl --version" "sudo -n true" "/usr/sbin/sshd -t")
 run_checks() { # $1: label; prints the failures, returns 1 if any
 	local c out bad=0
@@ -87,7 +90,20 @@ run_checks() { # $1: label; prints the failures, returns 1 if any
 	done
 	return $bad
 }
-LD_PRELOAD=$SO run_checks "LD_PRELOAD" || { echo "the library breaks a system program, not installing" >&2; exit 3; }
+# the temp copy, BEFORE it replaces $SO: with the line already in $PRE (a rerun, the apt hook) the mv makes it live
+# for every new process at once, and a library that fails here would have stayed installed (10-31 audit).
+# Not under iso, which hides all of $PRE: a broken OTHER line would pass here and fail step 5, which then takes out
+# our healthy line (exit 4). Our own line is hidden: a broken installed copy must not block its own repair (10-31 reviews)
+others() { # "$@" with $PRE showing every line but ours (bash only, like remove_line)
+	local l
+	[ -e $PRE ] || { "$@"; return; }
+	while IFS= read -r l || [ -n "$l" ]; do [ "$l" = "$SO" ] || printf '%s\n' "$l"; done < $PRE > $W/pre-others
+	unshare -m --propagation private sh -c 'mount --bind "$0" "$1" && shift && exec "$@"' $W/pre-others $PRE "$@"
+}
+others env LD_PRELOAD=$W/y700-yuv709.so bash -c "$(declare -p CHECKS); $(declare -f run_checks); run_checks LD_PRELOAD" ||
+	{ echo "the new library, or another line in $PRE (see the error), breaks a system program; not installing" >&2; exit 3; }
+
+install -m 755 $W/y700-yuv709.so $SO.new && mv -f $SO.new $SO
 
 touch $PRE
 # rebuilt line by line: a last line without a newline would otherwise be glued to ours (two broken paths)

@@ -1,17 +1,24 @@
 """chrome-vp9-check.py: the DevTools side of chrome-vp9-check.sh (see there for why and what PASS means).
-usage: python3 -I chrome-vp9-check.py --port P --http HP --log chrome.log --out summary.json [--youtube URL] [--errts 0|1]
-       [--only webcodecs,video,youtube]
+usage: python3 -I chrome-vp9-check.py --port P --http HP --log chrome.log --out summary.json [--youtube URL]
+       [--mode gray|errts|recycle] [--codec vp9,av1] [--only webcodecs,video,youtube]
 Drives the first page of a Chrome started with --remote-debugging-port=P whose stderr goes to chrome.log (with
 IRIS_VAAPI_DEBUG=1), serving the clips on http://127.0.0.1:HP/. Each part's libva-v4l2 trace lines are the chrome.log
-bytes written while it ran. --errts 0: the kernel has no iris 1051 (y13 and older), no no-show buffer is expected.
+bytes written while it ran. --mode: the kernel's NOSHOW mode (chrome-vp9-check.sh's "NOSHOW mode" block). Only errts
+(y14) expects a no-show buffer per VP9 hidden frame (matched by local patch 0001); gray (y13 and older) and recycle
+(y15 on: the kernel recycles the NOSHOW buffer itself) expect none. --errts 0|1, the older switch, means gray|errts.
+--codec av1 adds the 8-bit AV1 Main clip av1-main-8bit (IVF for WebCodecs, WebM for <video>); its hidden and
+show_existing frames come from av1-main-8bit.frames (FFmpeg's trace_headers, written by chrome-vp9-check.sh).
 Prints one line per check, exit 0 when nothing FAILed."""
 import argparse, json, os, sys, time, urllib.request
 import websocket
 
-TRACE = {   # libva-v4l2 trace lines (src/decoder.cpp, src/vp9.cpp; 0001 adds the no-show ones)
+TRACE = {   # libva-v4l2 / qcom-va-driver trace lines (src/decoder.cpp, src/vp9.cpp, src/av1.cpp; 0001 adds the no-show ones)
     "decoded": "decoded token=", "noshow": "no-show CAPTURE token=", "invisible": "VP9 invisible reference",
     "replaced": "replaced damaged picture", "nopic": "no picture after no-show",
     "discarding": "discarding completed token", "damaged": "completed damaged token", "timeout": "sync timeout",
+    # v1.1 av1.cpp: one "AV1 frame" line per VA picture (original-show=0: a hidden frame), "AV1 install reference" when
+    # the driver replays a held-back reference as NOSHOW
+    "av1_frames": "AV1 frame surface=", "av1_hidden": "original-show=0", "av1_replay": "AV1 install reference",
 }
 
 JS_LIB = r"""
@@ -41,21 +48,38 @@ window.yRows = (buf, pl, w, h) => { const n = Math.ceil(h / ROWSTEP), y = new Ui
 // leaves >= 3, see the README). The BT.601 is Chrome's EGL colour-space hint (ui/ozone/common/native_pixmap_egl_binding.cc
 // passes REC601 for everything but BT.2020); with yuv709-shim.c preloaded, or once Chrome passes the frame's BT.709, the
 // YUV -> RGB step is BT.709 instead, so both models are tried. This replays one on a software (I420) frame: YUV with
-// matrix dm (601|709), full range df -> 8-bit RGB -> Y with matrix em, full range ef; same rows as yRows. Chroma: nearest.
-window.rgbRT = (buf, l, w, h, dm, df, em, ef) => { const n = Math.ceil(h / ROWSTEP), y = new Uint8Array(w * n);
+// matrix dm (601|709), full range df -> 8-bit RGB -> Y with matrix em, full range ef; same rows as yRows. Chroma: nearest
+// (10-29: bilinear chroma, sited midway, top-left or MPEG-2 "left", left 13-27 on every frame, nearest 1 or 2).
+// y.clip marks the samples whose RGB left 0..255 and was clipped (out-of-gamut YUV, at sharp coloured edges): there
+// the round trip loses information and Chrome's own arithmetic lands 2 from the model now and then. 10-29, AV1 clip:
+// 1 sample of 259200 in 3 of 90 frames, frame 37 row 872 column 1568, YUV 108/199/189 -> B 257.1 clipped, R 216.48 and
+// G 59.475 next to a rounding step; model 107, Chrome 109; the bitstream Iris got there was byte for byte FFmpeg's,
+// which decodes bit-exact against dav1d (vaapi-check). Such a sample may differ by 2, any other by 1 (yDiff maxIn).
+window.MODELS = [['601', 601], ['709', 709]];
+window.rgbRT = (buf, l, w, h, dm, df, em, ef) => { const n = Math.ceil(h / ROWSTEP), y = new Uint8Array(w * n), c = new Uint8Array(w * n);
   const K = m => m === 601 ? [0.299, 0.114] : [0.2126, 0.0722], [dr, db] = K(dm), [er, eb] = K(em);
-  const cl = v => v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+  const cl = v => v < 0 ? 0 : v > 255 ? 255 : Math.round(v), out = v => v < 0 || v > 255;
   for (let k = 0; k < n; k++) { const r = k * ROWSTEP; for (let x = 0; x < w; x++) {
     const Y0 = buf[l[0].offset + r * l[0].stride + x], U0 = buf[l[1].offset + (r >> 1) * l[1].stride + (x >> 1)] - 128,
       V0 = buf[l[2].offset + (r >> 1) * l[2].stride + (x >> 1)] - 128;
     const Yf = df ? Y0 : (Y0 - 16) * 255 / 219, U = df ? U0 : U0 * 255 / 224, V = df ? V0 : V0 * 255 / 224;
-    const Rf = Yf + 2 * (1 - dr) * V, Bf = Yf + 2 * (1 - db) * U, R = cl(Rf), B = cl(Bf), G = cl((Yf - dr * Rf - db * Bf) / (1 - dr - db));
-    const L = er * R + (1 - er - eb) * G + eb * B; y[k * w + x] = cl(ef ? L : 16 + L * 219 / 255); } }
-  return y; };
-// how two sampled planes differ: share of pixels, signed / abs mean, max
-window.yDiff = (a, b) => { let ne = 0, sg = 0, ab = 0, mx = 0;
-  for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; if (d) { ne++; ab += Math.abs(d); sg += d; mx = Math.max(mx, Math.abs(d)); } }
-  return {differ: +(ne / a.length).toFixed(4), signed: +(sg / a.length).toFixed(3), abs: +(ab / a.length).toFixed(3), max: mx}; };
+    const Rf = Yf + 2 * (1 - dr) * V, Bf = Yf + 2 * (1 - db) * U, Gf = (Yf - dr * Rf - db * Bf) / (1 - dr - db);
+    const R = cl(Rf), B = cl(Bf), G = cl(Gf), L = er * R + (1 - er - eb) * G + eb * B;
+    y[k * w + x] = cl(ef ? L : 16 + L * 219 / 255); if (out(Rf) || out(Gf) || out(Bf)) c[k * w + x] = 1; } }
+  y.clip = c; return y; };
+// how two sampled planes differ: share of pixels, signed / abs mean, max, how many samples are off by 2 or more; with a
+// model (b.clip) also maxIn, the largest difference on samples the model did not clip, and how many it clipped
+window.yDiff = (a, b) => { let ne = 0, sg = 0, ab = 0, mx = 0, n2 = 0, mi = 0, nc = 0; const c = b.clip;
+  for (let i = 0; i < a.length; i++) { const d = a[i] - b[i], ad = Math.abs(d); if (c && c[i]) nc++;
+    if (d) { ne++; ab += ad; sg += d; mx = Math.max(mx, ad); if (ad > 1) n2++; if (!(c && c[i])) mi = Math.max(mi, ad); } }
+  return {differ: +(ne / a.length).toFixed(4), signed: +(sg / a.length).toFixed(3), abs: +(ab / a.length).toFixed(3), max: mx, n2,
+    maxIn: mi, clipped: nc}; };
+// a sampled hardware readback a explained by model b: within 1, or 2 where the model clipped RGB (rgbRT)
+window.fits = m => m.maxIn <= 1 && m.max <= 2;
+// the first lim samples off by 2 or more: [luma row, column, a, b] (a, b: sampled planes of width w, every ROWSTEP-th row)
+window.yOff = (a, b, w, lim) => { const o = [];
+  for (let i = 0; i < a.length && o.length < lim; i++) { const d = a[i] - b[i]; if (d > 1 || d < -1) o.push([Math.floor(i / w) * ROWSTEP, i % w, a[i], b[i]]); }
+  return o; };
 // [mean signed difference a - b, mean absolute difference]
 window.cmp = (a, b) => { let s = 0, d = 0; for (let k = 0; k < a.length; k++) { const x = a[k] - b[k]; s += x; d += Math.abs(x); }
   return [s / a.length, d / a.length]; };
@@ -107,8 +131,8 @@ window.runWC = async (url, codec, refUrl) => {
       if (f.format === 'NV12' || f.format === 'I420') {
         const vr = f.visibleRect, buf = new Uint8Array(f.allocationSize());
         pend.push(f.copyTo(buf).then(l => { rec.yh = yHash(buf, l[0], vr.width, vr.height); rec.rows = yRows(buf, l[0], vr.width, vr.height);
-            if (f.format === 'I420') rec.mrows = {601: rgbRT(buf, l, vr.width, vr.height, 601, 0, 709, 0),
-                                                  709: rgbRT(buf, l, vr.width, vr.height, 709, 0, 709, 0)};
+            if (f.format === 'I420') rec.mrows = Object.fromEntries(MODELS.map(([k, dm]) =>
+                                                   [k, rgbRT(buf, l, vr.width, vr.height, dm, 0, 709, 0)]));
             if (!geo) geo = {coded: [f.codedWidth, f.codedHeight], visible: [vr.x, vr.y, vr.width, vr.height], layout: l}; })
           .catch(e => { rec.yh = 'copyTo ' + e.name; }).finally(() => f.close()));
       } else f.close(); }, error: e => { err = err || String(e); }});
@@ -129,7 +153,9 @@ window.runWC = async (url, codec, refUrl) => {
   // every packet outputs one frame (a superframe's hidden frames output nothing), so output ordinal = packet number;
   // these are the 1-byte show_existing_frame packets the -sef clips insert
   const sefAt = pkts.map((p, i) => p.length === 1 ? i + 1 : 0).filter(Boolean);
-  const r = {w, h, packets: pkts.length, sefAt, hidden: vp9Hidden(pkts), sw: {supported: sw.supported, n: sw.out ? sw.out.length : 0, err: sw.err || null,
+  // hidden frames: parsed here for VP9; for AV1 the Python side fills them in from FFmpeg's header trace
+  const r = {w, h, packets: pkts.length, sefAt, hidden: codec.startsWith('vp09') ? vp9Hidden(pkts) : null,
+    sw: {supported: sw.supported, n: sw.out ? sw.out.length : 0, err: sw.err || null,
     fmt: sw.fmt || null, cs: sw.cs || null, ms: sw.ms || 0}, hw: {supported: hw.supported, n: hw.out ? hw.out.length : 0,
     err: hw.err || null, fmt: hw.fmt || null, cs: hw.cs || null, ms: hw.ms || 0}};
   if (refUrl) {   // output frame i against FFmpeg's frame i (FFmpeg outputs the show_existing frames too: 97 for -sef)
@@ -154,9 +180,9 @@ window.runWC = async (url, codec, refUrl) => {
     const H = hw.out.map(f => f.y), S = sw.out.map(f => f.y);
     r.near = nearest(H, S); r.near.shift1 = nearest(H.slice(1), S).wrong;
     // decoded Y planes, hardware vs software, frame by frame (8-bit only; null = not comparable): bit for bit, or else
-    // every sampled pixel of the hardware readback within 1 of libvpx's frame put through a readback model (by: how
-    // many frames each YUV -> RGB matrix explained)
-    const swF = new Map(sw.out.map(f => [f.ts, f])), ex = {compared: 0, equal: 0, model: 0, modelMax: 0, by: {}, differ: [], errors: []};
+    // every sampled pixel of the hardware readback within 1 of the software frame put through one of the readback
+    // models (models: per model, the frames it explains, its largest difference and summed mean abs difference)
+    const swF = new Map(sw.out.map(f => [f.ts, f])), ex = {compared: 0, equal: 0, model: 0, modelMax: 0, models: {}, differ: [], errors: []};
     let first = null;
     hw.out.forEach((f, i) => { const s = swF.get(f.ts);
       if (!s) return;
@@ -164,10 +190,14 @@ window.runWC = async (url, codec, refUrl) => {
       if (f.yh === null || s.yh === null) return;
       ex.compared++;
       if (f.yh === s.yh) { ex.equal++; return; }
-      const ms = s.mrows ? [601, 709].map(k => [k, yDiff(f.rows, s.mrows[k])]) : [], hit = ms.find(([, m]) => m.max <= 1);
-      if (hit) { ex.model++; ex.by[hit[0]] = (ex.by[hit[0]] || 0) + 1; ex.modelMax = Math.max(ex.modelMax, hit[1].max); return; }
+      const ms = s.mrows ? MODELS.map(([k]) => [k, yDiff(f.rows, s.mrows[k])]) : [];
+      ms.forEach(([k, m]) => { const st = ex.models[k] || (ex.models[k] = {fit: 0, max: 0, abs: 0, n: 0, clip2: 0});
+        st.n++; st.abs += m.abs; st.max = Math.max(st.max, m.max); if (fits(m)) { st.fit++; st.clip2 += m.n2; } });
+      const best = ms.find(([, m]) => fits(m)) || ms.reduce((b, c) => !b || c[1].max < b[1].max ? c : b, null);
+      if (best && fits(best[1])) { ex.model++; ex.modelMax = Math.max(ex.modelMax, best[1].max); return; }
       if (ex.differ.length < 12) ex.differ.push(i + 1);
-      if (!first) first = {frame: i + 1, direct: yDiff(f.rows, s.rows), model601: ms[0] ? ms[0][1] : null, model709: ms[1] ? ms[1][1] : null}; });
+      if (!first) first = {frame: i + 1, direct: yDiff(f.rows, s.rows), models: Object.fromEntries(ms),
+        off: best ? yOff(f.rows, s.mrows[best[0]], w, 8) : []}; });
     if (first) { ex.first = first; ex.geo = {hw: hw.geo, sw: sw.geo}; }
     r.exact = ex;
   }
@@ -357,21 +387,46 @@ def check(name, ok, detail):
         fails += 1
 
 
-ERRTS = 1   # --errts: 1 = the kernel gives the NOSHOW error buffer the hidden frame's timestamp (iris 1051, y14 on)
+MODE = "errts"   # --mode: the kernel's NOSHOW mode, gray | errts | recycle (chrome-vp9-check.sh)
 
 
-def trace_ok(name, c, hidden=None):
-    """hidden: the hidden frames the part decoded (the clip's count), None = unknown (YouTube). With 1051 every one
-    of them comes back as a no-show CAPTURE buffer that 0001 matches; without it (y13) none does."""
+def trace_ok(name, c, hidden=None, codec="vp9"):
+    """hidden: the hidden frames the part decoded (the clip's count), None = unknown (YouTube, seeks).
+    VP9: in errts mode (y14, 1051) every hidden frame comes back as a no-show CAPTURE buffer that 0001 matches; in gray
+    (y13) and recycle mode (y15, 1052 recycles it in the kernel) none does. AV1: no no-show line in any mode (0001 is
+    VP9 only), at least one "AV1 frame" line, and with a known clip one hidden VA picture per hidden frame."""
     bad = [k for k in ("replaced", "nopic", "discarding", "timeout") if c[k]]
-    noshow_want = c["invisible"] if ERRTS else 0
+    if codec == "av1":
+        ok = (c["decoded"] > 0 and c["av1_frames"] > 0 and not bad and c["noshow"] == 0
+              and (hidden is None or c["av1_hidden"] == hidden))
+        check(name + " trace", ok, f"decoded {c['decoded']}, AV1 pictures {c['av1_frames']}, hidden {c['av1_hidden']}"
+              + (f" (the clip has {hidden} hidden frames)" if hidden is not None else "") +
+              f", reference replays {c['av1_replay']}, no-show {c['noshow']} (expected 0), replaced {c['replaced']}, "
+              f"discarding {c['discarding']}, sync timeout {c['timeout']}, damaged {c['damaged']}, "
+              f"Chrome media errors {c['chrome_errors']} (NOSHOW mode {MODE})")
+        if not c["av1_hidden"]:
+            print(f"SKIP  {name} hidden frames: no hidden AV1 picture decoded, the NOSHOW path was not exercised", flush=True)
+        return
+    noshow_want = c["invisible"] if MODE == "errts" else 0
     ok = c["decoded"] > 0 and not bad and c["noshow"] == noshow_want and (hidden is None or c["invisible"] == hidden)
-    check(name + " trace", ok, f"decoded {c['decoded']}, no-show {c['noshow']} (expected {noshow_want}) / invisible "
-          f"{c['invisible']}" + (f" (the clip has {hidden} hidden frames)" if hidden is not None else "") +
+    check(name + " trace", ok, f"decoded {c['decoded']}, no-show {c['noshow']} (expected {noshow_want}, NOSHOW mode "
+          f"{MODE}) / invisible {c['invisible']}" + (f" (the clip has {hidden} hidden frames)" if hidden is not None else "") +
           f", replaced {c['replaced']}, no-picture {c['nopic']}, discarding {c['discarding']}, sync timeout {c['timeout']}, "
           f"damaged {c['damaged']}, Chrome media errors {c['chrome_errors']}")
     if not c["invisible"]:
         print(f"SKIP  {name} hidden frames: no VP9 invisible reference decoded, the no-show path was not exercised", flush=True)
+
+
+AV1_CLIP = "av1-main-8bit"
+
+
+def av1_info(base):
+    """the AV1 clip's frames from FFmpeg's header trace (chrome-vp9-check.sh writes AV1_CLIP.frames: "H <n>" per hidden
+    frame, "E <k>" per show_existing_frame at output frame k, "S <output frames>")"""
+    with urllib.request.urlopen(f"{base}/{AV1_CLIP}.frames", timeout=10) as f:
+        rows = [l.split() for l in f.read().decode().splitlines() if len(l.split()) == 2]
+    return {"hidden": sum(1 for k, _ in rows if k == "H"), "sef": [int(v) for k, v in rows if k == "E"],
+            "frames": next((int(v) for k, v in rows if k == "S"), None)}
 
 
 def platform_ok(name, pl):
@@ -390,13 +445,23 @@ def main():
     ap.add_argument("--log", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--youtube")
-    ap.add_argument("--errts", type=int, choices=(0, 1), default=1)
+    ap.add_argument("--mode", choices=("gray", "errts", "recycle"))
+    ap.add_argument("--errts", type=int, choices=(0, 1), help="older switch: 0 = --mode gray, 1 = --mode errts")
+    ap.add_argument("--codec", default="vp9", help="comma list of vp9, av1")
     ap.add_argument("--only", default="webcodecs,video,youtube", help="comma list of parts to run")
     a = ap.parse_args()
-    parts = set(a.only.split(","))
-    global ERRTS
-    ERRTS = a.errts
+    parts, codecs = set(a.only.split(",")), set(a.codec.split(","))
+    if not codecs or codecs - {"vp9", "av1"}:
+        ap.error(f"--codec {a.codec}: a comma list of vp9, av1")
+    global MODE
+    MODE = a.mode or {0: "gray", 1: "errts"}.get(a.errts, "errts")
+    print(f"      NOSHOW mode {MODE}, codecs {','.join(sorted(codecs))}", flush=True)
     base = f"http://127.0.0.1:{a.http}"
+    av1 = None
+    if "av1" in codecs:
+        av1 = av1_info(base)
+        print(f"      {AV1_CLIP}: {av1['frames']} output frames, {av1['hidden']} hidden, show_existing at "
+              f"{av1['sef'] or '-'} (FFmpeg's header trace)", flush=True)
     log = Log(a.log)
     cdp = CDP(a.port)
     for m in ("Page.enable", "Runtime.enable", "Media.enable"):
@@ -413,7 +478,7 @@ def main():
     try:
         caps = cdp.eval(r"""(async () => { const out = {};
           for (const [n, c] of [['hevc main', 'hvc1.1.6.L120.90'], ['hevc main10', 'hvc1.2.4.L120.90'], ['vp9 p0', 'vp09.00.40.08'],
-                                ['vp9 p2', 'vp09.02.40.10'], ['av1', 'av01.0.08M.08']]) {
+                                ['vp9 p2', 'vp09.02.40.10'], ['av1 8-bit', 'av01.0.08M.08'], ['av1 10-bit', 'av01.0.08M.10']]) {
             const t = `video/mp4; codecs="${c}"`; let d;
             try { d = await navigator.mediaCapabilities.decodingInfo({type: 'media-source',
                     video: {contentType: t, width: 1920, height: 1080, bitrate: 8e6, framerate: 30}}); } catch (e) { d = {error: String(e)}; }
@@ -427,10 +492,15 @@ def main():
         print(f"INFO  decoding capabilities not read: {type(e).__name__}: {e}"[:300], flush=True)
 
     # webcodecs
-    for clip, codec, want in (("vp9-p0.ivf", "vp09.00.10.08", 90), ("vp9-p0-sef.ivf", "vp09.00.10.08", 97),
-                              ("vp9-p2-10bit.ivf", "vp09.02.10.10", 90), ("vp9-p2-10bit-sef.ivf", "vp09.02.10.10", 97)
-                              ) if "webcodecs" in parts else ():
+    wclips = []
+    if "vp9" in codecs:
+        wclips += [("vp9-p0.ivf", "vp09.00.10.08", 90), ("vp9-p0-sef.ivf", "vp09.00.10.08", 97),
+                   ("vp9-p2-10bit.ivf", "vp09.02.10.10", 90), ("vp9-p2-10bit-sef.ivf", "vp09.02.10.10", 97)]
+    if av1:
+        wclips += [(AV1_CLIP + ".ivf", "av01.0.08M.08", av1["frames"])]
+    for clip, codec, want in wclips if "webcodecs" in parts else ():
         name = "webcodecs " + clip
+        kind = "av1" if clip.startswith("av1") else "vp9"
         cdp.eval(JS_LIB + JS_WC + ";1")
         k, x = len(cdp.events), log.mark()
         ref = base + "/" + clip.replace(".ivf", ".ref.rgb")
@@ -441,6 +511,8 @@ def main():
             continue
         c, errs = log.counts(x, log.mark())
         r["trace"], r["players"], r["chrome_errors"] = c, cdp.players(k), errs
+        if kind == "av1":   # an AV1 show_existing frame is no 1-byte packet: FFmpeg's header trace says where they are
+            r["hidden"], r["sefAt"] = av1["hidden"], av1["sef"]
         results[name] = r
         sw, hw, d = r["sw"], r["hw"], r.get("diff") or {}
         print(f"      {clip} {r['w']}x{r['h']}, {r['packets']} packets, show_existing at {r['sefAt'] or '-'}; "
@@ -465,26 +537,38 @@ def main():
         ex = r.get("exact") or {}
         if ex.get("compared") or ex.get("errors"):
             ok = ex.get("compared") == hw["n"] and ex.get("equal", 0) + ex.get("model", 0) == ex.get("compared") and not ex.get("errors")
-            check(name + " exact", ok, f"decoded Y plane hardware vs software (libvpx), {ex.get('compared')} of {hw['n']} frames: "
+            mods = ", ".join(f"{k} {v['fit']}/{v['max']}/{v['abs'] / max(v['n'], 1):.3f}/{v['clip2']}"
+                             for k, v in (ex.get("models") or {}).items())
+            check(name + " exact", ok, f"decoded Y plane hardware vs software ({'dav1d' if kind == 'av1' else 'libvpx'}), "
+                  f"{ex.get('compared')} of {hw['n']} frames: "
                   f"{ex.get('equal')} bit for bit, {ex.get('model')} equal through Chrome's readback (YUV -> RGB -> BT.709, "
-                  f"every 8th row, max {ex.get('modelMax')}; decoded with BT.601: {ex.get('by', {}).get('601', 0)}, "
-                  f"BT.709: {ex.get('by', {}).get('709', 0)})" + (f", differ at {ex['differ']}" if ex.get("differ") else "")
+                  f"every 8th row, within 1, 2 only where the model clipped RGB; max {ex.get('modelMax')}; per model, frames "
+                  f"explained / max / mean abs / samples at 2 in them: {mods or '-'})"
+                  + (f", differ at {ex['differ']}" if ex.get("differ") else "")
                   + (f", errors {ex['errors']}" if ex.get("errors") else ""))
             if ex.get("first"):
                 print(f"      first differing frame {json.dumps(ex['first'])}; geometry {json.dumps(ex.get('geo'))}", flush=True)
         else:
             print(f"      {clip}: decoded planes not compared (hardware frames are {hw['fmt']}: no copyTo)", flush=True)
-        trace_ok(name, c, r["hidden"])
+        trace_ok(name, c, r["hidden"], kind)
 
     # video
-    for clip, want in (("vp9-p0.webm", 90), ("vp9-p0-sef.webm", 97), ("vp9-p2-10bit-sef.webm", 97)) if "video" in parts else ():
+    vclips = []
+    if "vp9" in codecs:
+        vclips += [("vp9-p0.webm", 90), ("vp9-p0-sef.webm", 97), ("vp9-p2-10bit-sef.webm", 97)]
+    if av1:
+        vclips += [(AV1_CLIP + ".webm", av1["frames"])]
+    for clip, want in vclips if "video" in parts else ():
         name = "video " + clip
+        kind = "av1" if clip.startswith("av1") else "vp9"
         wc = results.get("webcodecs " + clip.replace(".webm", ".ivf")) or {}   # the same bitstream as IVF
         sef = wc.get("sefAt")
         ref = base + "/" + clip.replace(".webm", ".ref.rgb")
         cdp.navigate(base + "/index.html")
         cdp.eval(JS_LIB + JS_VIDEO + ";1")
-        if sef is None:   # no webcodecs part this run: read the show_existing packets from the IVF
+        if kind == "av1":
+            sef = av1["sef"]
+        elif sef is None:   # no webcodecs part this run: read the show_existing packets from the IVF
             sef = cdp.eval(f"sefOf({json.dumps(base + '/' + clip.replace('.webm', '.ivf'))})") if "-sef" in clip else []
         k, x = len(cdp.events), log.mark()
         try:
@@ -496,9 +580,11 @@ def main():
         x2 = log.mark()
         c, errs = log.counts(x, x2)
         # paused seeks, what a scrub does: Chrome flushes the decoder and decodes from the keyframe to the frame sought;
-        # in the -sef clips to each show_existing frame (the gray one when a hidden frame was grayed). The <video> as
-        # drawImage gives it and as the compositor shows it (Page.captureScreenshot of the element), each by content
-        seeks, shots = sef or [20, 45, 70], []
+        # in the -sef clips to each show_existing frame (the gray one when a hidden frame was grayed; the AV1 clip has
+        # dozens: up to 8 spread over the clip). The <video> as drawImage gives it and as the compositor shows it
+        # (Page.captureScreenshot of the element), each by content
+        seeks = (sef[::max(1, len(sef) // 8)][:8] if kind == "av1" else sef) or [20, 45, 70]
+        shots = []
         for kf in seeks:
             try:
                 at = cdp.eval(f"showFrame({kf}, {json.dumps(ref)})", timeout=20)
@@ -521,7 +607,7 @@ def main():
               f"missed {r['missed']}), decoded {r['total']}, dropped {r['dropped']}"
               + (f"; vs FFmpeg (signed / abs / max abs) {r['ref']}" if r.get("ref") else ""))
         check(name + " gray", not r["gray"], f"gray frames {r['gray'] or 0}")
-        trace_ok(name, c, wc.get("hidden"))
+        trace_ok(name, c, av1["hidden"] if kind == "av1" else wc.get("hidden"), kind)
 
         def desc(w):
             return (f"frame {w['frame']}" + ("" if w["ok"] else f" (the one sought: {w['own']} away, the closest: {w['best']})")
@@ -533,7 +619,7 @@ def main():
               f"sought, not gray, at {len(shots) - len(bad)} of {len(shots)}"
               + "".join(f"; seek {s['seek']}: " + (s["error"] if "error" in s else
                         f"currentTime {s['t']}, drawImage {desc(s['drawn'])}, screen {desc(s['screen'])}") for s in bad))
-        trace_ok(name + " seek", c2)
+        trace_ok(name + " seek", c2, None, kind)
         # informational: the matrix of the <video> drawImage path (the playback) and of the compositor (the seeks)
         scr = [s["screen"] for s in shots if "screen" in s and s["screen"].get("bt709") is not None]
         print(f"INFO  {name} matrix, abs vs FFmpeg BT.709 / BT.601: <video> drawImage {(r.get('ref') or {}).get('mad')} / "
@@ -584,8 +670,11 @@ def main():
                       f"dropped {s.get('dropped')}, paused {s.get('paused')}, ad {s.get('ad')}", flush=True)
             last = samples[-1]
             codec = " ".join(str(s.get("codec")) for s in samples)
-            if "vp09" not in codec:
-                print(f"SKIP  youtube: served {codec or 'unknown codec'}, not VP9 (page '{last.get('title')}')", flush=True)
+            # VP9 while no-av1.js hides AV1 (or AV1 is not hardware); 8-bit AV1 once it lets AV1 Main through (v1.6)
+            served = "vp9" if "vp09" in codec else "av1" if "av01" in codec else None
+            results[name]["served"] = served
+            if not served:
+                print(f"SKIP  youtube: served {codec or 'unknown codec'}, neither VP9 nor AV1 (page '{last.get('title')}')", flush=True)
             else:
                 platform_ok(name, pl)
                 hk = last.get("hook") or {}
@@ -598,7 +687,7 @@ def main():
                 check(name + " gray", covered and not hk.get("gray"),
                       f"gray frames {hk.get('gray')} at {hk.get('grayAt') or '-'}; the hook drew {drawn} of {shown} frames "
                       f"decoded since it was set ({hook}{', error ' + hk['err'] if hk.get('err') else ''}; needs half)")
-                trace_ok(name, c)
+                trace_ok(name, c, None, served)
 
     results["fails"] = fails
 

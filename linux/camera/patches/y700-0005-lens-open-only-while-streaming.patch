@@ -1,0 +1,387 @@
+Description: libcamera: camera_lens: keep the lens subdev open only while streaming
+ CameraLens opened the lens subdev in init() and kept it open for the life
+ of the CameraManager. Lens drivers power the actuator while their node is
+ open: dw9719 (the GT9764 VCM of the TB323FU rear camera) takes a runtime
+ PM reference in its open handler. In a desktop session PipeWire and
+ WirePlumber each keep a CameraManager for the whole session, so the VCM
+ regulator (vreg_l6b_2p8) stayed on and the lens stayed driven with no
+ camera in use.
+ .
+ CameraLens:
+  - init() closes the subdev once the driver is validated and the model
+    and controls are cached. That instance is never reopened, so controls()
+    and its ControlId pointers stay valid and unchanged.
+  - open() opens a separate, new V4L2Subdevice instance (a no-op when
+    open), close() destroys it, isOpen() reports it.
+  - setFocusPosition() opens the lens on demand. The IPU3 and Raspberry Pi
+    pipeline handlers, which never call open() or close(), keep working:
+    the lens opens on their first focus write and stays open as before,
+    just no longer from CameraManager start. They are deliberately not
+    made to close at stop: the Raspberry Pi IPA sends its default lens
+    position only on the first start, so the lens would be left at rest
+    while the IPA assumes otherwise.
+ .
+ Simple pipeline handler:
+  - start() opens the lens just before streamon. Failure is a warning,
+    not a start failure; autofocus then reports AfStateFailed.
+  - stopDevice() closes it last, after the software ISP has stopped and
+    delivered its pending metadata. dw9719 then ramps the lens down to 0
+    and cuts its supplies in its runtime suspend handler, after its 1 s
+    autosuspend delay, so no userspace parking is needed.
+  - moveFocus() refuses to move a closed lens instead of letting
+    CameraLens reopen it outside the start()..stop() window.
+  - A lens failure no longer fails the request: handleFocusControls()
+    returns void, the frame is captured and AfState reports the failure.
+  - resetAutoFocus() also clears afCurrentFrame_ and afMoveFrame_. Request
+    sequence numbers restart at 0 on every start, and the stale values of
+    the previous run held the first scan back for as many frames as that
+    run lasted (a bug of patch 0004).
+  - updateAutoFocus() returns early for a camera without a focus lens, as
+    handleFocusControls() already did. As in iceland-mainline, patches
+    0003-0004 attached AfMode, AfState and FocusAbsolute to every completed
+    request of a fixed-focus camera (the TB323FU front camera), which
+    advertises none of these controls, telling applications it could focus.
+ .
+ Everything runs in the pipeline handler thread, as before.
+Author: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Origin: vendor
+Forwarded: no
+Last-Update: 2026-10-29
+---
+ include/libcamera/internal/camera_lens.h |  4 +
+ src/libcamera/camera_lens.cpp            | 94 ++++++++++++++++++++++-
+ src/libcamera/pipeline/simple/simple.cpp | 95 +++++++++++++++++-------
+ 3 files changed, 161 insertions(+), 32 deletions(-)
+
+diff --git a/include/libcamera/internal/camera_lens.h b/include/libcamera/internal/camera_lens.h
+index f347c5e..7892d86 100644
+--- a/include/libcamera/internal/camera_lens.h
++++ b/include/libcamera/internal/camera_lens.h
+@@ -27,6 +27,9 @@ public:
+ 	~CameraLens();
+ 
+ 	int init();
++	int open();
++	void close();
++	bool isOpen() const { return active_ != nullptr; }
+ 	int setFocusPosition(int32_t position);
+ 
+ 	const std::string &model() const { return model_; }
+@@ -43,6 +46,7 @@ private:
+ 
+ 	const MediaEntity *entity_;
+ 	std::unique_ptr<V4L2Subdevice> subdev_;
++	std::unique_ptr<V4L2Subdevice> active_;
+ 
+ 	std::string model_;
+ };
+diff --git a/src/libcamera/camera_lens.cpp b/src/libcamera/camera_lens.cpp
+index ccc2a6a..cfd3000 100644
+--- a/src/libcamera/camera_lens.cpp
++++ b/src/libcamera/camera_lens.cpp
+@@ -27,6 +27,21 @@ LOG_DEFINE_CATEGORY(CameraLens)
+  * The CameraLens class eases handling of lens for pipeline handlers by
+  * hiding the details of the V4L2 subdevice kernel API and caching lens
+  * information.
++ *
++ * Lens actuator drivers commonly power the actuator for as long as their
++ * subdev node is open: the dw9719 driver, for instance, takes a runtime PM
++ * reference in its subdev open handler and drops it in the close handler. A
++ * CameraLens lives as long as the CameraManager that created it, which for a
++ * desktop media server means the whole session, so the subdev node is only
++ * kept open while it is needed. init() closes it again once the lens
++ * information has been cached, and the node is reopened by open(), or on
++ * demand by setFocusPosition(), and closed by close().
++ *
++ * The lens information returned by controls() is cached at init() time and
++ * stays valid, unchanged, whether the lens is open or not.
++ *
++ * CameraLens is not thread-safe. All functions shall be called from the
++ * thread that runs the pipeline handler.
+  */
+ 
+ /**
+@@ -62,7 +77,14 @@ int CameraLens::init()
+ 		return -EINVAL;
+ 	}
+ 
+-	/* Create and open the subdev. */
++	/*
++	 * Create and open the subdev to validate the driver and cache the lens
++	 * information, then close it so that the lens driver can power the
++	 * actuator down while the camera is not in use. subdev_ is never
++	 * reopened: it only holds the control information returned by
++	 * controls(), which then never changes. Focus positions are written
++	 * through the separate instance created by open().
++	 */
+ 	subdev_ = std::make_unique<V4L2Subdevice>(entity_);
+ 	int ret = subdev_->open();
+ 	if (ret < 0)
+@@ -73,23 +95,87 @@ int CameraLens::init()
+ 		return ret;
+ 
+ 	model_ = subdev_->model();
++	subdev_->close();
++
++	return 0;
++}
++
++/**
++ * \brief Open the lens subdev to control the lens
++ *
++ * Open the lens subdev node, if it isn't open already. Most lens drivers keep
++ * the actuator powered, and holding its position, for as long as the node is
++ * open. Pipeline handlers that control when the lens is powered call open()
++ * when starting capture and close() when stopping it. Pipeline handlers that
++ * don't call open() get the lens opened on demand by the first call to
++ * setFocusPosition(), and kept open until close() is called or the CameraLens
++ * is destroyed.
++ *
++ * \return 0 on success or a negative error code otherwise
++ */
++int CameraLens::open()
++{
++	if (active_)
++		return 0;
++
++	/*
++	 * Use a new instance for every open, so that a failed open never
++	 * leaves a half-initialised device behind, and the control information
++	 * of a previous open is never rebuilt in place.
++	 */
++	auto subdev = std::make_unique<V4L2Subdevice>(entity_);
++	int ret = subdev->open();
++	if (ret < 0)
++		return ret;
++
++	active_ = std::move(subdev);
+ 	return 0;
+ }
+ 
++/**
++ * \brief Close the lens subdev
++ *
++ * Close the lens subdev node, if it is open, allowing the lens driver to power
++ * the actuator down. The lens driver decides where the lens rests when
++ * powered down; drivers that would let the lens hit its end stop are expected
++ * to move it to a safe position themselves, as the dw9719 driver does in its
++ * runtime suspend handler.
++ *
++ * Whether the next open() moves the lens back to the position set last
++ * depends on the driver. Callers that need an exact position shall set it
++ * again once the lens is open, keeping in mind that V4L2 skips writing a
++ * control whose value doesn't change.
++ */
++void CameraLens::close()
++{
++	active_.reset();
++}
++
++/**
++ * \fn CameraLens::isOpen()
++ * \brief Check if the lens subdev is open
++ * \return True if the lens subdev is open, false otherwise
++ */
++
+ /**
+  * \brief This function sets the focal point of the lens to a specific position.
+  * \param[in] position The focal point of the lens
+  *
+  * This function sets the value of focal point of the lens as in \a position.
++ * The lens subdev is opened first if it isn't open, see open().
+  *
+- * \return 0 on success or -EINVAL otherwise
++ * \return 0 on success or a negative error code otherwise
+  */
+ int CameraLens::setFocusPosition(int32_t position)
+ {
+-	ControlList lensCtrls(subdev_->controls());
++	int ret = open();
++	if (ret < 0)
++		return ret;
++
++	ControlList lensCtrls(active_->controls());
+ 	lensCtrls.set(V4L2_CID_FOCUS_ABSOLUTE, static_cast<int32_t>(position));
+ 
+-	if (subdev_->setControls(&lensCtrls))
++	if (active_->setControls(&lensCtrls))
+ 		return -EINVAL;
+ 
+ 	return 0;
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 1d9969a..80c4c30 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -296,7 +296,7 @@ public:
+ 			 Transform transform = Transform::Identity);
+ 	void imageBufferReady(FrameBuffer *buffer);
+ 	void clearIncompleteRequests();
+-	int handleFocusControls(Request *request);
++	void handleFocusControls(Request *request);
+ 	void updateAutoFocus(Request *request, uint32_t frame,
+ 			     const ControlList &metadata);
+ 	void resetAutoFocus();
+@@ -814,6 +814,15 @@ int SimpleCameraData::init()
+ 
+ int SimpleCameraData::moveFocus(int32_t position)
+ {
++	/*
++	 * The lens is open, and powered, only while the camera is running, see
++	 * SimplePipelineHandler::start(). Never let CameraLens reopen it on
++	 * demand outside of that window, and stay quiet when it failed to open
++	 * at start, as start() has already warned.
++	 */
++	if (!focusLens_->isOpen())
++		return -ENODEV;
++
+ 	position = std::clamp(position, focusMinimum_, focusMaximum_);
+ 	int ret = focusLens_->setFocusPosition(position);
+ 	if (ret < 0) {
+@@ -931,59 +940,59 @@ void SimpleCameraData::writeFocusMetadata(Request *request)
+ 	metadata.set(controls::draft::FocusAbsolute, focusPosition_);
+ }
+ 
+-int SimpleCameraData::handleFocusControls(Request *request)
++void SimpleCameraData::handleFocusControls(Request *request)
+ {
+ 	if (!focusLens_)
+-		return 0;
++		return;
+ 
++	/*
++	 * A lens that can't be moved doesn't fail the request: the frame is
++	 * still captured, startAutoFocus() reports AfStateFailed and
++	 * moveFocus() logs the error.
++	 */
+ 	if (afStartPending_) {
+ 		afStartPending_ = false;
+-		if (afMode_ == controls::AfModeContinuous) {
+-			int ret = startAutoFocus();
+-			if (ret < 0)
+-				return ret;
+-		}
++		if (afMode_ == controls::AfModeContinuous)
++			startAutoFocus();
+ 	}
+ 
+ 	const auto &mode = request->controls().get(controls::AfMode);
+ 	if (mode && *mode != afMode_) {
+ 		afMode_ = *mode;
+ 		cancelAutoFocus();
+-		if (afMode_ == controls::AfModeContinuous) {
+-			int ret = startAutoFocus();
+-			if (ret < 0)
+-				return ret;
+-		}
++		if (afMode_ == controls::AfModeContinuous)
++			startAutoFocus();
+ 	}
+ 
+ 	const auto &trigger = request->controls().get(controls::AfTrigger);
+ 	if (trigger && afMode_ == controls::AfModeAuto) {
+ 		if (*trigger == controls::AfTriggerStart &&
+-		    afState_ != controls::AfStateScanning) {
+-			int ret = startAutoFocus();
+-			if (ret < 0)
+-				return ret;
+-		} else if (*trigger == controls::AfTriggerCancel) {
++		    afState_ != controls::AfStateScanning)
++			startAutoFocus();
++		else if (*trigger == controls::AfTriggerCancel)
+ 			cancelAutoFocus();
+-		}
+ 	}
+ 
+ 	const auto &position =
+ 		request->controls().get(controls::draft::FocusAbsolute);
+-	if (position && afMode_ == controls::AfModeManual) {
+-		int ret = moveFocus(*position);
+-		if (ret < 0)
+-			return ret;
+-	}
++	if (position && afMode_ == controls::AfModeManual)
++		moveFocus(*position);
+ 
+ 	writeFocusMetadata(request);
+-	return 0;
+ }
+ 
+ void SimpleCameraData::resetAutoFocus()
+ {
+ 	cancelAutoFocus();
+ 	afLockedFoM_ = 0;
++	/*
++	 * Request sequence numbers, which updateAutoFocus() compares with
++	 * afMoveFrame_, restart from 0 at every start. Stale values from the
++	 * previous run would hold the scan back for as many frames as that
++	 * run lasted.
++	 */
++	afCurrentFrame_ = 0;
++	afMoveFrame_ = 0;
+ 	afMoved_ = false;
+ 	afStartPending_ = focusLens_ != nullptr;
+ }
+@@ -991,6 +1000,13 @@ void SimpleCameraData::resetAutoFocus()
+ void SimpleCameraData::updateAutoFocus(Request *request, uint32_t frame,
+ 				       const ControlList &metadata)
+ {
++	/*
++	 * A camera without a focus lens doesn't advertise the autofocus
++	 * controls, so it doesn't report them in its metadata either.
++	 */
++	if (!focusLens_)
++		return;
++
+ 	afCurrentFrame_ = frame;
+ 	const int32_t framePosition =
+ 		request->_d()->metadata()
+@@ -1990,6 +2006,22 @@ int SimplePipelineHandler::start(Camera *camera, [[maybe_unused]] const ControlL
+ 						      &DelayedControls::applyControls);
+ 	}
+ 
++	/*
++	 * The focus lens is open, and so powered by its driver, only while the
++	 * camera is running: stopDevice() closes it, including on the error
++	 * paths below that call stop(). Opening may block for a few tens of
++	 * milliseconds while the driver ramps the lens back to its last
++	 * position, so do it before streaming starts. A lens that fails to
++	 * open doesn't prevent capture, autofocus then reports AfStateFailed.
++	 */
++	if (data->focusLens_) {
++		ret = data->focusLens_->open();
++		if (ret < 0)
++			LOG(SimplePipeline, Warning)
++				<< "Failed to open the focus lens, autofocus disabled: "
++				<< strerror(-ret);
++	}
++
+ 	ret = video->streamOn();
+ 	if (ret < 0) {
+ 		stop(camera);
+@@ -2047,6 +2079,15 @@ void SimplePipelineHandler::stopDevice(Camera *camera)
+ 	data->conversionBuffers_.clear();
+ 
+ 	releasePipeline(data);
++
++	/*
++	 * Close the focus lens last, as stopping the software ISP above may
++	 * still deliver metadata that moves it. The lens driver then powers
++	 * the actuator down once its autosuspend delay expires, parking the
++	 * lens first if it needs to (dw9719 ramps it back to 0).
++	 */
++	if (data->focusLens_)
++		data->focusLens_->close();
+ }
+ 
+ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+@@ -2054,9 +2095,7 @@ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+ 	SimpleCameraData *data = cameraData(camera);
+ 	int ret;
+ 
+-	ret = data->handleFocusControls(request);
+-	if (ret < 0)
+-		return ret;
++	data->handleFocusControls(request);
+ 
+ 	std::map<const Stream *, FrameBuffer *> buffers;
+ 	bool metadataRequired = false;

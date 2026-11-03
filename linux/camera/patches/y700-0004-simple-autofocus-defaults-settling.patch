@@ -1,0 +1,282 @@
+Description: pipeline: simple: autofocus defaults and settling for camera apps
+ For camera applications that use libcamera through PipeWire or GStreamer
+ and never set AfMode:
+  - continuous AF is the default mode when the sensor has a focus lens
+    (LIBCAMERA_SIMPLE_AF_MODE=manual|auto|continuous overrides it);
+  - a continuous scan starts on the first request after every start();
+  - a FocusFoM is only used from a frame at least two frames after the
+    one whose statistics moved the lens;
+  - LIBCAMERA_SIMPLE_AF_RANGE=<min>-<max> narrows the scan to a module's
+    calibrated range, manual focus keeps the full range;
+  - the soft IPA divides the FocusFoM by the mean luminance, so that an
+    exposure change alone does not restart a continuous scan.
+ .
+ Patch 4/4 of the libcamera autofocus series of iceland-mainline
+ 990a0597 (commit aa2be227fae8c6b76884f5975a6257bb20397439 there).
+ Regenerated against 0.7.0-1ubuntu2 so that it applies without fuzz: the
+ soft_simple.cpp context differs in 0.7.0 ("auto const &algo"); the added
+ code is unchanged.
+Author: mzak <mzak.amin@gmail.com>
+Origin: other, https://github.com/mzakamin-hub/iceland-mainline/blob/990a0597cab555bcdadb90d39f1d241198de07de/packaging/libcamera/0004-pipeline-simple-autofocus-defaults-and-settling-for-.patch
+Forwarded: no
+Last-Update: 2026-10-28
+---
+ src/ipa/simple/soft_simple.cpp           |  18 +++-
+ src/libcamera/pipeline/simple/simple.cpp | 101 ++++++++++++++++++++---
+ 2 files changed, 106 insertions(+), 13 deletions(-)
+
+diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
+index f8675bf..95c8090 100644
+--- a/src/ipa/simple/soft_simple.cpp
++++ b/src/ipa/simple/soft_simple.cpp
+@@ -5,6 +5,7 @@
+  * Simple Software Image Processing Algorithm module
+  */
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <limits>
+ #include <stdint.h>
+@@ -314,8 +315,21 @@ void IPASoftSimple::processStats(const uint32_t frame,
+ 	for (auto const &algo : algorithms())
+ 		algo->process(context_, frame, frameContext, stats_, metadata);
+ 	if (stats_->valid && stats_->focusSamples) {
+-		const uint64_t focus = stats_->focusSum * 1024 /
+-				       stats_->focusSamples;
++		/*
++		 * The gradient sum scales with the image brightness: divide
++		 * by the mean luminance so that an exposure change alone
++		 * does not look like a focus change and restart a scan.
++		 */
++		uint64_t histSum = 0, histWeighted = 0;
++		for (unsigned int i = 0; i < SwIspStats::kYHistogramSize; i++) {
++			histSum += stats_->yHistogram[i];
++			histWeighted += static_cast<uint64_t>(stats_->yHistogram[i]) * (2 * i + 1);
++		}
++		/* the mean bin in half-bin units (1 .. 127); 64 = mid grey */
++		const uint64_t meanHalfBins =
++			histSum ? std::max<uint64_t>(1, histWeighted / histSum) : 64;
++		const uint64_t focus = stats_->focusSum * 1024 * 64 /
++				       (static_cast<uint64_t>(stats_->focusSamples) * meanHalfBins);
+ 		metadata.set(controls::FocusFoM,
+ 			     static_cast<int32_t>(std::min<uint64_t>(
+ 				     focus, std::numeric_limits<int32_t>::max())));
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 74a9c07..1d9969a 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -16,6 +16,7 @@
+ #include <queue>
+ #include <set>
+ #include <stdint.h>
++#include <stdio.h>
+ #include <string.h>
+ #include <string>
+ #include <unordered_map>
+@@ -25,6 +26,7 @@
+ #include <linux/media-bus-format.h>
+ 
+ #include <libcamera/base/log.h>
++#include <libcamera/base/utils.h>
+ 
+ #include <libcamera/camera.h>
+ #include <libcamera/color_space.h>
+@@ -295,7 +297,9 @@ public:
+ 	void imageBufferReady(FrameBuffer *buffer);
+ 	void clearIncompleteRequests();
+ 	int handleFocusControls(Request *request);
+-	void updateAutoFocus(Request *request, const ControlList &metadata);
++	void updateAutoFocus(Request *request, uint32_t frame,
++			     const ControlList &metadata);
++	void resetAutoFocus();
+ 
+ 	unsigned int streamIndex(const Stream *stream) const
+ 	{
+@@ -349,6 +353,8 @@ public:
+ 	int32_t focusPosition_;
+ 	int32_t focusMinimum_;
+ 	int32_t focusMaximum_;
++	int32_t afScanMinimum_ = 0;
++	int32_t afScanMaximum_ = 0;
+ 	V4L2VideoDevice *video_;
+ 	V4L2Subdevice *frameStartEmitter_;
+ 
+@@ -382,6 +388,18 @@ private:
+ 	void advanceAutoFocus(int32_t focusFoM);
+ 	void writeFocusMetadata(Request *request);
+ 
++	/*
++	 * A focus figure of merit is only used from a frame at least this
++	 * many frames after the one whose statistics moved the lens: the
++	 * frames in between may have been exposed while the lens moved.
++	 */
++	static constexpr uint32_t kAfSettleFrames = 2;
++
++	int32_t afDefaultMode_;
++	bool afStartPending_;
++	uint32_t afCurrentFrame_;
++	uint32_t afMoveFrame_;
++	bool afMoved_;
+ 	int32_t afMode_;
+ 	int32_t afState_;
+ 	AfScanStage afScanStage_;
+@@ -503,7 +521,9 @@ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+ 				   MediaEntity *sensor)
+ 	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr),
+ 	  focusLens_(nullptr), focusPosition_(0), focusMinimum_(0),
+-	  focusMaximum_(0), afMode_(controls::AfModeManual),
++	  focusMaximum_(0), afDefaultMode_(controls::AfModeManual),
++	  afStartPending_(false), afCurrentFrame_(0), afMoveFrame_(0),
++	  afMoved_(false), afMode_(controls::AfModeManual),
+ 	  afState_(controls::AfStateIdle), afScanStage_(AfScanStage::Idle),
+ 	  afScanPosition_(0), afScanEnd_(0), afScanStep_(0), afCoarseStep_(0),
+ 	  afBestPosition_(0), afBestFoM_(std::numeric_limits<int32_t>::min()),
+@@ -720,9 +740,26 @@ int SimpleCameraData::init()
+ 			const ControlValue triggerStart(controls::AfTriggerStart);
+ 			const ControlValue idle(controls::AfStateIdle);
+ 
++			/*
++			 * LIBCAMERA_SIMPLE_AF_MODE=manual|auto|continuous picks the
++			 * mode used until an application sets AfMode. Camera
++			 * applications that use libcamera through PipeWire or
++			 * GStreamer never set it, so continuous is the default.
++			 */
++			afDefaultMode_ = controls::AfModeContinuous;
++			const char *afEnv = utils::secure_getenv("LIBCAMERA_SIMPLE_AF_MODE");
++			if (afEnv) {
++				std::string m(afEnv);
++				if (m == "manual")
++					afDefaultMode_ = controls::AfModeManual;
++				else if (m == "auto")
++					afDefaultMode_ = controls::AfModeAuto;
++			}
++			afMode_ = afDefaultMode_;
++
+ 			controlsMap.emplace(&controls::AfMode,
+ 					    ControlInfo(controls::AfModeValues,
+-							manual));
++							ControlValue(afDefaultMode_)));
+ 			controlsMap.emplace(&controls::AfTrigger,
+ 					    ControlInfo(controls::AfTriggerValues,
+ 							triggerStart));
+@@ -735,6 +772,26 @@ int SimpleCameraData::init()
+ 			focusMinimum_ = focus->second.min().get<int32_t>();
+ 			focusMaximum_ = focus->second.max().get<int32_t>();
+ 			focusPosition_ = focus->second.def().get<int32_t>();
++
++			/*
++			 * LIBCAMERA_SIMPLE_AF_RANGE=<min>-<max> narrows the scan to a
++			 * module's calibrated infinity .. macro positions (native
++			 * actuator units). Manual positioning keeps the full range.
++			 */
++			const char *rangeEnv = utils::secure_getenv("LIBCAMERA_SIMPLE_AF_RANGE");
++			int lo, hi;
++			if (rangeEnv && sscanf(rangeEnv, "%d-%d", &lo, &hi) == 2 &&
++			    lo >= focusMinimum_ && hi <= focusMaximum_ && lo < hi) {
++				afScanMinimum_ = lo;
++				afScanMaximum_ = hi;
++			} else {
++				afScanMinimum_ = focusMinimum_;
++				afScanMaximum_ = focusMaximum_;
++			}
++			LOG(SimplePipeline, Info)
++				<< "Focus lens " << focusMinimum_ << ".." << focusMaximum_
++				<< ", autofocus scan " << afScanMinimum_ << ".."
++				<< afScanMaximum_ << ", default AfMode " << afDefaultMode_;
+ 		}
+ 	}
+ 
+@@ -766,15 +823,17 @@ int SimpleCameraData::moveFocus(int32_t position)
+ 	}
+ 
+ 	focusPosition_ = position;
++	afMoveFrame_ = afCurrentFrame_;
++	afMoved_ = true;
+ 	return 0;
+ }
+ 
+ int SimpleCameraData::startAutoFocus()
+ {
+-	afCoarseStep_ = std::max(1, (focusMaximum_ - focusMinimum_ + 9) / 10);
++	afCoarseStep_ = std::max(1, (afScanMaximum_ - afScanMinimum_ + 9) / 10);
+ 	afScanStage_ = AfScanStage::Coarse;
+-	afScanPosition_ = focusMinimum_;
+-	afScanEnd_ = focusMaximum_;
++	afScanPosition_ = afScanMinimum_;
++	afScanEnd_ = afScanMaximum_;
+ 	afScanStep_ = afCoarseStep_;
+ 	afBestPosition_ = focusPosition_;
+ 	afBestFoM_ = std::numeric_limits<int32_t>::min();
+@@ -836,9 +895,9 @@ void SimpleCameraData::advanceAutoFocus(int32_t focusFoM)
+ 	if (afScanStage_ == AfScanStage::Coarse) {
+ 		const int32_t coarseBest = afBestPosition_;
+ 		afScanStage_ = AfScanStage::Fine;
+-		afScanPosition_ = std::max(focusMinimum_,
++		afScanPosition_ = std::max(afScanMinimum_,
+ 					   coarseBest - afCoarseStep_);
+-		afScanEnd_ = std::min(focusMaximum_,
++		afScanEnd_ = std::min(afScanMaximum_,
+ 				      coarseBest + afCoarseStep_);
+ 		afScanStep_ = std::max(1, afCoarseStep_ / 4);
+ 		afBestFoM_ = std::numeric_limits<int32_t>::min();
+@@ -877,6 +936,15 @@ int SimpleCameraData::handleFocusControls(Request *request)
+ 	if (!focusLens_)
+ 		return 0;
+ 
++	if (afStartPending_) {
++		afStartPending_ = false;
++		if (afMode_ == controls::AfModeContinuous) {
++			int ret = startAutoFocus();
++			if (ret < 0)
++				return ret;
++		}
++	}
++
+ 	const auto &mode = request->controls().get(controls::AfMode);
+ 	if (mode && *mode != afMode_) {
+ 		afMode_ = *mode;
+@@ -912,15 +980,25 @@ int SimpleCameraData::handleFocusControls(Request *request)
+ 	return 0;
+ }
+ 
+-void SimpleCameraData::updateAutoFocus(Request *request,
++void SimpleCameraData::resetAutoFocus()
++{
++	cancelAutoFocus();
++	afLockedFoM_ = 0;
++	afMoved_ = false;
++	afStartPending_ = focusLens_ != nullptr;
++}
++
++void SimpleCameraData::updateAutoFocus(Request *request, uint32_t frame,
+ 				       const ControlList &metadata)
+ {
++	afCurrentFrame_ = frame;
+ 	const int32_t framePosition =
+ 		request->_d()->metadata()
+ 			.get(controls::draft::FocusAbsolute)
+ 			.value_or(focusPosition_);
+ 	const auto &focusFoM = metadata.get(controls::FocusFoM);
+-	if (focusFoM && afMode_ != controls::AfModeManual)
++	const bool settled = !afMoved_ || frame >= afMoveFrame_ + kAfSettleFrames;
++	if (focusFoM && afMode_ != controls::AfModeManual && settled)
+ 		advanceAutoFocus(*focusFoM);
+ 
+ 	writeFocusMetadata(request);
+@@ -1284,7 +1362,7 @@ void SimpleCameraData::metadataReady(uint32_t frame, const ControlList &metadata
+ 		return;
+ 
+ 	info->request->_d()->metadata().merge(metadata);
+-	updateAutoFocus(info->request, metadata);
++	updateAutoFocus(info->request, frame, metadata);
+ 	info->metadataProcessed = true;
+ 	tryCompleteRequest(info->request);
+ }
+@@ -1866,6 +1944,7 @@ int SimplePipelineHandler::exportFrameBuffers(Camera *camera, Stream *stream,
+ int SimplePipelineHandler::start(Camera *camera, [[maybe_unused]] const ControlList *controls)
+ {
+ 	SimpleCameraData *data = cameraData(camera);
++	data->resetAutoFocus();
+ 	V4L2VideoDevice *video = data->video_;
+ 	V4L2Subdevice *frameStartEmitter = data->frameStartEmitter_;
+ 	int ret;

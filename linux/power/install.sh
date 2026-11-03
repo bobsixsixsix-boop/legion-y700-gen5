@@ -17,6 +17,7 @@ done
 #   3. (only with --dumpmode-off, the owner's call) leave Qualcomm crash-dump mode 3 min after boot
 #   4. TEO idle governor via tmpfiles (see below)
 #   5. USB controller allowed to runtime-suspend (90-y700-usb-rpm.rules)
+#   6. printk time prefix back on (y700-printk-time.conf, tmpfiles)
 if [ "$1" = --dumpmode-off ]; then
 	install -m 644 "$SRC/y700-dumpmode-off.service" "$SRC/y700-dumpmode-off.timer" /etc/systemd/system/
 	systemctl daemon-reload
@@ -34,6 +35,10 @@ fi
 install -m 644 "$SRC/90-y700-usb-rpm.rules" /etc/udev/rules.d/90-y700-usb-rpm.rules
 udevadm control --reload; echo auto > /sys/bus/platform/devices/a600000.usb/power/control
 echo "usb controller control: $(cat /sys/bus/platform/devices/a600000.usb/power/control)"
+#   6. printk time prefix on the console/pstore (tmpfiles; the upstream initramfs switches it off, see the .conf)
+install -m 644 "$SRC/y700-printk-time.conf" /etc/tmpfiles.d/y700-printk-time.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/y700-printk-time.conf
+echo "printk time: $(cat /sys/module/printk/parameters/time)"
 tb323fu-ctl refresh preset power-saver
 tb323fu-ctl --json status | python3 -c 'import json,sys; r=json.load(sys.stdin)["Refresh"]; print("refresh idle", r.get("IdleMs60"), r.get("IdleMs30"), r.get("Policy"))'
 echo POWER_OK

@@ -24,15 +24,18 @@ LINUX_TYPE = uuid.UUID("0fc63daf-8483-4772-8e79-3d69d8477de4")
 ROOT_GUID = uuid.UUID("a2ce1c90-1d13-4f07-b492-fc7ebc1fa6dd")
 ROOT_START = 39476224
 
-# Partitions never written from a package dump: device-unique calibration/identity/security state,
-# another device's logs, all-zero placeholders, and the board config table.
-DROP = {
+# Device-unique calibration/identity/security state and the board config table: another device's copy cannot be
+# undone (baseband, IMEI). flash_coloros.py's check_flash_set refuses any flash list that writes one of these.
+DEVICE_STATE = {
     "modemst1", "modemst2", "fsg", "fsc", "fs_bkup",          # modem EFS / RF calibration
     "secdata", "uefivarstore", "spunvm", "keystore",          # attestation, UEFI vars, SPU NV
     "frp", "misc", "ssd", "devinfo", "persist", "oemowninfo",  # FRP, boot control, identity
+    "cdt",                                                     # board config data table: never touch
+}
+# Partitions never written from a package dump: DEVICE_STATE, another device's logs, all-zero placeholders.
+DROP = DEVICE_STATE | {
     "logdump", "logfs", "xbl_sc_logs", "xbl_sc_test_mode",    # logs
     "vm-persist", "qmcs", "mdcompress", "connsec", "tzsc", "dpm",
-    "cdt",                                                     # board config data table: never touch
     "qweslicstore_a", "qweslicstore_b",                        # runtime license store (v16 does not write it)
     "ALIGN_TO_128K_1", "ALIGN_TO_128K_2", "rawdump", "last_parti",
     "userdata", "metadata",                                    # formatted in recovery after flashing

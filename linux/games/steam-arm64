@@ -19,6 +19,18 @@ S="$HOME/.local/share/Steam"; mkdir -p "$HOME/.steam"
 for l in root:. steam:. binarm64:steamrtarm64 sdkarm64:linuxarm64 sdk64:linux64 sdk32:linux32; do
 	[ -e "$HOME/.steam/${l%%:*}" ] || ln -sfn "$S/${l#*:}" "$HOME/.steam/${l%%:*}"
 done
+# y700 (10-30): Steam UI on the GPU with zink's render-pass tracking off. Its GL goes ANGLE -> zink -> Turnip (see
+# /etc/drirc); with zink's render-pass tracking on (its default here) store pages show noise blocks where
+# faded/masked layers are (reviews, "read more"). ZINK_DEBUG=norp: clean, and scrolling costs ~0.3 cores and ~1.3 W
+# less than CPU drawing (README "Steam 界面花屏"). Only programs on zink read it (/etc/drirc: Chrome, ChatGPT,
+# steamwebhelper); games started from Steam do not use zink.
+# Y700_STEAM_UI=cpu: CPU drawing (-cef-disable-gpu, the 10-29 workaround). Y700_STEAM_UI=gpu-rp: GPU with zink's
+# default, to re-test after a Mesa (libgl1-mesa-dri) or Steam update whether the noise is gone.
+case "${Y700_STEAM_UI:-gpu}" in
+cpu) set -- -cef-disable-gpu "$@" ;;
+gpu-rp) ;;
+*) export ZINK_DEBUG=norp ;;
+esac
 MAGIC_RESTART_EXITCODE=42
 n=0; t0=$(date +%s)
 while :; do

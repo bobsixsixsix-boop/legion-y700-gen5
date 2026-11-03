@@ -144,8 +144,11 @@ public class MainActivity extends Activity {
             String staged = s.get("staged");
             status.setText("当前 boot_a：" + now
                     + "\n回安卓的备份（boot_b）：" + (bOk ? "正常" : "不对，已禁止切换")
-                    + "\nLinux 镜像：" + ("none".equals(staged) ? "没有准备好" : "已就绪 " + staged));
-            ready = bOk && !"none".equals(staged) && !"linux".equals(a);
+                    + "\n备用镜像（暂存）：" + ("none".equals(staged) ? "没有" : staged));
+            // The switch script picks the image: the last running Linux (linux-current/linux-good.img on the Linux
+            // root) first, the staged one only as a fallback; with none at all it stops before writing. So the
+            // staged image must not gate the button (10-31 audit misc A3).
+            ready = bOk && !"linux".equals(a);
         }
         go.setEnabled(ready);
         go.animate().alpha(ready ? 1f : 0.5f).setDuration(160).setInterpolator(EASE_OUT).start();

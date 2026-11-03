@@ -24,10 +24,17 @@
 #include <QTextBoundaryFinder>
 #include <QTimer>
 
+#include <algorithm>
+
 namespace {
 const QString CTRL_PATH = QStringLiteral("/fyi/fortime/Fcitx5Osk/Controller");
 const QString CTRL_IF = QStringLiteral("fyi.fortime.Fcitx5Osk.Controller1");
 const QString OWN_IF = QStringLiteral("fyi.y700.Osk");
+// X11 clients (x11Decide): fcitx5 quiet this long after the last Show/Hide and the lift; a tap off a
+// field blurred it 35-70 ms after the lift's Show in Steam (2026-10-30), slack for a busy page
+constexpr qint64 X11_SETTLE_MS = 200;
+constexpr qint64 X11_EVIDENCE_MS = 600;   // the burst began this soon after the tap's lift (Gate: EVIDENCE_MS)
+constexpr qint64 X11_GIVE_UP_MS = 3000;   // a finger held this long is no tap: decide with what there is
 
 QPainterPath roundedRect(const QRectF &r, qreal tl, qreal tr, qreal br, qreal bl)
 {
@@ -126,18 +133,36 @@ Osk::Osk(QObject *parent) : QObject(parent)
         // may be about to be overruled by a tap-confirmed show: wait for the verdict instead of letting
         // the keyboard slide out under a long press and back in
         if (m_gate && m_gate->alive() && m_gate->busy()) { m_hideTimer->start(120); return; }
+        // the same for an X11 client, which the gate leaves out (Steam's touches carry no desktop file):
+        // pressing a field of a Steam window that is not active sends the Hide at the press, its Show
+        // only after the lift
+        if (m_gate && m_gate->alive() && x11Pending()) { m_hideTimer->start(120); return; }
         hide(true);
     });
-
-    m_since.start();
 
     m_soundIdle = new QTimer(this);
     m_soundIdle->setSingleShot(true);
     m_soundIdle->setInterval(10000);    // let the speaker path sleep when nobody types
     connect(m_soundIdle, &QTimer::timeout, this, [this] { m_sound->setActive(false); });
 
+    m_x11Settle = new QTimer(this);
+    m_x11Settle->setSingleShot(true);
+    connect(m_x11Settle, &QTimer::timeout, this, &Osk::x11Decide);
+    m_x11Verify = new QTimer(this);
+    m_x11Verify->setSingleShot(true);
+    connect(m_x11Verify, &QTimer::timeout, this, &Osk::x11Verify);
+
     connect(m_fcitx, &Fcitx::showRequested, this, [this] { showRequest(true); });
-    connect(m_fcitx, &Fcitx::hideRequested, this, [this] { if (!m_force) m_hideTimer->start(300); });
+    connect(m_fcitx, &Fcitx::hideRequested, this, [this] {
+        if (m_gate) m_fcitxHideAt = m_gate->now();
+        m_fcitxLastHide = true;
+        m_voice->discard();             // speech still being recognised was for the field that lost the focus
+        if (!m_force) m_hideTimer->start(300);
+    });
+    connect(m_fcitx, &Fcitx::echoHideSwallowed, this, [this] {
+        if (m_gate) m_echoHideAt = m_gate->now();
+        x11Check();
+    });
     connect(m_fcitx, &Fcitx::candidatesChanged, this, [this](const QStringList &c, bool p, bool n, int cursor) {
         if (c == m_candidates && p == m_hasPrev && n == m_hasNext && cursor == m_cursor) return;
         m_candidates = c; m_hasPrev = p; m_hasNext = n; m_cursor = cursor;
@@ -181,6 +206,11 @@ bool Osk::claimBus()
     // The keyboard comes up for taps on text fields only (Gate, fed by the y700_oskgate KWin effect)
     m_gate = new Gate(this);
     connect(m_gate, &Gate::showWanted, this, [this] { show(false); });
+    connect(m_gate, &Gate::touchEnded, this, &Osk::x11TouchEnded);
+    // fcitx5 into on-screen mode once the gate guards its Shows (they no longer bring the keyboard up by
+    // themselves): only then does an X11 client's field reach x11Decide() before a Wayland field did
+    connect(m_gate, &Gate::aliveChanged, this, [this](bool alive) { if (alive) m_fcitx->enterOnScreenMode(); });
+    connect(m_fcitx, &Fcitx::restarted, this, [this] { if (m_gate->alive()) m_fcitx->enterOnScreenMode(); });
     readTextInputSupport();
     // Like fcitx5-osk we do not enter fcitx5's on-screen mode at start (that would pop the keyboard
     // up with no text field): the launcher calls Show when KWin activates a text field, then
@@ -191,10 +221,13 @@ bool Osk::claimBus()
 // A preview never touches fcitx5's names, but it does answer the debug hook under its own name, so
 // the touch state machine can be driven (down/up/tap) and read back (state) without a text field:
 // osk.key()/commit() are no-ops in preview, what would have been typed lands in the typed log.
+// fcitx5's panel object is served too (under the preview's name only): a test sends it the Hide fcitx5
+// sends when a field loses the focus (tests/voice-drop.sh).
 void Osk::claimPreviewBus()
 {
     auto bus = QDBusConnection::sessionBus();
     bus.registerVirtualObject(QStringLiteral("/Osk"), new OskBusObject(this), QDBusConnection::SingleNode);
+    bus.registerObject(QStringLiteral("/org/fcitx/virtualkeyboard/impanel"), m_fcitx, QDBusConnection::ExportAdaptors);
     if (!bus.registerService(QStringLiteral("fyi.y700.OskPreview"))) qWarning() << "osk: fyi.y700.OskPreview is taken (another preview is running)";
 }
 
@@ -297,14 +330,14 @@ void Osk::readTextInputSupport()
         if (!r.isValid()) return;
         m_clientTextInput = r.value().variant().toBool();
         m_fcitx->setClientWithoutTextInput(!m_clientTextInput);
-        // a gated Show that turns out to be for an X11 client (no text-input, so no tap evidence
-        // will ever come): honour it after all
-        // (once per Show: show() reads this again, and must not come back here)
-        if (!m_clientTextInput && m_since.elapsed() - m_ignoredShowAt < 600) {
-            m_ignoredShowAt = -100000;
-            if (m_gate) m_gate->note(QStringLiteral("X11 client: showing on the focus-driven Show"));
-            show(false, true);
+        if (m_clientTextInput) {
+            m_x11FirstShow = -1;              // the Shows were for a text-input client: the gate's taps decide
+            return;
         }
+        // gated Shows that turn out to be for an X11 client (no text-input, so no tap evidence from KWin):
+        // judged together once the touch and the client's focus have settled. However late the reply
+        // comes; x11Decide() ends the burst before it calls show(), whose reply then finds none
+        if (m_x11FirstShow >= 0 && !m_x11Settle->isActive()) x11Decide();
     });
 }
 
@@ -337,13 +370,14 @@ void Osk::show(bool force, bool fromFcitx)
 // the moment a touch ACTIVATES a window - the app puts its focus back into its text field - and
 // neither knows where the finger was (owner, 2026-10-14: dragging Telegram popped the keyboard up).
 // With the KWin gate running they no longer bring the keyboard up; Gate decides from the tap. They
-// still count for: X11 clients (no text-input, so no tap evidence: decided by the fresh
-// activeClientSupportsTextInput reply, never by a cached value), activations KWin makes itself (tray
+// still count for: X11 clients (no text-input, so no tap evidence from KWin: once the fresh
+// activeClientSupportsTextInput reply - never a cached value - says X11, x11Decide()), activations KWin makes itself (tray
 // "show virtual keyboard", KWin's own text fields), and - when the keyboard is already up - focus moving
 // within the same window or without a touch (Tab, Return, script). Without the effect, or when it went
 // silent, they work as before.
 void Osk::showRequest(bool fromFcitx)
 {
+    if (fromFcitx) m_fcitxLastHide = false;
     if (m_preview || !m_gate || !m_gate->alive()) {
         show(false, fromFcitx);
         return;
@@ -351,7 +385,14 @@ void Osk::showRequest(bool fromFcitx)
     // an X11 client may just have been activated: the reply decides. Not for the Shows that come with
     // an activation for KWin's own non-text focus (the task switcher cards, 2026-10-21): they are for
     // that item, whatever the text-input focus behind it is
-    m_ignoredShowAt = m_gate->internalOther() ? -100000 : m_since.elapsed();
+    if (!m_gate->internalOther()) {
+        // one tap gives an X11 client's field up to three Shows within ~100 ms: x11Decide() judges them
+        // together, from the first (the one the tap caused) and the last. A burst never judged (no reply
+        // from KWin) is not carried along
+        const qint64 now = m_gate->now();
+        if (m_x11FirstShow < 0 || now - m_x11LastShow > 1000 || now - m_x11FirstShow > X11_GIVE_UP_MS) m_x11FirstShow = now;
+        m_x11LastShow = now;
+    }
     readTextInputSupport();
     if (!fromFcitx && m_gate->kwinInitiated()) {
         m_gate->note(QStringLiteral("launcher Show for a KWin-initiated activation"));
@@ -371,10 +412,110 @@ void Osk::showRequest(bool fromFcitx)
     if (m_gate->silentMs() > 1000) {
         QTimer::singleShot(150, this, [this, fromFcitx] {
             if (m_shown || !m_gate->alive() || m_gate->silentMs() < 1100) return;
+            // an X11 client's focus never goes through text-input: silence is normal there (Steam focusing
+            // a field by itself), and taking it for a lost effect popped the keyboard. Ask KWin instead
+            if (!m_clientTextInput) { m_gate->ensureLoaded(); return; }
             m_gate->lost();
             show(false, fromFcitx);
         });
     }
+}
+
+// X11 clients have no text-input, so KWin cannot tell a tap on a field from one anywhere else: fcitx5's
+// focus-driven Show (the IM module's FocusIn) is all there is. Measured in Steam (CEF with the GTK fcitx5
+// module, 2026-10-30, tests/gate-steam.sh):
+//   - while a field has the focus, EVERY tap in the window gives FocusOut+FocusIn right after the lift
+//     (fcitx5: Hide, Show), and a tap off the field then blurs it 35-70 ms later (Hide);
+//   - a tap on a field: FocusIn 5-45 ms after the lift, and it keeps the focus;
+//   - a drag (scrolling): nothing.
+// Showing on the first Show popped the keyboard for every tap anywhere while a field had the focus,
+// and the later Hide lost to it (the reply to that Show stopped the hide timer). So: wait until the touch
+// behind the burst is over and fcitx5 has been quiet for X11_SETTLE_MS, then show only when its last
+// word was a Show, a field really has the focus (the last Show may be the answer to our own requestShow:
+// key-helper's echo), and the burst came from a tap on an app window that is still there - not a drag
+// or a hold, not a panel or the dock that activated the app, not a window closed or minimized by that tap
+// (closing Chrome over Steam gives Steam its search box back): those are the focus restored, not a tap
+// on the field.
+void Osk::x11Decide()
+{
+    if (m_x11FirstShow < 0 || !m_gate) return;
+    const qint64 now = m_gate->now();
+    const Gate::Touch t = m_gate->touchBefore(m_x11FirstShow);
+    const int managed = m_gate->managed(t.wid);
+    const bool waiting = now - m_x11FirstShow < X11_GIVE_UP_MS;
+    if (waiting && (t.down() || (t.downAt >= 0 && managed < 0))) { m_x11Settle->start(60); return; }
+    const qint64 settle = std::max({ m_x11LastShow, m_fcitxHideAt, t.upAt }) + X11_SETTLE_MS - now;
+    if (waiting && settle > 0) { m_x11Settle->start(int(settle)); return; }
+    const qint64 first = m_x11FirstShow;
+    m_x11FirstShow = -1;
+    if (m_fcitxLastHide) {
+        m_gate->note(QStringLiteral("X11 client: the field lost the focus again (a tap off it): no show"));
+        return;
+    }
+    if (t.downAt < 0 || !t.tap || first > t.upAt + X11_EVIDENCE_MS) {
+        m_gate->note(QStringLiteral("X11 client: no tap behind the Show (%1): no show")
+                         .arg(t.downAt < 0 ? QStringLiteral("no touch") : t.down() ? QStringLiteral("still held")
+                              : !t.tap ? QStringLiteral("a drag, hold or gesture") : QStringLiteral("tap %1 ms earlier").arg(first - t.upAt)));
+        return;
+    }
+    if (managed == 0) {
+        m_gate->note(QStringLiteral("X11 client: the tap was on %1, not an app window (an activation): no show").arg(t.win));
+        return;
+    }
+    if (m_fcitx->commitAvailable() && !m_fcitx->inputFocused()) {
+        m_gate->note(QStringLiteral("X11 client: tap on %1, but no field has the focus: no show").arg(t.win));
+        return;
+    }
+    m_gate->stillThere(t.wid, this, [this, t](bool there) {
+        if (m_x11FirstShow >= 0 || m_fcitxLastHide) return;     // fcitx5 spoke again: that burst decides
+        if (!there) {
+            m_gate->note(QStringLiteral("X11 client: the tap was on %1, closed or minimized since (an activation): no show").arg(t.win));
+            return;
+        }
+        m_gate->note(QStringLiteral("X11 client: tap on %1, the field kept the focus: show").arg(t.win));
+        show(false, true);
+    });
+}
+
+// Up over an X11 client, the field can lose the focus without a Hide reaching us: Return in Steam's
+// search box loads the results page within key-helper's echo window (Fcitx::inHelperEcho), so its Hide
+// is taken for the echo; so is the Hide of a tap off the field right after BackSpace. Checked after each
+// such swallowed Hide and after each tap in an app window that fcitx5 says nothing about (a tap in
+// Steam's results page): x11Verify().
+void Osk::x11TouchEnded()
+{
+    const Gate::Touch t = m_gate->lastTouch();
+    if (t.tap && m_gate->managed(t.wid) != 0) x11Check();      // not this keyboard, a panel, the dock
+}
+
+void Osk::x11Check()
+{
+    if (m_shown && !m_force && !m_clientTextInput && m_gate && m_fcitx->commitAvailable()) m_x11Verify->start(int(X11_SETTLE_MS));
+}
+
+// Once no finger is down and fcitx5 has been quiet for X11_SETTLE_MS (a Steam tap's FocusOut+FocusIn is
+// never caught half-way), ask fcitx5 whether a field has the focus; none: put the keyboard away like a
+// Hide would. Never while typing into a field: it keeps the focus. A forced keyboard (tray, CLI) stays.
+void Osk::x11Verify()
+{
+    if (!m_shown || m_force || m_clientTextInput || !m_gate) return;
+    const qint64 now = m_gate->now();
+    const Gate::Touch t = m_gate->lastTouch();
+    if (t.down() && now - t.downAt < X11_GIVE_UP_MS) { m_x11Verify->start(60); return; }
+    const qint64 settle = std::max({ m_x11LastShow, m_fcitxHideAt, m_echoHideAt, t.upAt }) + X11_SETTLE_MS - now;
+    if (settle > 0) { m_x11Verify->start(int(settle)); return; }
+    if (m_fcitxLastHide || m_fcitx->inputFocused()) return;    // a real Hide last: the hide timer has it
+    m_gate->note(QStringLiteral("X11 client: no field has the focus (after %1): hide")
+                     .arg(m_echoHideAt > t.upAt ? QStringLiteral("a Hide taken for key-helper's echo") : QStringLiteral("a tap on ") + t.win));
+    hide(true);
+}
+
+bool Osk::x11Pending() const
+{
+    const qint64 now = m_gate->now();
+    if (m_x11Settle->isActive() || (m_x11FirstShow >= 0 && now - m_x11FirstShow < X11_GIVE_UP_MS)) return true;
+    const Gate::Touch t = m_gate->lastTouch();
+    return t.down() && t.win.endsWith(QLatin1Char('|')) && m_gate->managed(t.wid) == 1 && now - t.downAt < X11_GIVE_UP_MS;
 }
 
 void Osk::hide(bool immediate)
@@ -384,6 +525,7 @@ void Osk::hide(bool immediate)
     m_force = false;
     if (!m_shown) return;
     m_shown = false;
+    m_voice->discard();         // before cancel(), which would toast "recognising" for what is still in flight
     m_voice->cancel();
     emit shownChanged();        // QML slides out, then calls hideDone()
 }

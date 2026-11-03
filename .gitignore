@@ -75,6 +75,8 @@ Image-*
 __pycache__/
 *.pyc
 target/
+# the Android switcher's javac/aapt2 outputs: build.sh starts with rm -rf build and regenerates them
+/switcher/android/build/
 
 # signing material and identity containers: never commit any of these
 *.jks

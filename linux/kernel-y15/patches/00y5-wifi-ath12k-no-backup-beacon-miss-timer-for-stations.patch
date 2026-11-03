@@ -1,0 +1,42 @@
+From 0f1b8d2b1432e81512b7c0cabc255f2ea283ac68 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 05:52:00 +0000
+Subject: [PATCH] wifi: ath12k: don't arm the backup connection-loss timer on
+ beacon miss
+
+On 5 GHz the WCN7860 firmware stops forwarding beacons over WMI a few
+seconds after association, so the backup connection_loss_work (which only
+a WMI beacon cancels) tore the link down (reason 4) every ~20 s while
+data still flowed. mac80211 already probes the AP after
+ieee80211_beacon_loss() and disconnects on a real loss. (y3)
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 4d9ea66bd..755bc4a06 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -1982,7 +1982,18 @@ void ath12k_mac_handle_beacon_miss(struct ath12k *ar,
+ 	 * doesn't make sense to continue operation. Queue connection loss work
+ 	 * which can be cancelled when beacon is received.
+ 	 */
+-	ieee80211_queue_delayed_work(hw, &arvif->connection_loss_work,
++	/*
++	 * y700 (TB323FU, WCN7860): on 5 GHz the firmware stops forwarding beacons
++	 * over WMI a few seconds after association ("beacon rx" stays at 1), so
++	 * this backup timer, which only a WMI beacon cancels, tore the link down
++	 * (reason 4, locally generated) every ~20 s although data still flowed.
++	 * mac80211 already probes the AP after ieee80211_beacon_loss() and
++	 * disconnects on a real loss; mt76/rtw89 rely on that alone, and the
++	 * Aug-2026 "improve MLO station stability" series drops the timer for
++	 * MLO for the same reason. Keep it off for every station link here.
++	 */
++	if (0)
++		ieee80211_queue_delayed_work(hw, &arvif->connection_loss_work,
+ 				     ATH12K_CONNECTION_LOSS_HZ);
+ }
+ 
+-- 
+2.53.0
+

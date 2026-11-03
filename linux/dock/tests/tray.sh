@@ -10,14 +10,14 @@
 # "tray: +" line of the item's label), and reads every shot with tray-look.py (written below into the bed: the tray
 # tiles in colA, the menu page's rows in colB, the power card; its lines go to the log as "tray-look <shot>: ...").
 # Coordinates come from the shots, not from the contract: the tray tiles are the light runs between the Tailscale
-# tile (y 276-335) and the power row (766-825) in colA's three 104 px columns (x 840 / 958 / 1076), the menu rows the
+# tile (y 276-335) and the power row (800-859 since 11-01, 766-825 before) in colA's three 104 px columns (x 840 / 958 / 1076), the menu rows the
 # runs under the back button in colB (x 1204-1544, rows tapped at x 1374). Nothing is tapped that was not seen: the
 # bed's control centre shows and switches the REAL system (its commands run in the bed's environment but against
 # the real system bus and daemons: Wi-Fi, Bluetooth, Tailscale, power). A blind tap on the back button's spot
 # (1222, 180) with the grid up turns the real Wi-Fi off, one on the Tailscale tile drops the ssh path. So a menu row
 # or the back button is tapped only when the last shot showed the menu page (else the curtain is closed and opened
 # again, which leaves any page), a tray tile only when the last shot found it between the two anchors, and the power
-# card is closed by closing the curtain, never by a tap inside it (休眠 / 锁屏 there need no second tap).
+# card is closed by closing the curtain, never by a tap inside it (息屏 / 锁屏 there need no second tap).
 # The curtain is opened over D-Bus (show), not pulled (curtain.sh covers the pull), so every touch lands on the
 # open curtain; the holding finger is long-pressed on its empty left half (300, 700), which is no tap there.
 # Steps and shots (OUT/*.png):
@@ -116,10 +116,10 @@ def ln(a, b):
 
 
 def colA():
-    """col1's runs, the Tailscale tile (276-335) and the power row (766-825) as anchors"""
+    """col1's runs, the Tailscale tile (276-335) and the power row (800-859) as anchors"""
     rs = segs(band(852, 858, 822, 832) > THR)
     ts = next((r for r in rs if 268 <= r[0] <= 284 and 50 <= ln(*r) <= 70), None)
-    pw = next((r for r in rs if 818 <= r[1] <= 834 and 50 <= ln(*r) <= 70), None)
+    pw = next((r for r in rs if 852 <= r[1] <= 868 and 50 <= ln(*r) <= 70), None)
     print("INFO col1 runs", " ".join("%d-%d" % tuple(r) for r in rs))
     return rs, ts, pw
 

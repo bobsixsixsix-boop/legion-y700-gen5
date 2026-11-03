@@ -5,13 +5,27 @@
 # 03:41 the tablet sat there for 7 h at ~1.6 W (73 % -> 37 %). It also turns panic=10 into "never
 # reboots", which defeats the trial kernel's panic -> initramfs count -> rollback design.
 # Early boot keeps it: a kernel that panics before /init could otherwise reboot forever and make the
-# bootloader switch slots. After 3 min (the trial-kernel confirmation at 90 s is long past) a crash
-# means: console-ramoops/dmesg-ramoops to pstore, 10 s, reboot.
+# bootloader switch slots. After 3 min (the trial-kernel confirmation at 90 s is long past) a kernel
+# panic means: console-ramoops/dmesg-ramoops to pstore, 10 s, reboot.
+# NOT covered until kernel y16: "off" only clears the TCSR dload bits. qcom_scm disables SDI (Secure
+# Debug Image) at probe only, and only when download_mode is already off or DT has qcom,sdi-enabled -
+# neither is true here (CONFIG_CMDLINE_FORCE carries download_mode=full). So a reset the firmware does
+# itself (watchdog bite, fatal bus error) still goes SDI -> XBL rawdump -> waits in dump mode: on
+# 2026-10-31 21:04 a synchronous external abort stopped CPU0 before panic() and the tablet sat there
+# 2 h 9 min with this unit active. The 10-15 "verified" test was 5 clean reboots, which write NODUMP
+# on their way down anyway. README "10-31 21:04 死机".
+# From kernel y16 (patch 1058) writing off also disables SDI and the kernel logs "download mode off,
+# SDI disable: <n>" (0 = done; y700-checklist checks it): a watchdog bite then reboots at once (bite
+# test 2026-11-01 01:27, ~23 s, no dump mode). Unverified: whether a reset the firmware judges fatal on
+# the spot consults SDI, and a bite while the whole kernel hangs (the test bit a live kernel).
+# linux/kernel-y16/NOTES.md.
 # To take a full dump on purpose: echo full > /sys/module/qcom_scm/parameters/download_mode first.
+# On y16 writing full does not turn SDI back on; whether a bite or a kernel panic still dumps after
+# that (dload cookie set, SDI off) is untested - try it once with someone present before relying on it.
 [Unit]
 Description=y700: leave Qualcomm download (crash-dump) mode after boot
 ConditionPathExists=/sys/module/qcom_scm/parameters/download_mode
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'echo off > /sys/module/qcom_scm/parameters/download_mode && logger -t y700-dumpmode "download_mode off: a crash now reboots after 10 s (pstore keeps the log)"'
+ExecStart=/bin/sh -c 'echo off > /sys/module/qcom_scm/parameters/download_mode && logger -t y700-dumpmode "download_mode off: a kernel panic now reboots after 10 s (pstore keeps the log); y16+ also disables SDI (see the kernel line SDI disable), so a watchdog bite reboots too"'

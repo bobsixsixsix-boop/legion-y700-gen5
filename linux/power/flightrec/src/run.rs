@@ -1,5 +1,6 @@
 //! The sinks, the pstore archive, MARK lines, the cadence and the daemon loop (see main.rs for the overview).
 use super::*;
+use std::os::unix::io::AsRawFd;
 
 pub struct Paths {
     pub log_dir: String,
@@ -139,9 +140,12 @@ fn boot_order(p: &Paths, boot: &str) -> Vec<String> {
 }
 
 /// keep this boot's log and the newest KEEP_LOGS - 1 others, newest by boot_order(); a log it does not know (from
-/// before boots.txt existed) counts as older than every one it knows, by mtime among themselves
+/// before boots.txt existed) counts as older than every one it knows, by mtime among themselves. pstore/<boot>
+/// (archive_pstore) goes by the same list: every start copies all of systemd-pstore's flat archive again (~240 KB a
+/// boot, more with every dmesg-ramoops-N it never deletes) and nothing removed the copies (10-31 audit A2); a
+/// directory there whose boot has no log left - the ones from before this - goes too
 fn prune_logs(p: &Paths, boot: &str, order: &[String]) {
-    let mut logs: Vec<((bool, i64), PathBuf)> = fs::read_dir(&p.log_dir)
+    let mut logs: Vec<((bool, i64), PathBuf, String)> = fs::read_dir(&p.log_dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -155,14 +159,19 @@ fn prune_logs(p: &Paths, boot: &str, order: &[String]) {
                 Some(i) => (true, i as i64),
                 None => (false, fs::metadata(e.path()).ok()?.mtime()),
             };
-            Some((key, e.path()))
+            Some((key, e.path(), b))
         })
         .collect();
     logs.sort();
-    let others = KEEP_LOGS - 1;
-    if logs.len() > others {
-        for (_, f) in &logs[..logs.len() - others] {
-            let _ = fs::remove_file(f);
+    let gone = logs.len().saturating_sub(KEEP_LOGS - 1);
+    for (_, f, _) in &logs[..gone] {
+        let _ = fs::remove_file(f);
+    }
+    for e in fs::read_dir(format!("{}/pstore", p.log_dir)).into_iter().flatten().flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        let kept = n == boot || logs[gone..].iter().any(|(_, _, b)| *b == n);
+        if !kept && e.file_type().map_or(false, |t| t.is_dir()) {
+            let _ = fs::remove_dir_all(e.path()); // does not follow symlinks; file_type() is the entry's own
         }
     }
 }
@@ -356,6 +365,25 @@ pub fn run() -> i32 {
         return 0;
     }
 
+    // one daemon per run_dir (10-31 audit A1): a second one started by hand without --run-dir rewrote the energy
+    // line under the service's, overwrote daemon.pid and, stopped with Ctrl-C, deleted it - y700-batteryd then took
+    // the recorder for gone and kept the battery page degraded (cov:0) for the rest of the boot. Taken before
+    // Sinks::new and archive_pstore touch anything; held until exit (the File lives to the end of run()).
+    let _ = fs::create_dir_all(&p.run_dir);
+    let lockf = format!("{}/lock", p.run_dir);
+    let _lock = match OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(&lockf) {
+        Ok(f) if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 => f,
+        Ok(_) => {
+            let e = std::io::Error::last_os_error(); // flock's
+            eprintln!("{lockf}: {e} - another y700-flightrec runs there (a test instance needs its own --run-dir)");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("{lockf}: {e}");
+            return 1;
+        }
+    };
+
     // signals are taken synchronously (sigtimedwait is the sleep): TERM/INT stop, USR1 = a mark changed the cadence
     let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
     unsafe {
@@ -369,7 +397,8 @@ pub fn run() -> i32 {
     let copied = archive_pstore(&p, &sinks.boot);
     let order = boot_order(&p, &sinks.boot);
     prune_logs(&p, &sinks.boot, &order);
-    let _ = fs::write(format!("{}/daemon.pid", p.run_dir), format!("{}\n", std::process::id()));
+    let pidf = format!("{}/daemon.pid", p.run_dir);
+    let _ = fs::write(&pidf, format!("{}\n", std::process::id()));
     let params = r.params();
     let header = format!(
         "HEADER boot={} at={} kernel={} interval={interval:?} sync={sync_every} idle_interval={idle_interval:?} idle_sync={idle_sync} iface={iface} pstore_archived={copied} {params} cmdline={}",
@@ -383,6 +412,8 @@ pub fn run() -> i32 {
     sinks.write(&mode_line(&fast, "no-experiment"), sync_every, false);
     let ivl = |fast: &Option<String>| if fast.is_some() { interval } else { idle_interval };
     let (mut prev, mut wprev) = (r.sample(), r.wifi(&iface));
+    // the battery page's counters: this boot's resumed from <run_dir>/energy or zeroed, edge written now (acc.rs)
+    let mut energy = super::acc::Acc::open(&p.run_dir, &sinks.boot, &prev);
     let mut next = mono() + ivl(&fast);
     loop {
         let now = mono();
@@ -416,6 +447,7 @@ pub fn run() -> i32 {
         let (cur, wcur) = (r.sample(), r.wifi(&iface));
         let line = r.fmt(&prev, &cur, &wprev, &wcur);
         sinks.write(&line, if fast.is_some() { sync_every } else { idle_sync }, false);
+        energy.line(&cur); // data lines only: HEADER/MODE/MARK/STOP carry no reading
         prev = cur;
         wprev = wcur;
         // the knobs are read with every line: an experiment switched on without a mark is caught too
@@ -430,6 +462,10 @@ pub fn run() -> i32 {
         }
     }
     sinks.write(&format!("STOP t={:.1} at={}", mono(), strftime("%H:%M:%S")), sync_every, true);
-    let _ = fs::remove_file(format!("{}/daemon.pid", p.run_dir));
+    // only if it still names us: batteryd reads "flightrec runs" from it (a recorder that is not ours - an older
+    // build without the lock above - may have written its pid since)
+    if rd(&pidf) == Some(std::process::id().to_string()) {
+        let _ = fs::remove_file(&pidf);
+    }
     0
 }

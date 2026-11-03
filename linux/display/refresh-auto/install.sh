@@ -1,6 +1,8 @@
 #!/bin/bash
 # install.sh: install y700-refresh-auto on the tablet (ROOT; files copied to /tmp/ra/ first). 2026-10-16.
-#   ~user/.local/bin/y700-refresh-auto                      daemon
+#   /usr/local/libexec/y700-refresh-auto                        daemon: Rust since 2026-11-03, built and installed by
+#                                                               daemon/install.sh, which must run first (the Python one
+#                                                               this script used to put in ~/.local/bin: git 669f79f)
 #   ~user/.config/systemd/user/y700-refresh-auto.service    user unit (enabled, graphical-session)
 #   ~user/.local/share/kwin/scripts/y700-refresh-auto/      KWin script, enabled by default (metadata EnabledByDefault):
 #                                                               KWin loads it at login; the daemon unload/load/starts it on
@@ -16,7 +18,7 @@ set -eu
 U=user; H=/home/$U; S=/tmp/ra
 RUN=(sudo -u $U env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0)
 install -d -o $U -g $U $H/.local/bin $H/.config/systemd/user $H/.config/mpv/scripts $H/.local/share/kwin/scripts
-install -m 755 -o $U -g $U $S/y700-refresh-auto $H/.local/bin/y700-refresh-auto
+[ -x /usr/local/libexec/y700-refresh-auto ] || { echo "no daemon: run daemon/install.sh first"; exit 1; }
 install -m 644 -o $U -g $U $S/y700-refresh-auto.service $H/.config/systemd/user/y700-refresh-auto.service
 install -m 644 -o $U -g $U $S/y700-video-state.lua $H/.config/mpv/scripts/y700-video-state.lua
 rm -rf $H/.local/share/kwin/scripts/y700-refresh-auto

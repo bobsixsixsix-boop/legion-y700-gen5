@@ -1,0 +1,24 @@
+[Unit]
+Description=Turn off G9 lights with the screen and wake the screen from its buttons
+After=systemd-udev-trigger.service tb323fu-usb-port.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/y700-gamepad-screen
+ExecStopPost=/usr/local/libexec/y700-gamepad-screen --restore
+Restart=on-failure
+RestartSec=3
+StateDirectory=y700-gamepad-screen
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStopSec=15
+Nice=10
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=full
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

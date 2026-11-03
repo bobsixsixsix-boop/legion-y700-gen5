@@ -166,10 +166,28 @@ void Voice::stopCapture()
 
 void Voice::cancel()
 {
-    // cancels the capture only; speech already sent for recognition is still delivered
+    // cancels the capture only; speech already sent for recognition is still delivered (discard() drops it)
     stopCapture();
     { std::lock_guard<std::mutex> l(m_mx); m_pcm.clear(); }
     updateState();
+}
+
+void Voice::discard()
+{
+    // A result is typed into whatever has the focus when it arrives: after a hop to the next chat in the
+    // same Telegram window, or to the address bar, it landed there (10-19 audit D2, 10-31 audit osk A3).
+    // Osk calls this on fcitx5's Hide (the field lost the focus) and when the keyboard goes away; dictating
+    // into one field sentence by sentence gets no Hide in between, so nothing is lost there.
+    if (m_pending.isEmpty()) return;
+    const QList<QNetworkReply *> pending = m_pending;
+    m_pending.clear();
+    for (QNetworkReply *r : pending) {
+        r->disconnect(this);       // abort() emits finished(): it must not reach drain()
+        r->abort();
+        r->deleteLater();
+    }
+    updateState();
+    emit failed(QStringLiteral("换了输入框，这句语音没有上屏"));
 }
 
 void Voice::updateState() { setState(m_stream ? 1 : m_pending.isEmpty() ? 0 : 2); }

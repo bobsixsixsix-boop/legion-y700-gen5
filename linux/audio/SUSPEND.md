@@ -40,7 +40,7 @@
 | 上游 UCM | `alsa/ucm2/Lenovo/TB323FU/HiFi.conf:10-26`、`conf.d/kaanapali/LENOVO-TB323FU.conf:7-12`（=0.4.2） | 只有路由 cset 和 PlaybackPCM/Priority/Channels | 无 |
 | 上游混音默认值/功放增益 | `etc/tb323fu/audio.conf`、`libexec/tb323fu-audio-defaults`、`libexec/tb323fu-speaker-gain`、`systemd/{system/tb323fu-audio,user/tb323fu-speaker-gain}.service`、`udev/91-tb323fu-audio.rules`（=0.4.2） | 只写 amixer 控件、默认输出元数据 | 无 |
 | 我们的调音链 | 作者自用的 `y700-lenovo-tuning.conf`（未随附，见 [README.md](README.md)） | 回放侧 `node.passive = true`、`dont-reconnect`/`dont-fallback` | 无 |
-| 我们的守护 | `y700-speaker-guard`（事件驱动 + 30 s） | 只跑 pw-cli/pw-metadata/pactl 查询、`set-sink-volume`、`move-sink-input` | 不建流、不恢复挂起的 sink |
+| 我们的守护 | `y700-speaker-guard`（事件驱动 + 30 s；11-03 换 Rust 后兜底改 10 min） | 只跑 pw-cli/pw-metadata/pactl 查询、`set-sink-volume`、`move-sink-input` | 不建流、不恢复挂起的 sink |
 | 屏幕键盘 | `linux/osk/src/sound.cpp:111-139` | 自建 pw_stream，`PW_STREAM_FLAG_INACTIVE` 连接（:133-134），`node.latency = 256/48000`（:119） | 见 §2.5：不活动时不拖住 sink |
 | WirePlumber 0.5.13 默认 | `src/scripts/monitors/alsa.lua:189-190` | `node.pause-on-idle = false`（**所有** ALSA 节点） | 这就是快照里那个 False |
 | | `src/scripts/node/suspend-node.lua:12-23,38-62` | 关注 `Audio/*`、`Video/*` 的 node-state-changed；进 idle/error 起一个 `session.suspend-timeout-seconds`（缺省 **5**，0=不挂起）的一次性定时器，到时发**一次** `Suspend`，不复查 | 默认会挂起 |
@@ -185,7 +185,7 @@
 - **`node.suspend-on-idle = true`**：在 RUNNING→IDLE 的那一刻立即挂起（`impl-node.c:521-526`）= 立刻 `snd_pcm_drop` + 关 PCM，按源码推断会丢掉 ALSA 缓冲里还没放完的那几十毫秒（drop 本身也正是 d9a63dc69 要避免的爆音来源），每两声之间都重开一次；而且走的是同一个 `suspend_node()`，1.6.2 的 `-EBUSY` 照样拒绝。
 - **`node.always-process` / `dither.noise` 保活**：方向相反。
 - **为了生效去重启 PipeWire/WirePlumber**：会触发 README:745 的 UCM 路由坑；下次开机生效即可（§6.2 写了非重启不可时的完整流程）。
-- **让 `y700-speaker-guard` 去挂起 sink**：它是 shell + pactl，每次检查起十来个进程；挂起是会话管理器的职责，放在 WirePlumber 里零额外进程。
+- **让 `y700-speaker-guard` 去挂起 sink**：它是 shell + pactl，每次检查起十来个进程（11-03 换 Rust 后是 3 个，理由不变）；挂起是会话管理器的职责，放在 WirePlumber 里零额外进程。
 - **动上游保护链 / 调音链、缩短键盘 10 s 计时**：与熄屏无关，且会改变听感/首击延迟。
 - **在平板上做 A/B**：按约定 12:30 前不碰平板；§6.4 写好了步骤。
 

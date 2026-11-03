@@ -9,7 +9,10 @@
 #   3. same Chrome: an 8 s clip looping must keep the state file and its rate the whole time (a loop is a seek);
 #      5 small captions flying over the video -> danmaku=1 with a why= line, and danmaku=0 again 8 s after they are
 #      gone; one big animated overlay plus 2 small spinners (player UI) -> danmaku=0.
-#   4. a page asks MediaSource / canPlayType / mediaCapabilities about AV1 and VP9: AV1 refused, VP9 offered.
+#   4. a page asks MediaSource / canPlayType / mediaCapabilities about AV1 and VP9: VP9 offered; AV1 refused, except
+#      (v1.6) 8-bit AV1 Main where this Chrome reports a hardware decoder for it. This headless Chrome has none (it runs
+#      without the desktop entry's VA-API flags), so here 1.6 must answer as 1.5 did: the fallback. The hardware side
+#      (owner's flags, YouTube served av01) is linux/video/chrome-vp9-check.sh CODEC=vp9,av1.
 #   5. a fullscreen element holding a video: body and the rest of the page turn visibility:hidden (what hides itself
 #      inside stays hidden), back to normal on exit; a fullscreen element inside a shadow tree is left alone; the
 #      prefixed webkitRequestFullscreen(), paused, then webkitExitFullscreen(): the page comes back (v1.5).
@@ -123,23 +126,54 @@ tab=$(open_tab ui.html); sleep 6; s=$(snap)
 echo "$s" | grep -q 'playing=1 fullscreen=1 .*danmaku=0' && ok "player UI animations: $s" || bad "player UI animations: '$s'"
 curl -s "http://127.0.0.1:$P/json/close/$tab" >/dev/null
 
-echo "== 4. AV1 hidden from pages (no-av1.js, page world)"
+echo "== 4. what pages are told about AV1 (no-av1.js, page world)"
+# by the installed extension's version: up to 1.5 every AV1 type is refused; from 1.6 8-bit AV1 Main is let through
+# where this Chrome reports a hardware decoder for it (MediaCapabilities powerEfficient, what no-av1.js probes),
+# 10-bit, profile 1 and a bare "av01" stay refused. That report is asked in an isolated world (below), where the hooks
+# are not. 10-29 the first 1.6 run expected "true probably true" whenever the VA driver lists VAProfileAV1Profile0, and
+# FAILed: this headless Chrome (no VA-API flags) has no hardware decoder for it; vainfo is shown, not used.
+xv=$(sed -n 's/.*"external_version": *"\([^"]*\)".*/\1/p' /usr/share/google-chrome/extensions/$ID.json)
+av1hw=no; "${SU[@]}" vainfo --display drm --device /dev/dri/renderD128 2>/dev/null | grep -q VAProfileAV1Profile0 && av1hw=yes
 tab=$(open_tab p30.html); sleep 2
-av1=$(python3 - $P $tab <<'PY'
+got=$(python3 - $P $tab <<'PY'
 import json, sys, websocket
 ws = websocket.create_connection(f"ws://127.0.0.1:{sys.argv[1]}/devtools/page/{sys.argv[2]}", timeout=10, suppress_origin=True)
-ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"returnByValue": True, "awaitPromise": True, "expression": """(async () => {
+n = 0
+def call(method, **params):
+    global n
+    n += 1
+    ws.send(json.dumps({"id": n, "method": method, "params": params}))
+    while True:
+        m = json.loads(ws.recv())
+        if m.get("id") == n: return m.get("result", m)
+# Chrome's own answer comes from an isolated world: its own prototypes, so no-av1.js's hooks are not there, and the same
+# renderer, so the same GPU check. Not from a Worker: Chrome skips the GPU check there ("GpuFactories isn't available
+# in worker scope", media_capabilities.cc) and a fresh profile's empty decode history says powerEfficient - 10-29 a
+# Worker said true in this headless Chrome, whose pages get no hardware AV1.
+frame = call("Page.getFrameTree")["frameTree"]["frame"]["id"]
+ctx = call("Page.createIsolatedWorld", frameId=frame, worldName="y700-test")["executionContextId"]
+hw = call("Runtime.evaluate", contextId=ctx, returnByValue=True, awaitPromise=True, expression="""
+  navigator.mediaCapabilities.decodingInfo({type: 'media-source', video: {contentType: 'video/mp4; codecs="av01.0.08M.08"',
+    width: 1920, height: 1080, bitrate: 8e6, framerate: 30}}).then((r) => r.supported && r.powerEfficient)""")
+ans = call("Runtime.evaluate", returnByValue=True, awaitPromise=True, expression="""(async () => {
   const av1 = 'video/webm; codecs="av01.0.08M.08"', vp9 = 'video/webm; codecs="vp09.00.40.08"';
+  const a10 = 'video/webm; codecs="av01.0.08M.10"', p1 = 'video/webm; codecs="av01.1.08M.08"', bare = 'video/mp4; codecs="av01"';
   const di = (t) => navigator.mediaCapabilities.decodingInfo({type: 'media-source', video: {contentType: t, width: 1920, height: 1080, bitrate: 4e6, framerate: 60}}).then((r) => r.supported);
   return [MediaSource.isTypeSupported(av1), document.createElement('video').canPlayType(av1) || 'no', await di(av1),
+          MediaSource.isTypeSupported(a10), await di(a10), MediaSource.isTypeSupported(p1), MediaSource.isTypeSupported(bare),
           MediaSource.isTypeSupported(vp9), await di(vp9)].join(' ');
-})()"""}}))
-while True:
-    m = json.loads(ws.recv())
-    if m.get("id") == 1: print(m["result"]["result"].get("value", m)); break
+})()""")
+v = lambda r: str(r.get("result", {}).get("value", "error")).lower()
+print(v(hw), v(ans))
 PY
 )
-[ "$av1" = "false no false true true" ] && ok "AV1 refused, VP9 offered ($av1)" || bad "AV1/VP9 answers: '$av1' (want: false no false true true)"
+chw=${got%% *}; av1=${got#* }
+want8="false no false"
+[ "$(printf '%s\n' 1.6 "$xv" | sort -V | head -1)" = 1.6 ] && [ "$chw" = true ] && want8="true probably true"
+want="$want8 false false false false true true"
+case $chw in true|false) ;; *) bad "Chrome's own answer on hardware AV1 (isolated world): '$chw'" ;; esac
+[ "$av1" = "$want" ] && ok "AV1 answers for extension $xv, this Chrome hardware AV1 $chw (VA profile $av1hw): 8-bit Main / 10-bit / profile 1 / bare av01 / VP9 = $av1" \
+  || bad "AV1/VP9 answers for extension $xv, this Chrome hardware AV1 $chw (VA profile $av1hw): '$av1' (want: $want)"
 curl -s "http://127.0.0.1:$P/json/close/$tab" >/dev/null
 
 echo "== 5. page behind a fullscreen video is hidden"

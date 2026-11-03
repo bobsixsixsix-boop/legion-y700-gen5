@@ -3,7 +3,7 @@
 // it covers the whole screen, KWin's blur behind all of it. On it: the time and date big at the top left, and
 // one half: the notification centre (NotesPane.qml, pulled from the left half) or the controls (pulled from
 // the right half; two columns laid out for the right thumb, see `ctl`: the thumb column with the sliders and
-// the frequent tiles, the far column with the rare toggles and power + Android; or a device list).
+// the frequent tiles, the far column with the rare toggles, the keyboard and power + Android; or a device list).
 // D-Bus toggle/show open the controls, showSide("left") the notifications.
 // Closes on a tap on the empty curtain, a push up on the header or the bottom handle, or an app launched from it.
 // Wi-Fi / Bluetooth lists: long press on their tiles. Power menu and Android both confirm in place.
@@ -38,7 +38,7 @@ Window {
     property bool powerOpen: false
     property string powerArmed: ""        // "reboot" | "poweroff" waiting for the second tap
     onOpenChanged: {
-        if (!open) { confirmAndroid = false; powerOpen = false; powerArmed = "" ; page = ""; trayPending = "" }
+        if (!open) { confirmAndroid = false; powerOpen = false; powerArmed = "" ; page = ""; trayPending = ""; kbdPending = false }
         else now = new Date()
         if (!tracking) settle()
     }
@@ -131,9 +131,16 @@ Window {
     property bool inputLock: false
     Timer { id: unlock; interval: 4000; onTriggered: win.inputLock = false }
     function lockInput() { win.inputLock = true; unlock.interval = 4000; unlock.restart() }
+    // the 「键盘」 tile's ForceShow on its way (busctl gives up after 3 s): the tile dims and takes no second tap, and
+    // only its yes closes the curtain; forgotten when the curtain closes (as trayPending), so a late answer never
+    // closes the next opening
+    property bool kbdPending: false
     Connections {
         target: backend
-        function onActionFinished(name, ok) { if (name === "hz" && win.inputLock) { unlock.interval = 800; unlock.restart() } }
+        function onActionFinished(name, ok) {
+            if (name === "hz" && win.inputLock) { unlock.interval = 800; unlock.restart() }
+            if (name === "键盘") { const asked = win.kbdPending; win.kbdPending = false; if (ok && asked && win.open) backend.hide() }
+        }
     }
 
     function tileBg(pressed) { return Qt.rgba(1, 1, 1, pressed ? 0.20 : 0.12) }
@@ -268,10 +275,22 @@ Window {
                     text: win.now.toLocaleDateString(Qt.locale("zh_CN"), "M月d日 dddd")
                     color: Qt.rgba(1, 1, 1, 0.72); font.pixelSize: 17
                 }
+                // the battery pill opens the battery page (10-30, as on the phones): y700-battery (linux/power/battery)
+                // starts it, the curtain closes as for 「系统网络设置」. The pill is 32 high: the handler reaches 12 px
+                // past it. A drag that starts on it still pushes the curtain up: the header's DragHandler takes the
+                // point over past its threshold, and a tap is a release within bounds only.
                 Rectangle {
+                    id: batPill
                     anchors { right: parent.right; verticalCenter: clock.verticalCenter }
                     height: 32; width: batRow.implicitWidth + 24; radius: 16
-                    color: Qt.rgba(1, 1, 1, 0.12)
+                    color: win.tileBg(batTap.pressed)
+                    Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                    scale: batTap.pressed ? 0.96 : 1
+                    Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    TapHandler {
+                        id: batTap; margin: 12; gesturePolicy: TapHandler.ReleaseWithinBounds
+                        onTapped: { backend.haptic(); backend.launch("/usr/local/bin/y700-battery"); backend.hide() }
+                    }
                     Row {
                         id: batRow; anchors.centerIn: parent; spacing: 6
                         Item {
@@ -284,6 +303,8 @@ Window {
                             }
                         }
                         Text { anchors.verticalCenter: parent.verticalCenter; text: (st.charging ? "⚡" : "") + (st.battery === undefined || st.battery < 0 ? "–" : st.battery) + "%"; color: "white"; font.pixelSize: 15; font.weight: Font.DemiBold }
+                        // it leads somewhere
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "›"; color: Qt.rgba(1, 1, 1, 0.55); font.pixelSize: 17; font.weight: Font.DemiBold }
                     }
                 }
             }
@@ -304,13 +325,16 @@ Window {
             // is the band neither thumb reaches (the sliders used to sit there, in the left column).
             //   thumb column (colB, x 1204-1544): Wi-Fi | Bluetooth (the first row everyone expects), rotation lock
             //     | auto brightness, the brightness and volume pills at the resting height (centres y 420 / 494),
-            //     the performance profile with refresh rate | HUD under it (the game cluster), recording |
-            //     screenshot last (both close the curtain); the player under the grid only while something plays.
-            //   far column (colA, x 840-1180): bypass | torch, Tailscale, 「后台应用」 (the apps' tray items, only while
-            //     there are some), blank, and on the bottom line power + Android: 9 cm from the thumb, the distance
-            //     is the first confirmation (the cards are the second).
-            // Rows 14 apart; tiles 100 high, every single-line control 60 high with 44 px chips, radius 18 (the pills
-            // keep their capsule). Both columns start at y 162 and end on the same line (826), player or not.
+            //     the performance profile with refresh rate | HUD under it (the game cluster), last the four actions
+            //     that close the curtain, 60 high two across: recording | screenshot, show desktop | task cards
+            //     (11-01); the player under the grid only while something plays.
+            //   far column (colA, x 840-1180): bypass | torch | keyboard (three across, the columns of the tray tiles
+            //     under them), Tailscale, 「后台应用」 (the apps' tray items, only while there are some), blank, and on
+            //     the bottom line power + Android: 9 cm from the thumb, the distance is the first confirmation (the
+            //     cards are the second).
+            // Rows 14 apart; tiles 100 high (163 wide two across, 104 three across), every single-line control 60 high
+            // with 44 px chips, radius 18 (the pills keep their capsule). Both columns start at y 162 and end on the
+            // same line (860), player or not.
             Item {
                 id: ctl
                 visible: !win.notes
@@ -320,13 +344,15 @@ Window {
                 height: parent.height - y - 48
                 // the thumb grid's height, remembered while it is up: the far column ends on its bottom line, and
                 // must not move while a device list replaces the grid
-                property real gridH: 664
+                property real gridH: 698
                 readonly property int rowGap: 14
+                // a tile's width three across a column: the far column's first row and the tray tiles under it share it
+                readonly property real third: (win.colW - 2 * rowGap) / 3
                 // what the tray section's heading and tiles may take: the far column's blank (between the toggles
                 // and the power row) less what the taller confirm card grows by, so either card still opens under
                 // the tiles and the bottom line stays put. While shown the section is the column's filler (the
-                // spacer goes, and its second gap with it): gridH 664: 664 - 174 - 2 x 14 - 250 = 212 = the heading
-                // (19), 8 and two whole rows (182). More apps than that: the last place opens the list of all (traySec).
+                // spacer goes, and its second gap with it): gridH 698: 698 - 174 - 2 x 14 - 250 = 246 = the heading
+                // (19), 8, two whole rows (182) and 37 spare. More apps than that: the last place opens the list of all (traySec).
                 readonly property real trayRoom: gridH - colATop.implicitHeight - 2 * rowGap
                                                  - Math.max(60, powerCard.implicitHeight, androidCard.implicitHeight)
 
@@ -341,23 +367,40 @@ Window {
                     GridLayout {
                         id: colATop
                         Layout.fillWidth: true
-                        columns: 2; columnSpacing: ctl.rowGap; rowSpacing: ctl.rowGap
+                        columns: 3; columnSpacing: ctl.rowGap; rowSpacing: ctl.rowGap
                         Tile {
-                            Layout.fillWidth: true
+                            Layout.fillWidth: true; Layout.preferredWidth: ctl.third
                             icon: "bypass"; title: "旁路供电"
                             active: !!st.bypass
                             onTapped: { backend.setLocal("bypass", !st.bypass); backend.act("bypass", "tb323fu-ctl bypass " + (st.bypass ? "on" : "off")) }
                         }
                         Tile {
-                            Layout.fillWidth: true
+                            Layout.fillWidth: true; Layout.preferredWidth: ctl.third
                             icon: "torch"; title: "手电筒"
                             active: !!st.torch
                             onTapped: { backend.setLocal("torch", !st.torch); backend.act("torch", "tb323fu-ctl torch " + (st.torch ? "on" : "off")) }
                         }
+                        // 「键盘」 (10-30): the on-screen keyboard up by hand for Wine / Proton games, whose X11 input
+                        // (XIM: the whole window is the input field) never tells fcitx5 a field was tapped, so it cannot
+                        // come up by itself there. ForceShow: forced, it stays until its own close key (the gate's hides
+                        // do not take it down). An action, not a toggle (never accent); the curtain goes once the
+                        // keyboard said yes (win.kbdPending), a refusal or no answer within 3 s stays on screen as the
+                        // toast 「键盘失败：…」 (the action's name is the toast's label: backend.cpp has none for it).
+                        // fyi.fortime.Fcitx5Osk is whichever keyboard is in charge (y700-osk, or fcitx5-osk after
+                        // `y700-osk-ctl off`), started by D-Bus activation if it is not running
+                        Tile {
+                            Layout.fillWidth: true; Layout.preferredWidth: ctl.third
+                            icon: "keyboard"; title: "键盘"
+                            busy: win.kbdPending
+                            onTapped: {
+                                win.kbdPending = true
+                                backend.act("键盘", "busctl --user --timeout=3 call fyi.fortime.Fcitx5Osk /fyi/fortime/Fcitx5Osk/Controller fyi.fortime.Fcitx5Osk.Controller1 ForceShow")
+                            }
+                        }
                         // Tailscale: a wide tile (status is the useful part). Running -> down; Stopped -> up;
                         // NeedsLogin -> start a login and open the URL in the browser (the curtain closes for it)
                         WideTile {
-                            Layout.fillWidth: true; Layout.columnSpan: 2
+                            Layout.fillWidth: true; Layout.columnSpan: 3
                             icon: "tailscale"; title: "Tailscale"
                             readonly property string s: st.ts || ""
                             active: s === "Running"
@@ -379,7 +422,8 @@ Window {
                     }
 
                     // 后台应用: the apps' tray items (StatusNotifierItems, src/tray.h; the Plasma tray went with the
-                    // panel in phase 3), three to a row like the mockup (104 = (340 - 2 x 14) / 3). Tap = open the app,
+                    // panel in phase 3), three to a row like the mockup (ctl.third = (340 - 2 x 14) / 3 = 104, the
+                    // columns of the first row above). Tap = open the app,
                     // long press = its menu (a page of the thumb column). Only while some app has one. It fills the
                     // blank in place of the spacer below, the tiles at its top: as many whole rows as ctl.trayRoom
                     // holds (two on the tablet), so a confirm card grows up into the rest and never reaches them; while
@@ -398,7 +442,7 @@ Window {
                         readonly property int rows: Math.max(1, Math.floor((ctl.trayRoom - trayHead.height - 8 + ctl.rowGap) / (84 + ctl.rowGap)))
                         readonly property int places: rows * 3
                         readonly property bool over: tray.keys.length > places
-                        readonly property real tileW: (win.colW - 2 * ctl.rowGap) / 3
+                        readonly property real tileW: ctl.third
                         Text {
                             id: trayHead
                             text: "后台应用"
@@ -472,7 +516,8 @@ Window {
                             }
                         }
 
-                        // power card: screen off (full row) / lock / suspend / reboot / power off (reboot and power off ask twice)
+                        // power card: screen off / lock (a full row each) / reboot | power off (those two ask twice). No suspend:
+                        // suspend.target is masked (README 续航「永不休眠」), the button could only fail (10-31 audit C3)
                         Rectangle {
                             id: powerCard
                             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -505,8 +550,7 @@ Window {
                                             // the short sleep lets the curtain go up first
                                             { k: "screenoff", t: "息屏", i: "screenoff", wide: true, confirm: false,
                                               cmd: "sleep 0.4; busctl --user call org.kde.kglobalaccel /component/org_kde_powerdevil org.kde.kglobalaccel.Component invokeShortcut s 'Turn Off Screen'" },
-                                            { k: "lock", t: "锁屏", i: "lock", cmd: "loginctl lock-session", confirm: false },
-                                            { k: "suspend", t: "休眠", i: "sleep", cmd: "systemctl suspend", confirm: false },
+                                            { k: "lock", t: "锁屏", i: "lock", wide: true, cmd: "loginctl lock-session", confirm: false },
                                             { k: "reboot", t: "重启", i: "restart", cmd: "systemctl reboot", confirm: true },
                                             { k: "poweroff", t: "关机", i: "poweroff", cmd: "systemctl poweroff", confirm: true }
                                         ]
@@ -622,7 +666,7 @@ Window {
                         }
                     }
 
-                    // the thumb grid: 2 x 100 tiles / pills / performance / 2 x 100 tiles (664 high)
+                    // the thumb grid: 2 x 100 tiles / pills / performance / 2 x 100 tiles / 2 x 2 actions of 60 (698 high)
                     GridLayout {
                         id: gridB
                         Layout.fillWidth: true
@@ -643,7 +687,8 @@ Window {
                             Layout.fillWidth: true
                             icon: "bluetooth"; title: "蓝牙"
                             active: !!st.bt
-                            onTapped: { backend.setLocal("bt", !st.bt); backend.act("bt", "bluetoothctl power " + (st.bt ? "on" : "off")) }
+                            // timeout: bluetoothctl waits for ever when bluetoothd is gone (backend.cpp STATUS_CMD)
+                            onTapped: { backend.setLocal("bt", !st.bt); backend.act("bt", "timeout 10 bluetoothctl power " + (st.bt ? "on" : "off")) }
                             onLongPressed: win.page = "bt"
                         }
                         // row 2, y 276: the display pair (auto brightness right over the brightness pill)
@@ -741,17 +786,18 @@ Window {
                                 backend.act("hud", "$HOME/.local/bin/y700-hud-toggle " + next)
                             }
                         }
-                        // row 7, y 726: capture, both close the curtain
-                        Tile {
-                            Layout.fillWidth: true
+                        // rows 7-8, y 726 / 800: four actions that close the curtain, 60 high (11-01: show desktop and
+                        // the task cards came; a third row of 100 would not fit over the player, so capture shrank)
+                        WideTile {
+                            Layout.fillWidth: true; toggle: false
                             icon: "record"; title: st.recording ? "录屏中" : "录屏"
                             active: !!st.recording
                             // while recording the tile stops it (backend.stopRecording = a click on Spectacle's tray
                             // icon; there is no tray since the dock). st.recording follows Spectacle's own signals
                             onTapped: { if (st.recording) backend.stopRecording(); else backend.startRecording(); backend.hide() }
                         }
-                        Tile {
-                            Layout.fillWidth: true
+                        WideTile {
+                            Layout.fillWidth: true; toggle: false
                             icon: "screenshot"; title: "截图"
                             // Spectacle's activate() while it is recording finishes the recording instead of
                             // taking a screenshot (SpectacleCore.cpp, 6.6.6): the tile is off during a recording
@@ -761,9 +807,24 @@ Window {
                                 backend.hide(); backend.launch("sleep 0.6; spectacle -b -f")
                             }
                         }
+                        // every window minimized (kwin-script: y700-edge's "y700-show-desktop", 11-01), so the shellbar
+                        // shows its desktop as after the home flick: dock up, see-through status bar. One way: the dock or
+                        // the cards bring an app back. No wait: the windows may go while the curtain still covers them
+                        WideTile {
+                            Layout.fillWidth: true; toggle: false
+                            icon: "desktop"; title: "显示桌面"
+                            onTapped: { backend.hide(); backend.launch("busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s y700-show-desktop") }
+                        }
+                        // the task cards (linux/gesture/taskswitcher), the same shortcut as the G9 home key's double tap.
+                        // 0.3 s: the curtain's 240 ms slide-out first (the cards take the docks over the app as they open)
+                        WideTile {
+                            Layout.fillWidth: true; toggle: false
+                            icon: "tasks"; title: "多任务"
+                            onTapped: { backend.hide(); backend.launch("sleep 0.3; busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s 'y700-taskswitcher'") }
+                        }
                     }
 
-                    // now playing (MPRIS), only while some player has something: under the grid (y 840), pushing
+                    // now playing (MPRIS), only while some player has something: under the grid (y 874), pushing
                     // nothing above it (the layout skips it while hidden)
                     Rectangle {
                         visible: win.page === "" && !!media.service

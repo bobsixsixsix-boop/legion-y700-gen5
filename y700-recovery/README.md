@@ -82,6 +82,12 @@ tools/edl.sh r boot_b /tmp/boot_b-readback.img --lun=4 && sha256sum /tmp/boot_b-
 cd edl && ../edlvenv/bin/python edl.py --loader=../loader/qsahara_device_programmer.xml reset
 ```
 
+`tools/edl.sh` 退出码就是 edl 的（10-31 审计 A8）。原来脚本最后一条是 `echo … | tee`，不管 edl 成没成功都退 0：
+回读那步 USB 掉线时 `&&` 照样往下走，`sha256sum` 读的是 /tmp 里上一次留下的回读文件，两个哈希一致就会误以为写回成功。
+现在先存 `${PIPESTATUS[0]}`（edl 的，不是 tee 的），记进 `notes/edl-log.txt` 后 `exit` 它。
+离线测试：`bash tools/test-edl-sh.sh`（假 python 按 `FAKE_RC` 退出，临时目录里放一份 edl.sh，不碰真的 notes/），
+3 项，打印 ALL PASS；旧版过不了「edl 退 3 → edl.sh 退 3」这一项。
+
 Android 里也可以直接 `adb shell su -c 'dd if=... of=/dev/block/by-name/boot_b bs=4096 conv=fsync'`，
 这是上游模块的做法（Android 自己正从 boot_b 运行，内核已在内存里）。
 

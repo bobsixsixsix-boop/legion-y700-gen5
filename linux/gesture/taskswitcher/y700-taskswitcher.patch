@@ -1,6 +1,6 @@
 --- a/contents/ui/main.qml
 +++ b/contents/ui/main.qml
-@@ -12,18 +12,100 @@
+@@ -12,18 +12,104 @@
  SceneEffect {
      id: root
  
@@ -66,11 +66,15 @@
 +    readonly property string y700Build: "@Y700_BUILD@"
 +    signal y700DismissRequested()
 +    Component.onCompleted: console.info("y700-taskswitcher: loaded " + y700Build)
++    // y700: a swiped-away card quits its app (ui/AppQuit.qml). Here, not in the view: the view goes when the
++    // cards close, the app's window often after that. TaskSwitcher's own "root" hides ours, so it is handed in.
++    AppQuit { id: y700AppQuit }
 +
      // Created per screen
      delegate: TaskSwitcher {
          id: taskSwitcher
          state: taskSwitcherState
++        appQuit: y700AppQuit
 +        Component.onCompleted: root.y700Views++
 +        Connections {
 +            target: root
@@ -104,7 +108,7 @@
      }
  
      TaskSwitcherPlugin.MobileTaskSwitcherState {
-@@ -33,10 +115,14 @@
+@@ -33,10 +119,14 @@
              && !MobileShellState.ShellDBusClient.isActionDrawerOpen
              && !MobileShellState.ShellDBusClient.isVolumeOSDOpen
              && !MobileShellState.ShellDBusClient.isNotificationPopupDrawerOpen

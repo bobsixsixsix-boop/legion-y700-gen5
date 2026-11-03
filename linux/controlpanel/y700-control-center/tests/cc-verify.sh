@@ -108,7 +108,7 @@ check "short slow pull: stays closed" '[ "$(mapped y700-control-center)" = 0 ]'
 # backend.side is not on D-Bus (only scriptable slots and signals are exported), so the page is read from the
 # outside two ways: the strip's journal line for the pull, and a tap on the right half, which closes the curtain
 # only when it is empty there (Main.qml: a tap off the pane in use closes). With the controls up (1300, 900) is on
-# the ctl pane (x 840-1544, down to y 954; under its last tile row, which ends at 826) and does nothing.
+# the ctl pane (x 840-1544, down to y 954; under its last tile row, which ends at 860) and does nothing.
 since=$(date '+%Y-%m-%d %H:%M:%S')
 send "drag 300 1 300 700 300 20"; sleep 1
 check "pull in the left half: sheet open" '[ "$(mapped y700-control-center)" = 1 ]'

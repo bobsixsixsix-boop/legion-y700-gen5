@@ -1,4 +1,5 @@
 # /etc/systemd/system/y700-kmsg-watch.service -- see /usr/local/libexec/y700-kmsg-watch, y700/linux/net/KMSG-WATCH.md
+# Rust since 2026-11-03 (y700/linux/net/kmsg-watch/install.sh); the Python version it replaced: git 1814212
 # Event-driven trigger for y700-wifi-watchdog.service / y700-display-watchdog.service (their timers are disabled).
 # The watchdog units are started by systemd PID 1 in their own unit, so none of the sandboxing below reaches them.
 [Unit]
@@ -55,7 +56,7 @@ UMask=0077
 #   User=/DynamicUser=  a non-root systemctl start goes through polkit (would need a polkit rule)
 #   WatchdogSec=        needs a periodic sd_notify: exactly the wakeups this replaces
 #   ProtectProc=/ProcSubset=  PID 1 would be invisible to systemctl; small gain, not verified
-#   MemoryDenyWriteExecute=   would kill CPython's JIT if this python3.14 build has it on (not checked)
+#   MemoryDenyWriteExecute=   the Rust watcher (11-03) has no JIT and would run under it; left off so the swap changed one thing
 
 [Install]
 WantedBy=multi-user.target

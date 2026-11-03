@@ -51,14 +51,23 @@ Gate::Gate(QObject *parent) : QObject(parent)
     m_check->setInterval(15000);
     connect(m_check, &QTimer::timeout, this, &Gate::ensureLoaded);
     m_check->start();
-    // the panels' DPMS state: a tap that wakes a dark screen is swallowed by KWin, not a tap on a field
-    const QDir drm(QStringLiteral("/sys/class/drm"));
-    for (const QString &c : drm.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-        QFile en(drm.filePath(c + QStringLiteral("/enabled")));
-        if (QFile::exists(drm.filePath(c + QStringLiteral("/dpms"))) && en.open(QIODevice::ReadOnly) && en.readAll().startsWith("enabled"))
-            m_dpmsFiles << drm.filePath(c + QStringLiteral("/dpms"));
-    }
+    // the panel's DPMS state: a tap that wakes a dark screen is swallowed by KWin, not a tap on a field
+    m_dpmsFiles = panelDpms(QStringLiteral("/sys/class/drm"));
     ensureLoaded();
+}
+
+QStringList Gate::panelDpms(const QString &drmDir)
+{
+    // The internal DSI panel only, enabled or not: the touches land on it. This list is made once, at
+    // start. An external output that was enabled then reads Off for good once it is unplugged, and every
+    // touch would count as the wake tap until the keyboard restarts (10-31 audit osk A1); a panel KWin
+    // had switched off right then (no encoder) was left out, and the wake tap counted as a tap.
+    QStringList files;
+    const QDir drm(drmDir);
+    for (const QString &c : drm.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+        if (c.contains(QLatin1String("-DSI-")) && QFile::exists(drm.filePath(c + QStringLiteral("/dpms"))))
+            files << drm.filePath(c + QStringLiteral("/dpms"));
+    return files;
 }
 
 void Gate::ensureLoaded()
@@ -111,6 +120,7 @@ void Gate::setAlive(bool a)
     m_alive = a;
     m_down.clear();
     m_tap = {};
+    m_recent.clear();
     note(a ? QStringLiteral("effect alive: tap-gated") : QStringLiteral("effect gone: focus-driven fallback"));
     emit aliveChanged(a);
 }
@@ -138,6 +148,48 @@ bool Gate::kwinInitiated() const
 bool Gate::internalOther() const
 {
     return m_imInternalOther && m_clock.elapsed() - m_imActiveAt < 400;
+}
+
+Gate::Touch Gate::touchBefore(qint64 t) const
+{
+    for (auto it = m_recent.crbegin(); it != m_recent.crend(); ++it)
+        if (it->downAt <= t) return *it;
+    return {};
+}
+
+void Gate::lookUp(const QString &win, const QString &wid)
+{
+    if (wid.isEmpty() || m_managed.contains(wid)) return;
+    if (m_managed.size() > 256) m_managed.clear();      // window ids are never reused: just start over
+    // an app's window carries its desktop file ("class|app"); without one it is a layer-shell surface or
+    // an X11 app without one (Steam). KWin's getWindowInfo knows only the windows it manages: an empty
+    // map for this keyboard, Steam's caption/class/type for Steam (2026-10-30).
+    if (!win.endsWith(QLatin1Char('|'))) { m_managed.insert(wid, 1); return; }
+    m_managed.insert(wid, -1);
+    auto m = QDBusMessage::createMethodCall(QStringLiteral("org.kde.KWin"), QStringLiteral("/KWin"), QStringLiteral("org.kde.KWin"),
+                                            QStringLiteral("getWindowInfo"));
+    m << wid;
+    auto *w = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(m), this);
+    connect(w, &QDBusPendingCallWatcher::finished, this, [this, w, wid] {
+        w->deleteLater();
+        QDBusPendingReply<QVariantMap> r = *w;
+        // no answer (a KWin without the call): an app window, as it was before this check existed
+        m_managed.insert(wid, !r.isValid() || !r.value().isEmpty() ? 1 : 0);
+    });
+}
+
+void Gate::stillThere(const QString &wid, QObject *ctx, const std::function<void(bool)> &done)
+{
+    auto m = QDBusMessage::createMethodCall(QStringLiteral("org.kde.KWin"), QStringLiteral("/KWin"), QStringLiteral("org.kde.KWin"),
+                                            QStringLiteral("getWindowInfo"));
+    m << wid;
+    auto *w = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(m), ctx);
+    connect(w, &QDBusPendingCallWatcher::finished, ctx, [w, done] {
+        w->deleteLater();
+        QDBusPendingReply<QVariantMap> r = *w;
+        // an empty map once the window is gone; no answer: there, as before this check existed
+        done(!r.isValid() || (!r.value().isEmpty() && !r.value().value(QStringLiteral("minimized")).toBool()));
+    });
 }
 
 bool Gate::tapAnywhere(const QString &win)
@@ -186,18 +238,33 @@ void Gate::onEvent(const QString &json)
     const QString type = e.value(QStringLiteral("type")).toString();
 
     if (type == QLatin1String("down")) {
+        const int fingers = e.value(QStringLiteral("fingers")).toInt();
+        // KWin's own count includes this finger: when it is the only one, any other finger still held here
+        // lost its lift (the effect does the same with its own list). Not a held pen (id -1): KWin does not
+        // count it, and its lift still comes
+        if (fingers <= 1 && e.value(QStringLiteral("tool")).toString() == QLatin1String("touch")) {
+            const qint64 penAt = m_down.contains(-1) ? m_down.value(-1).at : -100001;
+            for (auto it = m_down.begin(); it != m_down.end();) it = it.key() >= 0 ? m_down.erase(it) : std::next(it);
+            for (Touch &t : m_recent) if (t.down() && t.downAt != penAt) t.upAt = now;   // ended, and not as a tap
+        }
         Down d;
         d.win = e.value(QStringLiteral("win")).toString();
         d.wid = e.value(QStringLiteral("wid")).toString();
         d.pos = QPointF(e.value(QStringLiteral("x0")).toDouble(), e.value(QStringLiteral("y0")).toDouble());
+        d.at = now;
+        // server-side frames (title bar drags); a dark screen (the wake tap)
+        d.hard = d.win.isEmpty() || e.value(QStringLiteral("frame")).toBool() || screenOff();
         // "exe|" (no desktop file) = layer-shell surfaces: this keyboard, panels, the control centre,
-        // notifications, the desktop; server-side frames (title bar drags); a dark screen (the wake tap)
-        d.ignore = d.win.isEmpty() || d.win.endsWith(QLatin1Char('|')) || e.value(QStringLiteral("frame")).toBool() || screenOff();
-        if (e.value(QStringLiteral("fingers")).toInt() > 1) {
-            for (Down &o : m_down) o.ignore = true;   // a multi-finger gesture: none of them is a tap
-            d.ignore = true;
+        // notifications, the desktop; also X11 apps without one (Steam), see lastTouch()
+        d.ignore = d.hard || d.win.endsWith(QLatin1Char('|'));
+        if (fingers > 1) {
+            for (Down &o : m_down) o.ignore = o.hard = true;   // a multi-finger gesture: none of them is a tap
+            d.ignore = d.hard = true;
         }
         m_down.insert(e.value(QStringLiteral("id")).toInt(), d);
+        m_recent.append({ d.win, d.wid, now, -100000, false });
+        while (m_recent.size() > 8) m_recent.removeFirst();
+        lookUp(d.win, d.wid);
         if (!d.ignore) {
             m_lastAppTouch = now;
             note(QStringLiteral("down %1 %2,%3").arg(d.win).arg(d.pos.x(), 0, 'f', 0).arg(d.pos.y(), 0, 'f', 0));
@@ -207,6 +274,7 @@ void Gate::onEvent(const QString &json)
     if (type == QLatin1String("cancel")) {
         m_down.clear();
         m_tap = {};
+        for (Touch &t : m_recent) if (t.down()) t.upAt = now;   // ended, and not as a tap
         return;
     }
     if (type == QLatin1String("up")) {
@@ -214,9 +282,16 @@ void Gate::onEvent(const QString &json)
         if (it == m_down.end()) return;
         const Down d = *it;
         m_down.erase(it);
+        const double travel = e.value(QStringLiteral("max")).toDouble(), ms = e.value(QStringLiteral("durMs")).toDouble();
+        for (Touch &t : m_recent) {
+            if (t.downAt != d.at || t.wid != d.wid || !t.down()) continue;
+            t.upAt = now;
+            t.tap = !d.hard && travel <= TAP_TRAVEL && ms <= TAP_MS;
+            break;
+        }
+        emit touchEnded();
         if (d.ignore) return;
         m_lastAppTouch = now;
-        const double travel = e.value(QStringLiteral("max")).toDouble(), ms = e.value(QStringLiteral("durMs")).toDouble();
         if (travel > TAP_TRAVEL || ms > TAP_MS) {
             note(QStringLiteral("not a tap: moved %1 px in %2 ms").arg(travel, 0, 'f', 0).arg(ms, 0, 'f', 0));
             m_tap = {};

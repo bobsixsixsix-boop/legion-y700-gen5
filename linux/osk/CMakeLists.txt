@@ -20,6 +20,11 @@ target_link_libraries(y700-osk PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt
 target_compile_definitions(y700-osk PRIVATE
     QML_DIR="${CMAKE_INSTALL_PREFIX}/share/y700-osk/qml"
     DATA_DIR="${CMAKE_INSTALL_PREFIX}/share/y700-osk")
+# the gate's panel DPMS files on a fake sysfs; not built by default:
+#   cmake --build build --target gate-dpms-test && build/gate-dpms-test
+add_executable(gate-dpms-test EXCLUDE_FROM_ALL tests/gate-dpms-test.cpp src/gate.cpp)
+target_link_libraries(gate-dpms-test PRIVATE Qt6::Core Qt6::DBus)
+
 install(TARGETS y700-osk RUNTIME DESTINATION bin)
 install(DIRECTORY qml/ DESTINATION share/y700-osk/qml)
 install(FILES data/icons.json DESTINATION share/y700-osk)

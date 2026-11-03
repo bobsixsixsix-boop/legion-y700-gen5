@@ -1,0 +1,28 @@
+{
+ "version": 1,
+ "calibrated": false,
+ "date": "2026-10-30",
+ "_doc": "Initial coefficients of DESIGN.md section 4 (uncalibrated priors). Loaded by report/y700_battery/config.py: the package copy is /usr/local/share/y700-battery/coeffs-v1.json; a calibrated ~/.config/y700-battery/coeffs-v<N>.json with the highest N wins. Every entry has value, unit, src, date, ci95 (null = not measured). Keys starting with _ are comments.",
+ "coeffs": {
+  "F_on": {"value": 330, "unit": "mW", "src": "续航速查：旋钮全关时的熄屏底噪 0.33 W；cx-auto 只在熄屏且用电池时才开，亮屏底噪按这个算（BATTERY-PAGE:53）", "date": "2026-10-30", "ci95": null},
+  "F_off": {"value": 147, "unit": "mW", "src": "先验：让 F_off + A*(1-exp(-R/R0)) 在平静时 R=150/s 下复现 E3a 平静的约 0.25 W：0.25 W - 103 mW = 147 mW（DESIGN 第 4 节表格写「约 120 mW / 取整约 120-150」，这里取推导值；以标定 B1 为准）", "date": "2026-10-30", "ci95": null},
+  "D_on": {"value": 600, "unit": "mW", "src": "y7/y9 配对：亮屏额外 0.5-0.7 W", "date": "2026-10-30", "ci95": null},
+  "B": {"value": [[41, 0], [410, 250], [2048, 1620], [4095, 3370]], "unit": "piecewise linear [backlight level 0-4095, mW]; clamp outside the points", "src": "1/10/50/100 % 背光 -> 1.13/1.38/2.75/4.50 W，约 0.83 mW/级", "date": "2026-10-30", "ci95": null},
+  "Pmax_little": {"value": 1500, "unit": "mW per busy core at fmax_little (cpu0-5, cpufreq policy0)", "src": "假设（量级）", "date": "2026-10-30", "ci95": null},
+  "Pmax_big": {"value": 3000, "unit": "mW per busy core at fmax_big (cpu6-7, cpufreq policy6)", "src": "假设（量级）", "date": "2026-10-30", "ci95": null},
+  "fmax_little": {"value": 3628.8, "unit": "MHz", "src": "cpuinfo_max_freq 3628800 kHz（runs/diag/20261021-2045-cx-votes.txt:353）", "date": "2026-10-30", "ci95": null},
+  "fmax_big": {"value": 4608.0, "unit": "MHz", "src": "cpuinfo_max_freq 4608000 kHz（runs/diag/20261021-2045-cx-votes.txt:354）", "date": "2026-10-30", "ci95": null},
+  "cpu_exp": {"value": 2.2, "unit": "1 (P_c(f) = Pmax_c * (f / fmax_c) ^ cpu_exp)", "src": "DESIGN 第 4 节公式", "date": "2026-10-30", "ci95": null},
+  "Pg": {"value": 2500, "unit": "mW of GPU busy time at g_fref_mhz", "src": "假设", "date": "2026-10-30", "ci95": null},
+  "g_fref_mhz": {"value": 1200, "unit": "MHz", "src": "DESIGN 第 4 节公式 g(f) = Pg * (f / 1.2 GHz) ^ 2", "date": "2026-10-30", "ci95": null},
+  "g_exp": {"value": 2.0, "unit": "1", "src": "DESIGN 第 4 节公式", "date": "2026-10-30", "ci95": null},
+  "r_kwin": {"value": 0.05, "unit": "GPU busy s per screen-on s", "src": "开机 28.6 h 里 GPU 忙 1167 s、按约 6.5 h 亮屏推出", "date": "2026-10-30", "ci95": null},
+  "kwin_gpu_mhz": {"value": 205, "unit": "MHz", "src": "KWin 合成时的 GPU 频点（DESIGN 第 4 节 g(205 MHz)）", "date": "2026-10-30", "ci95": null},
+  "A": {"value": 150, "unit": "mW (wake saturation amplitude)", "src": "README:3615 的 0.05 W 是旋钮开、关之差 = A*exp(-R/R0)，R=150 时约 0.32*A，反推 A=150 mW", "date": "2026-10-30", "ci95": null},
+  "R0": {"value": 130, "unit": "wakeups/s", "src": "DESIGN 第 4 节（评审修订）", "date": "2026-10-30", "ci95": null},
+  "ctx_per_wake": {"value": 1.0, "unit": "context switches per wakeup", "src": "WAKEUPS.md:11-12 实测 ctxt 409/s、idle 进入 285/s、退出 467/s，比值约 0.9-1.4，先按 1:1", "date": "2026-10-30", "ci95": null},
+  "k_pkt": {"value": 0.2, "unit": "mJ per packet (rx + tx)", "src": "假设", "date": "2026-10-30", "ci95": null},
+  "P_wifi_max": {"value": 300, "unit": "mW (cap: k_pkt * pkts <= P_wifi_max * T)", "src": "假设", "date": "2026-10-30", "ci95": null},
+  "V_nom": {"value": 3.87, "unit": "V (E_full = charge_full * V_nom)", "src": "续航速查：约 34 Wh", "date": "2026-10-30", "ci95": null}
+ }
+}

@@ -1,0 +1,135 @@
+Description: pipeline: simple: add native manual focus control
+ When the camera sensor has an ancillary lens subdev with
+ V4L2_CID_FOCUS_ABSOLUTE, the simple pipeline handler exposes it as the
+ new draft control FocusAbsolute, in the actuator's native units (these
+ modules have no dioptre calibration, which LensPosition would need), and
+ moves the lens when a request carries the control.
+ .
+ Patch 1/4 of the libcamera autofocus series of iceland-mainline
+ 990a0597 (packaging/libcamera, built there on libcamera 0.7.1), itself a
+ cherry-pick of commit 2f4cf4a413a4a292aa904dbc57fc68777ff82c57.
+ Regenerated against 0.7.0-1ubuntu2 so that it applies without fuzz, as
+ dpkg-source requires; the added code is unchanged.
+Author: Osilvfe <64585305+Osilvfe@users.noreply.github.com>
+Origin: other, https://github.com/mzakamin-hub/iceland-mainline/blob/990a0597cab555bcdadb90d39f1d241198de07de/packaging/libcamera/0001-pipeline-simple-add-native-manual-focus-control.patch
+Forwarded: no
+Last-Update: 2026-10-28
+---
+ src/libcamera/control_ids_draft.yaml     | 13 ++++++
+ src/libcamera/pipeline/simple/simple.cpp | 53 +++++++++++++++++++++++-
+ 2 files changed, 65 insertions(+), 1 deletion(-)
+
+diff --git a/src/libcamera/control_ids_draft.yaml b/src/libcamera/control_ids_draft.yaml
+index 03309ee..861b55f 100644
+--- a/src/libcamera/control_ids_draft.yaml
++++ b/src/libcamera/control_ids_draft.yaml
+@@ -294,4 +294,17 @@ controls:
+         Currently identical to ANDROID_STATISTICS_FACE_IDS.
+       size: [n]
+ 
++  - FocusAbsolute:
++      type: int32_t
++      direction: inout
++      description: |
++        Absolute focus actuator position in the native units exposed by the
++        V4L2 lens subdevice.
++
++        This control is intended for lens actuators that have not yet been
++        calibrated to the dioptre units required by the LensPosition control.
++        The valid range and default value are copied from
++        V4L2_CID_FOCUS_ABSOLUTE. Applications should not compare values across
++        different camera modules.
++
+ ...
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 4a0b9f5..6932abf 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -33,6 +33,7 @@
+ #include <libcamera/stream.h>
+ 
+ #include "libcamera/internal/camera.h"
++#include "libcamera/internal/camera_lens.h"
+ #include "libcamera/internal/camera_manager.h"
+ #include "libcamera/internal/camera_sensor.h"
+ #include "libcamera/internal/camera_sensor_properties.h"
+@@ -341,6 +342,8 @@ public:
+ 	 */
+ 	std::list<Entity> entities_;
+ 	std::unique_ptr<CameraSensor> sensor_;
++	CameraLens *focusLens_;
++	int32_t focusPosition_;
+ 	V4L2VideoDevice *video_;
+ 	V4L2Subdevice *frameStartEmitter_;
+ 
+@@ -469,7 +472,8 @@ private:
+ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+ 				   unsigned int numStreams,
+ 				   MediaEntity *sensor)
+-	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr)
++	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr),
++	  focusLens_(nullptr), focusPosition_(0)
+ {
+ 	/*
+ 	 * Find the shortest path from the camera sensor to a video capture
+@@ -664,6 +668,35 @@ int SimpleCameraData::init()
+ 
+ 	properties_ = sensor_->properties();
+ 
++	/*
++	 * Expose the native actuator position until a module-specific conversion
++	 * to the dioptre units used by LensPosition has been calibrated.
++	 */
++	focusLens_ = sensor_->focusLens();
++	if (focusLens_) {
++		auto focus = focusLens_->controls().find(V4L2_CID_FOCUS_ABSOLUTE);
++		if (focus == focusLens_->controls().end()) {
++			LOG(SimplePipeline, Warning)
++				<< "Focus lens has no V4L2_CID_FOCUS_ABSOLUTE control";
++			focusLens_ = nullptr;
++		} else {
++			ControlInfoMap::Map controlsMap(controlInfo_.begin(),
++							 controlInfo_.end());
++			const ControlValue manual(controls::AfModeManual);
++			const ControlValue idle(controls::AfStateIdle);
++
++			controlsMap.emplace(&controls::AfMode,
++					    ControlInfo(manual, manual, manual));
++			controlsMap.emplace(&controls::AfState,
++					    ControlInfo(idle, idle, idle));
++			controlsMap.emplace(&controls::draft::FocusAbsolute,
++					    focus->second);
++			controlInfo_ = ControlInfoMap(std::move(controlsMap),
++						  controls::controls);
++			focusPosition_ = focus->second.def().get<int32_t>();
++		}
++	}
++
+ 	/* Find the first subdev that can generate a frame start signal, if any. */
+ 	frameStartEmitter_ = nullptr;
+ 	for (const Entity &entity : entities_) {
+@@ -1727,6 +1760,24 @@ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+ 	SimpleCameraData *data = cameraData(camera);
+ 	int ret;
+ 
++	if (data->focusLens_) {
++		const auto &position =
++			request->controls().get(controls::draft::FocusAbsolute);
++		if (position) {
++			ret = data->focusLens_->setFocusPosition(*position);
++			if (ret < 0)
++				return ret;
++
++			data->focusPosition_ = *position;
++		}
++
++		ControlList &metadata = request->_d()->metadata();
++		metadata.set(controls::AfMode, controls::AfModeManual);
++		metadata.set(controls::AfState, controls::AfStateIdle);
++		metadata.set(controls::draft::FocusAbsolute,
++			     data->focusPosition_);
++	}
++
+ 	std::map<const Stream *, FrameBuffer *> buffers;
+ 	bool metadataRequired = false;
+ 

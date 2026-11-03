@@ -1,0 +1,21 @@
+[package]
+name = "y700-speaker-guard"
+version = "0.1.0"
+edition = "2021"
+description = "y700: keep the speakers behind their protection chain (default sink, bypassing streams, amplifier gain)"
+publish = false
+
+# Built offline on the tablet against Ubuntu's packaged crates (.cargo/config.toml points crates-io at
+# /usr/share/cargo/registry), like linux/gamepad/screen. No Pulse crate: the event side is a small native-protocol
+# client in src/main.rs. librust-libpulse-binding-dev is in the archive but not installed (and would need libpulse-dev
+# to link); a hundred lines of protocol instead, as linux/display/autobright does for D-Bus.
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "y700-speaker-guard"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+strip = true

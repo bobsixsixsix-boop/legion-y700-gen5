@@ -1,0 +1,31 @@
+#!/bin/sh
+# y700-battery: the 「电池」 entry (the control centre's battery pill, the desktop icon, the app grid all start this).
+# It opens our own battery page, /usr/local/libexec/y700-battery-page (tier 2, linux/power/battery/DESIGN.md section 6,
+# installed by install.sh --page): the charge since the last full charge, over 24 h and over 7 days, and what used it.
+# KDE's battery page, Plasma Mobile's power module (part of powerdevil, already installed: the devices, and behind the
+# battery the last 24 h of charge, its health, maker and model), is what it opens with --kde (the page's
+# 「KDE 电量页 ›」 row) and while our page is not installed; that one is opened maximized by the KWin rule
+# y700-battery-max (install-entry.sh), ours maximizes itself.
+# One battery page per screen, whichever kind: neither has a single instance of its own (kcmshell6: a second start was
+# a second window, the bed 10-30), so the pages already open on this WAYLAND_DISPLAY are closed first and the new one
+# comes up on top. --kde replaces our page too rather than opening over it: the page has no activation token to hand
+# kcmshell6 (it does not link KWindowSystem), and a window started without one may be kept behind the active window.
+# Our page runs in a scope of its own in app.slice, named as the dock names the apps it starts (app-y700-<desktop
+# id>-<pid>-<n>, linux/dock/y700-shellbar/src/apps.cpp), so the report counts its CPU as y700-battery's. Without it the
+# CPU would go to whoever started us: the control centre's launch() is a startDetached /bin/sh (backend.cpp). No scope
+# without a systemd user manager ($XDG_RUNTIME_DIR/systemd/private) or with Y700_BATTERY_NOSCOPE set (the test bed):
+# the page is exec'd as it is then. Any other arguments go to the page (--range, --detail: the test bed's).
+PAGE=/usr/local/libexec/y700-battery-page
+KDE=
+if [ "${1:-}" = --kde ]; then KDE=1; shift; fi
+[ -x "$PAGE" ] || KDE=1
+me=$(id -u)
+for p in $(pgrep -u "$me" -xf 'kcmshell6 kcm_mobile_power') $(pgrep -u "$me" -f '^/usr/local/libexec/y700-battery-page( |$)'); do
+    tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" && kill "$p"
+done
+[ -n "$KDE" ] && exec kcmshell6 kcm_mobile_power
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$XDG_RUNTIME_DIR/systemd/private" ] && [ -z "${Y700_BATTERY_NOSCOPE:-}" ]; then
+    # systemd-run execs the page in its own process: the page keeps the pid in the unit's name
+    exec systemd-run --user --scope --quiet --collect --slice=app.slice --unit="app-y700-y700-battery-$$-1" -- "$PAGE" "$@"
+fi
+exec "$PAGE" "$@"

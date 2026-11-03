@@ -8,8 +8,12 @@
 #     the first time, the symlink to the binary since), the unit - to /root/*.bak-<stamp>; no backup, no install;
 #   - installs /usr/local/libexec/y700-flightrec, makes /usr/local/libexec/y700-flightrec.py a symlink to it (the
 #     installed cx-exp.sh calls that path for --mark), installs the unit, restarts the service;
-#   - checks within 30 s: the unit active, the new HEADER (idle_interval=) and a MODE line in current.log, a sample
-#     line after the first interval, `--once` works; anything off -> puts all three back.
+#   - checks within ~40 s: the unit active, the new HEADER (idle_interval=) and a MODE line in current.log, a sample
+#     line after the first interval, `--once` works, and (not under Y700_FR_ROOT) the battery page's files: the edge
+#     file written at start and the energy line - this boot's, 321 bytes - rewritten within 25 s more; anything
+#     off -> puts all three back. A binary without src/acc.rs (no "v1 boot=" in it: the pre-acc backup, deployed to
+#     take acc out - battery/DESIGN.md section 9) skips those two and says so; the files it leaves are tmpfs, gone at
+#     the next boot.
 # Y700_FR_ROOT prefixes every absolute path (test-deploy.sh only).
 # Log: /var/log/y700-flightrec-deploy.txt
 set -u
@@ -33,7 +37,9 @@ done
 if [ -n "$busy" ]; then
 	if [ "$TRY" -ge 8 ]; then echo "still busy ($busy) after 8 tries - giving up, nothing changed"; exit 1; fi
 	echo "experiment running ($busy) - nothing changed, retrying in 30 min"
-	systemd-run --unit "y700-flightrec-deploy-$((TRY + 1))" --collect --on-active=30min /bin/bash "$0" "$SRC" $((TRY + 1)) >/dev/null
+	# the transient unit runs in /: started as `bash deploy.sh pkg`, the retry got the relative "$0" "$SRC", bash found
+	# no deploy.sh in / and it died (exit 127, journal only) before it logged a line (10-19 audit B6)
+	systemd-run --unit "y700-flightrec-deploy-$((TRY + 1))" --collect --on-active=30min /bin/bash "$(readlink -m "$0")" "$(readlink -m "$SRC")" $((TRY + 1)) >/dev/null
 	exit 0
 fi
 [ -x "$SRC/y700-flightrec" ] && [ -f "$SRC/y700-flightrec.service" ] || { echo "missing files in $SRC"; exit 2; }
@@ -64,6 +70,8 @@ install -m 755 "$SRC/y700-flightrec" $L/y700-flightrec
 ln -sfn y700-flightrec $L/y700-flightrec.py
 install -m 644 "$SRC/y700-flightrec.service" $UD/y700-flightrec.service
 systemctl daemon-reload
+EDGE=$R/run/y700-flightrec/edge
+edge0=$(cat $EDGE 2>/dev/null) # the new recorder must replace it at start (its t is later than any before it)
 systemctl restart y700-flightrec
 sleep 13
 systemctl is-active -q y700-flightrec || rollback "unit not active: $(systemctl is-active y700-flightrec)"
@@ -73,5 +81,21 @@ case "$hdr" in *idle_interval=*) ;; *) rollback "no new HEADER in $C" ;; esac
 tail -5 $C | grep -q "^MODE " || tail -20 $C | grep -q "^MODE " || rollback "no MODE line"
 tail -3 $C | grep -q "^t=" || rollback "no sample line within 13 s"
 $L/y700-flightrec --once | grep -q "^t=.* qs=" || rollback "--once failed"
+# the battery page's counters (src/acc.rs): rewritten in place after every data line, 10 s apart here (no
+# experiment). test-deploy.sh's fake recorders write current.log only, so this needs the real one. The energy line's
+# format string is in every acc binary (strip=true keeps .rodata); one without it (the pre-acc backup) writes neither.
+if [ -z "$R" ] && ! grep -qaF 'v1 boot=' "$SRC/y700-flightrec"; then
+	echo "no acc in $SRC/y700-flightrec - battery files not checked"
+elif [ -z "$R" ]; then
+	E=$R/run/y700-flightrec/energy
+	e0=$(cat $E 2>/dev/null); e1=$e0; n=0
+	while [ "$e1" = "$e0" ] && [ $n -lt 25 ]; do sleep 1; n=$((n + 1)); e1=$(cat $E 2>/dev/null); done
+	[ -n "$e1" ] && [ "$e1" != "$e0" ] || rollback "energy not rewritten within 25 s: '${e1:0:60}'"
+	case "$e1" in "v1 boot=$(cut -c1-8 $R/proc/sys/kernel/random/boot_id) "*) ;; *) rollback "energy is not this boot's v1 line: ${e1:0:60}" ;; esac
+	[ ${#e1} -eq 321 ] || rollback "energy line is ${#e1} bytes, not 321 (a residue past the newline counts)"
+	edge1=$(cat $EDGE 2>/dev/null)
+	case "$edge1" in "v1 t="*) ;; *) rollback "no edge file: '$edge1'" ;; esac
+	[ "$edge1" != "$edge0" ] || rollback "edge not written at start: $edge1"
+fi
 echo "deployed: $(sha256sum $L/y700-flightrec | cut -c1-16); $(tail -1 $C | cut -c1-120)"
 echo "backups: $BK/y700-flightrec{,.py,.service}.bak-$STAMP"

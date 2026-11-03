@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stand-in for bluetoothctl in cc-stall.sh's bed (cc-stall-run.sh puts it first on the control centre's PATH):
+# bluetoothd gone (masked, crashed, restarting), where the real one prints "Waiting to connect to bluetoothd..." and
+# waits for ever. Logs "<pid> bluetoothctl <args>" to $XDG_RUNTIME_DIR/cc-stall.calls, then waits (exec: the pid
+# logged is the waiting `sleep 600`, which the scenario checks something killed). Touches nothing real.
+echo "$$ bluetoothctl $*" >> "$XDG_RUNTIME_DIR/cc-stall.calls"
+echo "Waiting to connect to bluetoothd..."
+exec sleep 600

@@ -41,11 +41,14 @@ static QProcessEnvironment childEnv()
 }
 
 // One shell pipeline collects everything the sheet shows. Sections are split on the === markers.
+// bluetoothctl and tailscale wait for ever for a daemon that is gone or hung while holding its name or socket
+// (bluetoothctl: "Waiting to connect to bluetoothd...", BlueZ's non-interactive mode has no timeout): 3 s each, so a
+// dead daemon costs its own section only. refresh() bounds the whole pipeline for everything else (10-31 audit C1).
 static const char *STATUS_CMD =
     "tb323fu-ctl --json status 2>/dev/null; echo ===HUD; $HOME/.local/bin/y700-hud-toggle status 2>/dev/null;"
     " echo ===ROT; /usr/local/bin/y700-autorotate status 2>/dev/null; echo ===WIFI; nmcli -t -f WIFI radio 2>/dev/null;"
-    " nmcli -t -f NAME,TYPE connection show --active 2>/dev/null; echo ===BT; bluetoothctl show 2>/dev/null | grep Powered;"
-    " echo ===VOL; wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null; echo ===TS; tailscale status --json 2>/dev/null;"
+    " nmcli -t -f NAME,TYPE connection show --active 2>/dev/null; echo ===BT; timeout 3 bluetoothctl show 2>/dev/null | grep Powered;"
+    " echo ===VOL; wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null; echo ===TS; timeout 3 tailscale status --json 2>/dev/null;"
     " echo ===REC; pw-cli ls Node 2>/dev/null | grep -c 'media.class = \"Stream/Input/Video\"';"
     " echo ===AB; systemctl --user is-active y700-autobright.service 2>/dev/null;"
     " echo ===TSBIN; command -v tailscale 2>/dev/null";     // last: section("TS") finds the first ===TS
@@ -341,14 +344,25 @@ void Backend::refresh()
 {
     if (m_status) return;       // one at a time
     m_status = new QProcess(this);
-    connect(m_status, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
+    connect(m_status, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         const QString out = QString::fromUtf8(m_status->readAllStandardOutput());
         m_status->deleteLater(); m_status = nullptr;
+        // timed out (124): the output stops in the section that hung, and every later one would parse as empty
+        // (volume 0, Tailscale "not installed"): keep what is shown, and say where it hung
+        if (status != QProcess::NormalExit || code == 124) {
+            const int i = out.lastIndexOf("===");
+            fprintf(stderr, "status: timed out in section %s, nothing updated\n",
+                    i < 0 ? "JSON" : out.mid(i + 3).section('\n', 0, 0).toUtf8().constData());
+            return;
+        }
         parseStatus(out);
     });
     m_status->setProcessEnvironment(childEnv());
     m_queryStart = QDateTime::currentMSecsSinceEpoch();
-    m_status->start("/bin/sh", {"-c", QString::fromLatin1(STATUS_CMD)});
+    // bounded (10-31 audit C1): one command that never returned kept m_status set for good, every later refresh()
+    // returned at its first line and the whole sheet froze, silently. GNU timeout kills its process group: the
+    // grandchildren too
+    m_status->start("timeout", {"8", "/bin/sh", "-c", QString::fromLatin1(STATUS_CMD)});
 }
 
 void Backend::parseStatus(const QString &out)
@@ -371,7 +385,12 @@ void Backend::parseStatus(const QString &out)
         const QJsonObject bat = j.value("Battery").toObject();
         st["bypass"] = bat.value("Bypass").toBool();
         st["battery"] = bat.value("Capacity").toInt(-1);
-        st["charging"] = bat.value("InputCurrentMa").toInt() > 0;
+        // ⚡ = on the charger, as the status bar's battery reads it (UPower charging / full / pending-charge = the
+        // battery's Charging / Full / Not charging: held at the limit and bypass included). The USB input current
+        // alone (until 10-30) missed PPS fast charging: the charge pumps carry it and qcom-battmgr-usb's current_now
+        // reads 0 (sampler.rs `pump`); it stays as a fallback for a battery that reads Discharging on the charger.
+        const QString bs = bat.value("Status").toString();
+        st["charging"] = bs == "Charging" || bs == "Full" || bs == "Not charging" || bat.value("InputCurrentMa").toInt() > 0;
         st["profile"] = j.value("Gpu").toObject().value("Profile").toString();
         st["torch"] = j.value("Torch").toObject().value("On").toBool();
         const QJsonObject rf = j.value("Refresh").toObject();
@@ -387,7 +406,7 @@ void Backend::parseStatus(const QString &out)
     for (const QString &l : wifi) if (l.endsWith(":802-11-wireless")) { ssid = l.chopped(16); break; }
     st["ssid"] = ssid;
     st["bt"] = section("BT").contains("yes");
-    // automatic brightness (linux/display/y700-autobright): whether its user service runs
+    // automatic brightness (linux/display/autobright/): whether its user service runs
     const QString ab = section("AB");
     st["autobright"] = ab == "active" || ab == "activating";
     const QString vol = section("VOL");           // "Volume: 0.40 [MUTED]"
@@ -444,10 +463,24 @@ void Backend::showToast(const QString &text)
 
 void Backend::readBrightness()
 {
-    QDBusInterface d("org.kde.ScreenBrightness", "/org/kde/ScreenBrightness/display0", "org.kde.ScreenBrightness.Display");
-    const int max = d.property("MaxBrightness").toInt();
-    const int cur = d.property("Brightness").toInt();
-    if (max > 0) { m_brightnessMax = max; m_brightness = double(cur) / max; Q_EMIT brightnessChanged(); }
+    // async (10-31 audit C2): a QDBusInterface here introspected and read both properties synchronously on the GUI
+    // thread, 25 s (Qt's default) each, at every open: a PowerDevil that holds its name but does not answer froze the
+    // sheet, the pull-down and the back edge for 50 s (75 s the first time). A drag in progress or a write made since
+    // the call wins over the answer: a late answer must not pull the pill back to the old level.
+    QDBusMessage msg = QDBusMessage::createMethodCall("org.kde.ScreenBrightness", "/org/kde/ScreenBrightness/display0",
+                                                      "org.freedesktop.DBus.Properties", "GetAll");
+    msg << "org.kde.ScreenBrightness.Display";
+    const qint64 asked = QDateTime::currentMSecsSinceEpoch();
+    auto *w = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(msg, 1000), this);
+    connect(w, &QDBusPendingCallWatcher::finished, this, [this, asked](QDBusPendingCallWatcher *w) {
+        const QDBusPendingReply<QVariantMap> r = *w; w->deleteLater();
+        if (!r.isValid()) return;
+        const int max = r.value().value("MaxBrightness").toInt();
+        if (max <= 0) return;
+        m_brightnessMax = max;
+        if (m_pendingBrightness >= 0 || m_lastBrightnessWrite >= asked) return;
+        m_brightness = double(r.value().value("Brightness").toInt()) / max; Q_EMIT brightnessChanged();
+    });
 }
 
 void Backend::onBrightnessChanged(const QString &display, int value, const QString &, const QString &)
@@ -468,10 +501,15 @@ void Backend::setBrightness(double frac)
 
 void Backend::flushBrightness()
 {
-    if (m_pendingBrightness < 0 || m_brightnessMax <= 0) return;
-    QDBusInterface d("org.kde.ScreenBrightness", "/org/kde/ScreenBrightness/display0", "org.kde.ScreenBrightness.Display");
-    d.call(QDBus::NoBlock, "SetBrightness", int(m_pendingBrightness * m_brightnessMax), 1u /* silent: no OSD */);
-    m_lastBrightnessWrite = QDateTime::currentMSecsSinceEpoch();
+    // before readBrightness() has an answer there is no scale: the drag is dropped, not kept (a kept one would hold
+    // back every later answer). A bare message: QDBusInterface would introspect, a blocking call, at the first drag.
+    if (m_pendingBrightness >= 0 && m_brightnessMax > 0) {
+        QDBusMessage msg = QDBusMessage::createMethodCall("org.kde.ScreenBrightness", "/org/kde/ScreenBrightness/display0",
+                                                          "org.kde.ScreenBrightness.Display", "SetBrightness");
+        msg << int(m_pendingBrightness * m_brightnessMax) << 1u /* silent: no OSD */;
+        QDBusConnection::sessionBus().send(msg);
+        m_lastBrightnessWrite = QDateTime::currentMSecsSinceEpoch();
+    }
     m_pendingBrightness = -1;
 }
 
@@ -712,7 +750,9 @@ void Backend::runCapture(const QString &cmd, std::function<void(const QString &)
         done(out);
     });
     p->setProcessEnvironment(childEnv());
-    p->start("/bin/sh", {"-c", cmd});
+    // bounded as refresh(): with bluetoothd gone each long press on the Bluetooth tile left a bluetoothctl waiting for
+    // ever. 10 s: the Wi-Fi scan sleeps 2 s and asks nmcli once per saved network
+    p->start("timeout", {"10", "/bin/sh", "-c", cmd});
 }
 
 // ---------------------------------------------------------------- MPRIS (now playing)
@@ -883,6 +923,8 @@ void Backend::scanBt()
 
 void Backend::btToggle(const QString &mac, bool connected)
 {
-    act("bt-dev", QString("bluetoothctl %1 %2").arg(connected ? "disconnect" : "connect", mac));
+    // timeout: see STATUS_CMD. 30 s, not 10: a connect BlueZ is still working on (a page timeout, a slow LE device)
+    // must end with BlueZ's own answer; only a missing bluetoothd is cut short
+    act("bt-dev", QString("timeout 30 bluetoothctl %1 %2").arg(connected ? "disconnect" : "connect", mac));
     QTimer::singleShot(2500, this, &Backend::scanBt);
 }

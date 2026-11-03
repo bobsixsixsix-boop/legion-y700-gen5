@@ -21,8 +21,9 @@ y700：联想拯救者 Y700 第五代（TB323FU）上的 Linux 与 Android 个�
 | 针对上游设备树的补丁：`linux/audio/1050-arm64-dts-qcom-baldur-audio-aw882xx-fade-flag.DRAFT.patch` | BSD-3-Clause（与上游设备树相同） | Joonhoe Kim and contributors；bobsixsixsix-boop |
 | 内嵌了 Linux 内核源码片段（用作定位锚点）的脚本：`linux/kernel-y6/make-1032.py`、`linux/kernel-y7/make-1033.py`、`linux/kernel-y8/make-1041.py`、`linux/carplay/aptest/txdbg-patch.py`、`linux/carplay/aptest/noenc-patch.py` | GPL-2.0-only | bobsixsixsix-boop；Linux 内核的贡献者 |
 | tb323fu-linux 文件的原样副本：`y700-recovery/tools/boot-repack-kernel.py`、`y700-recovery/tools/build-boot.sh`、`linux/usbport/tb323fu-usb-port.upstream-0.4.2` | MIT | Joonhoe Kim and contributors |
-| 改写自 tb323fu-linux 的文件：`linux/usbport/y700-usb-port`、`linux/usbport/70-tb323fu-usb-port.rules`、`switcher/device/switch-to-linux.sh`、`linux/power/keyhold.c`、`linux/power/keyhold-event-driven.patch`、`linux/power/keyhold-model-test.py`、`linux/power/tb323fu-dsp-no-cdsp.conf` | MIT | Joonhoe Kim and contributors；bobsixsixsix-boop |
+| 改写自 tb323fu-linux 的文件：`linux/usbport/y700-usb-port`、`linux/usbport/70-tb323fu-usb-port.rules`、`switcher/device/switch-to-linux.sh`、`linux/power/keyhold.c`、`linux/power/keyhold-event-driven.patch`、`linux/power/keyhold-model-test.py`、`linux/power/tb323fu-dsp-no-cdsp.conf`、`linux/kernel-y17/init`（上游 kernel-t54 的 initramfs init 加开机磁盘检查）、`linux/kernel-y17/test-root-selection.sh`（上游 kernel-t54 的离线测试加 fsck 用例） | MIT | Joonhoe Kim and contributors；bobsixsixsix-boop |
 | 针对上游 helper 的补丁：`linux/power/helperd-slow-poll.patch` | GPL-3.0-or-later（与上游 helper 相同） | Joonhoe Kim and contributors；bobsixsixsix-boop |
+| libcamera 补丁：`linux/camera/patches/*.patch` | LGPL-2.1-or-later（与 libcamera 相同） | 0001–0004 的作者 Osilvfe、mzak（取自 mzakamin-hub/iceland-mainline `990a0597`，见各补丁的 `Author:`）；libcamera 的贡献者（上下文行）；bobsixsixsix-boop（0005 和移植改动） |
 | `linux/carplay/livi/`（LIVI 的集成脚本和 `y700-gst-colorimetry.c`） | GPL-3.0-or-later | bobsixsixsix-boop |
 | kwin-effect-upscale 的补丁和改写脚本：`linux/games/sgsr/kwin-effect-upscale-sgsr.patch`、`add-sgsr.py`、`add-rotation-aspect.py` | GPL-2.0-or-later（与 kwin-effect-upscale 相同） | Jens Koehler；bobsixsixsix-boop |
 | `linux/games/sgsr/kwin-upscale-x11.sh` | GPL-2.0-or-later（文件头） | Jens Koehler |
@@ -32,12 +33,13 @@ y700：联想拯救者 Y700 第五代（TB323FU）上的 Linux 与 Android 个�
 | `linux/power/cx-collapse/dczva-stress.c` | GPL-2.0-or-later | bobsixsixsix-boop |
 | 带桌面壁纸的截图：`linux/dock/tests/shots/` 里的 `01-desktop.png`、`c2-notes.png`、`c3-swiped.png`、`c4-cleared.png`、`h-widget-grid.png`、`r1-notes-real.png`、`r4-banners-real.png`、`r8-notes-real.png` | CC-BY-SA-4.0（与壁纸相同） | bobsixsixsix-boop；壁纸「Sub-Arctic」（KDE Plasma 6.6 默认壁纸）的作者 Krystian Zajdel |
 
-对其他项目的补丁（`linux/video/wiliwili-*.patch`、`linux/video/libva-v4l2-patches/`）只包含为该项目写的改动和少量上下文行；上下文行仍属于原项目，适用原项目的许可证。
+对其他项目的补丁（`linux/video/wiliwili-*.patch`、`linux/video/libva-v4l2-patches/`、`linux/camera/patches/`）只包含为该项目写的改动和少量上下文行；上下文行仍属于原项目，适用原项目的许可证。
 
 ## 第三方代码与来源
 
-- **tb323fu-linux**（Joonhoe Kim and contributors，<https://github.com/joonhoekim/tb323fu-linux>）：本仓库的基础。上面列出的副本和改写文件来自上游的 helper 0.4.2 与 main 分支（`0c7c0c4`）；`linux/kernel-y2/upstream-patches/` 里的 0097、0117 和 `linux/kernel-y8/t51/` 里的 0131、0132 是上游内核补丁；`linux/kernel-y5/baldur-extra.fragment` 与 `config-tb323fu-t49`、`linux/kernel-y8/inventory/config-t49.release` 是上游 t49 的配置。
-- **内核补丁的其他来源**：ArmadaOS（armada-os/armada）、Kettle（gennro）、Diogo Trindade（armada-os/armada PR #718）、code002-2/sm8750-video-accel、radxa-pkg/libva-v4l2（Xilin Wu）、h0cheung/tb322fc-linux-kernel 以及 xiaqinghuan 发到 lore 的补丁、justririll/x1e-sleep 和 Marc Zyngier 的 arm-platforms 树外勘误补丁、linux-next 中 Akhil P Oommen（Qualcomm）的 a6xx 补丁、SuperTurtleDev/iceland-mainline-kernel-linux（Yibo Wang）。逐个补丁的说明见 [PATCHES.md](PATCHES.md)。
+- **tb323fu-linux**（Joonhoe Kim and contributors，<https://github.com/joonhoekim/tb323fu-linux>）：本仓库的基础。上面列出的副本和改写文件来自上游的 helper 0.4.2 与 main 分支（`0c7c0c4`）；`linux/kernel-y2/upstream-patches/` 里的 0097、0117 和 `linux/kernel-y8/t51/` 里的 0131、0132 是上游内核补丁；`linux/kernel-y5/baldur-extra.fragment` 与 `config-tb323fu-t49`、`linux/kernel-y8/inventory/config-t49.release` 是上游 t49 的配置；`linux/kernel-y17/init` 和 `linux/kernel-y17/test-root-selection.sh` 改写自上游 `kernel-t54` tag 的 `kernel/initramfs/init` 及其离线测试。
+- **内核补丁的其他来源**：ArmadaOS（armada-os/armada）、Kettle（gennro）、Diogo Trindade（armada-os/armada PR #718）、code002-2/sm8750-video-accel、radxa-pkg/libva-v4l2（Xilin Wu）、h0cheung/tb322fc-linux-kernel 以及 xiaqinghuan 发到 lore 的补丁、Shenghan Gao 发到 lore 的 ath12k 补丁、justririll/x1e-sleep 和 Marc Zyngier 的 arm-platforms 树外勘误补丁、linux-next 中 Akhil P Oommen（Qualcomm）的 a6xx 补丁、SuperTurtleDev/iceland-mainline-kernel-linux（Yibo Wang）。逐个补丁的说明见 [PATCHES.md](PATCHES.md)。
+- **mzakamin-hub/iceland-mainline**（<https://github.com/mzakamin-hub/iceland-mainline>）：`linux/camera/patches/` 的 0001–0004（libcamera 的反差式自动对焦，作者 Osilvfe、mzak）取自它的 `packaging/libcamera/`（提交 `990a0597`）。
 - **LIVI**（GPL-3.0，<https://github.com/f-io/LIVI>）：CarPlay 与无线 Android Auto 的接收端，原样运行，不随附。集成脚本针对 9.4.0 和 10.0.0 编写，用到了上游提交 `b82707ad`（经 Wi‑Fi 使用 Siri 的修复）。
 - **hostapd / wpa_supplicant**（<https://w1.fi/>）与 Linux 的 **ath12k** 驱动：热点调试工具参照和修补的对象。
 - **kwin-effect-upscale**（Jens Koehler，JensKSP/kwin-effect-upscale，GPL-2.0-or-later）：SGSR 移植的宿主。
@@ -49,7 +51,7 @@ y700：联想拯救者 Y700 第五代（TB323FU）上的 Linux 与 Android 个�
 
 ## 使用但不随附的外部项目
 
-下面这些由脚本在设备上下载、构建或调用，本仓库不包含它们的代码或二进制，它们各自适用自己的许可证：bkerler/edl、KernelSU、LIVI、FEX 及其 x86 rootfs、Steam、Moonlight、wiliwili、kwin-effect-upscale、libva-v4l2、fcitx5、Plasma Mobile、Tailscale。
+下面这些由脚本在设备上下载、构建或调用，本仓库不包含它们的代码或二进制，它们各自适用自己的许可证：bkerler/edl、KernelSU、LIVI、FEX 及其 x86 rootfs、Steam、Moonlight、wiliwili、kwin-effect-upscale、libva-v4l2、libcamera、e2fsprogs（`e2fsck-static`）、fcitx5、Plasma Mobile、Tailscale。
 
 ## 不随附的专有文件
 
@@ -71,8 +73,9 @@ A file's own SPDX header takes precedence; files without one are covered by [REU
 - Kernel patches under `linux/kernel-*/`: GPL-2.0-only, held by the authors named in each patch (see [PATCHES.md](PATCHES.md)). Kernel configuration there: GPL-2.0-only.
 - Kernel patches elsewhere (`linux/audio/aw882xx-*.DRAFT.patch`, `linux/power/soc-qcom-ice-runtime-pm.DRAFT.patch`, `linux/wifi/ath12k-wcn7860-mlo-param.patch`): GPL-2.0-only. The device-tree patch `linux/audio/1050-…-fade-flag.DRAFT.patch`: BSD-3-Clause, as the upstream device trees.
 - Scripts that embed Linux kernel source excerpts as anchors (`make-1032.py`, `make-1033.py`, `make-1041.py`, `aptest/txdbg-patch.py`, `aptest/noenc-patch.py`): GPL-2.0-only.
-- Verbatim copies of tb323fu-linux files (`y700-recovery/tools/boot-repack-kernel.py`, `build-boot.sh`, `linux/usbport/tb323fu-usb-port.upstream-0.4.2`): MIT, Joonhoe Kim and contributors. Adaptations of them (`linux/usbport/y700-usb-port`, `70-tb323fu-usb-port.rules`, `switcher/device/switch-to-linux.sh`, `linux/power/keyhold.c`, `keyhold-event-driven.patch`, `keyhold-model-test.py`, `tb323fu-dsp-no-cdsp.conf`): MIT, with bobsixsixsix-boop.
+- Verbatim copies of tb323fu-linux files (`y700-recovery/tools/boot-repack-kernel.py`, `build-boot.sh`, `linux/usbport/tb323fu-usb-port.upstream-0.4.2`): MIT, Joonhoe Kim and contributors. Adaptations of them (`linux/usbport/y700-usb-port`, `70-tb323fu-usb-port.rules`, `switcher/device/switch-to-linux.sh`, `linux/power/keyhold.c`, `keyhold-event-driven.patch`, `keyhold-model-test.py`, `tb323fu-dsp-no-cdsp.conf`, `linux/kernel-y17/init` — upstream kernel-t54's initramfs init with a boot-time disk check added — and its test `test-root-selection.sh`): MIT, with bobsixsixsix-boop.
 - The patch against the upstream helper (`linux/power/helperd-slow-poll.patch`): GPL-3.0-or-later.
+- libcamera patches (`linux/camera/patches/`): LGPL-2.1-or-later, as libcamera. 0001–0004 are by Osilvfe and mzak (from mzakamin-hub/iceland-mainline `990a0597`; see each patch's `Author:`), 0005 and the porting changes by bobsixsixsix-boop; the context lines belong to the libcamera contributors.
 - `linux/carplay/livi/`: GPL-3.0-or-later.
 - kwin-effect-upscale patch and edit scripts (`linux/games/sgsr/`): GPL-2.0-or-later (Jens Koehler, bobsixsixsix-boop); `kwin-upscale-x11.sh`: GPL-2.0-or-later (Jens Koehler); `sgsr.frag`: BSD-3-Clause (Qualcomm Innovation Center, Inc., whose notice is the file's first line; the port by bobsixsixsix-boop).
 - Task cards (`linux/gesture/taskswitcher/` patch, `ui/`, `metadata.json`): GPL-2.0-or-later (Devin Lin and the Plasma Mobile contributors, bobsixsixsix-boop).
@@ -80,12 +83,13 @@ A file's own SPDX header takes precedence; files without one are covered by [REU
 - `linux/power/cx-collapse/dczva-stress.c`: GPL-2.0-or-later.
 - Screenshots in `linux/dock/tests/shots/` that show the desktop wallpaper (`01-desktop.png`, `c2-notes.png`, `c3-swiped.png`, `c4-cleared.png`, `h-widget-grid.png`, `r1-notes-real.png`, `r4-banners-real.png`, `r8-notes-real.png`): CC-BY-SA-4.0, bobsixsixsix-boop and Krystian Zajdel (the KDE Plasma 6.6 default wallpaper "Sub-Arctic").
 
-Patches against other projects (`linux/video/wiliwili-*.patch`, `linux/video/libva-v4l2-patches/`) contain only the changes written for that project plus a few context lines; the context lines remain the original project's and fall under its license.
+Patches against other projects (`linux/video/wiliwili-*.patch`, `linux/video/libva-v4l2-patches/`, `linux/camera/patches/`) contain only the changes written for that project plus a few context lines; the context lines remain the original project's and fall under its license.
 
 ### Third-party code and sources
 
-- **tb323fu-linux** (Joonhoe Kim and contributors): the base of this work. The copies and adaptations listed above come from upstream helper 0.4.2 and the main branch (`0c7c0c4`); patches 0097, 0117, 0131 and 0132 and the t49 configuration files are upstream's.
-- **Other kernel patch sources**: ArmadaOS (armada-os/armada), Kettle (gennro), Diogo Trindade (armada-os/armada PR #718), code002-2/sm8750-video-accel, radxa-pkg/libva-v4l2 (Xilin Wu), h0cheung/tb322fc-linux-kernel and xiaqinghuan's patch on lore, justririll/x1e-sleep and Marc Zyngier's out-of-tree erratum patch in arm-platforms, Akhil P Oommen's (Qualcomm) a6xx patches in linux-next, SuperTurtleDev/iceland-mainline-kernel-linux (Yibo Wang). See [PATCHES.md](PATCHES.md) for each patch.
+- **tb323fu-linux** (Joonhoe Kim and contributors): the base of this work. The copies and adaptations listed above come from upstream helper 0.4.2 and the main branch (`0c7c0c4`); patches 0097, 0117, 0131 and 0132 and the t49 configuration files are upstream's; `linux/kernel-y17/init` and `test-root-selection.sh` are adapted from upstream's `kernel-t54` tag (`kernel/initramfs/init` and its offline test).
+- **Other kernel patch sources**: ArmadaOS (armada-os/armada), Kettle (gennro), Diogo Trindade (armada-os/armada PR #718), code002-2/sm8750-video-accel, radxa-pkg/libva-v4l2 (Xilin Wu), h0cheung/tb322fc-linux-kernel and xiaqinghuan's patch on lore, Shenghan Gao's ath12k patch on lore, justririll/x1e-sleep and Marc Zyngier's out-of-tree erratum patch in arm-platforms, Akhil P Oommen's (Qualcomm) a6xx patches in linux-next, SuperTurtleDev/iceland-mainline-kernel-linux (Yibo Wang). See [PATCHES.md](PATCHES.md) for each patch.
+- **mzakamin-hub/iceland-mainline** (<https://github.com/mzakamin-hub/iceland-mainline>): patches 0001–0004 under `linux/camera/patches/` (contrast-detect autofocus for libcamera, by Osilvfe and mzak) come from its `packaging/libcamera/` at commit `990a0597`.
 - **LIVI** (GPL-3.0, <https://github.com/f-io/LIVI>): the CarPlay and wireless Android Auto receiver, run unmodified and not included. The integration targets 9.4.0 and 10.0.0 and relies on upstream commit `b82707ad` (the Siri-over-Wi-Fi fix).
 - **hostapd / wpa_supplicant** (<https://w1.fi/>) and the Linux **ath12k** driver: referenced and patched by the hotspot debugging tools.
 - **kwin-effect-upscale** (Jens Koehler, JensKSP/kwin-effect-upscale, GPL-2.0-or-later): host of the SGSR port.
@@ -97,7 +101,7 @@ Patches against other projects (`linux/video/wiliwili-*.patch`, `linux/video/lib
 
 ### External projects used but not included
 
-The scripts download, build or call the following on the device; none of their code or binaries is included here, and each comes under its own license: bkerler/edl, KernelSU, LIVI, FEX and its x86 rootfs, Steam, Moonlight, wiliwili, kwin-effect-upscale, libva-v4l2, fcitx5, Plasma Mobile, Tailscale.
+The scripts download, build or call the following on the device; none of their code or binaries is included here, and each comes under its own license: bkerler/edl, KernelSU, LIVI, FEX and its x86 rootfs, Steam, Moonlight, wiliwili, kwin-effect-upscale, libva-v4l2, libcamera, e2fsprogs (`e2fsck-static`), fcitx5, Plasma Mobile, Tailscale.
 
 ### Proprietary files not included
 

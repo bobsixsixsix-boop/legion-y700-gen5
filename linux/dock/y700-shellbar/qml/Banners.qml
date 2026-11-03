@@ -9,8 +9,8 @@
 // swipe up or sideways (expired: still in the notification centre), on a tap (the notification's default action,
 // then closed, as vivo does; just expired when it has none) or on one of its action buttons. The banners' own
 // clocks, not the model's: that one is the 3-minute history expiry. When the curtain comes down every banner is
-// expired at once: the centre shows them all. Only the cards take touches (setInputRects) and are blurred
-// (setBlurRects); the window is a 680 px band hung from the top edge, KWin centres it (src/main.cpp).
+// expired at once, the waiting ones too: the centre shows them all. Only the cards take touches (setInputRects)
+// and are blurred (setBlurRects); the window is a 680 px band hung from the top edge, KWin centres it (src/main.cpp).
 import QtQuick
 import QtQuick.Window
 import org.kde.kirigami as Kirigami
@@ -46,20 +46,35 @@ Window {
     }
 
     // mapped while there is a card, and a moment longer so a leaving card finishes its fade; never under the curtain.
-    // The model's count, not the ListView's: a ListView only signals countChanged when its window polishes (lays
+    // The model's rows, not the ListView's count: a ListView only signals countChanged when its window polishes (lays
     // out before a frame), and a hidden window never does - so a window waiting for list.count > 0 stays hidden
-    // for good (bed, 10-22: rows came in, no banner). notes.count follows the rows as they are inserted.
-    readonly property bool want: r.ready && !shell.ccOpen && notes.count > 0
+    // for good (bed, 10-22: rows came in, no banner). Nor notes.count: libnotificationmanager emits its countChanged
+    // from the filter layer's rowsInserted/rowsRemoved, before the sort and limit layers above have the row, so a
+    // binding on it reads the old number - a lone notification read 0 and stayed hidden until the next one came,
+    // then both showed (bed and the real journal, 10-31: banners only ever in pairs). The outer model's own row
+    // signals come once the row is in.
+    property int rows: 0
+    Connections {
+        target: notes
+        function onRowsInserted() { win.rows = notes.rowCount() }
+        function onRowsRemoved() { win.rows = notes.rowCount() }
+        function onModelReset() { win.rows = notes.rowCount() }
+        function onLayoutChanged() { win.rows = notes.rowCount() }
+    }
+    readonly property bool want: r.ready && !shell.ccOpen && rows > 0
     onWantChanged: if (!want) linger.restart()
     Timer { id: linger; interval: 240 }
     visible: want || (r.ready && !shell.ccOpen && linger.running)
 
-    // the curtain shows them all: the banners are done (from the last row down: an expired row leaves the model)
+    // the curtain shows them all: the banners are done, and so are the ones waiting behind the three. Row 0 until
+    // none is left: an expired row leaves the model and the limit lets the next waiting one up in its place, so a
+    // pass over the rowCount() (= 3) rows there were left the waiting ones to come back as banners, with a fresh
+    // clock, when the curtain went (10-31 审计 D1). 200: a bound, in case an expire ever leaves its row in
     Connections {
         target: shell
         function onCcOpenChanged() {
             if (!shell.ccOpen) return;
-            for (let i = notes.rowCount() - 1; i >= 0; i--) notes.expire(notes.index(i, 0));
+            for (let k = 0; k < 200 && notes.rowCount() > 0; k++) notes.expire(notes.index(0, 0));
         }
     }
 

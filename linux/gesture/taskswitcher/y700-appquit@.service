@@ -1,0 +1,10 @@
+# y700: quit the app of a task-switcher card that was swiped away (instance = PID_WINPID_..., see appquit.py).
+# Started by the y700-taskswitcher effect (ui/AppQuit.qml) over D-Bus with StartUnit; installed by install.sh.
+[Unit]
+Description=y700: quit the app of a swiped-away card (%i)
+CollectMode=inactive-or-failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/y700-appquit %i
+TimeoutStartSec=3min

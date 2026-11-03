@@ -3,6 +3,7 @@
 #include <LayerShellQt/Window>
 #include <QDBusConnection>
 #include <QDBusMessage>
+#include <QDBusServiceWatcher>
 #include <QPainterPath>
 #include <QVariantMap>
 #include <QWindow>
@@ -12,6 +13,12 @@ static const char *CC = "fyi.y700.ControlCenter", *CC_PATH = "/ControlCenter";
 Shell::Shell(QObject *parent) : QObject(parent)
 {
     QDBusConnection::sessionBus().connect(CC, CC_PATH, CC, "openChanged", this, SLOT(onCcOpen(bool)));
+    // openChanged(false) only comes from the control centre's hide(): one that dies with the curtain open (a crash
+    // and its Restart=on-failure, its install.sh's restart) never sends it, and the new one starts closed without a
+    // word - ccOpen stayed true: no banners, no clock, no pull strip over a fullscreen app (10-31 审计 D2). Its name
+    // changing hands = the curtain gone. A match rule on the bus, no wakeups but that
+    auto *w = new QDBusServiceWatcher(CC, QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
+    connect(w, &QDBusServiceWatcher::serviceOwnerChanged, this, [this] { onCcOpen(false); });
 }
 
 void Shell::onCcOpen(bool open)

@@ -1,0 +1,105 @@
+From 63e5d8fc5c146af3ecf20819ff254a32c8ac8152 Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 06:37:00 +0000
+Subject: [PATCH] power: supply: qcom_battmgr: y700 status, power_now from I*V,
+ mAh unit on SM8350/SM8550
+
+Three fixes for the TB323FU (kaanapali, SM8550-style battmgr firmware):
+- STATUS: the firmware says "Charging" while external power is in but the
+  battery is held (limit/bypass) or drained; derive Discharging /
+  Not charging from the sign of current_now (y1);
+- POWER_NOW: BATT_POWER_NOW is unusable (0, or a bogus constant after a
+  full-battery boot); always compute current_now * voltage_now (y1; y3
+  made it unconditional);
+- unit: the SM8350/SM8550 firmware answers BATT_CHG_FULL[_DESIGN] in uAh,
+  set QCOM_BATTMGR_UNIT_mAh so charge_full[_design] stop reading ENODATA
+  (UPower showed 0 Wh) (y1).
+y14: rebased onto upstream 0132 (charge current limit), which is now in
+the base series (in y10..y13 0132 was rebased onto this patch instead).
+---
+ drivers/power/supply/qcom_battmgr.c | 41 +++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index aaf8daa2d..8c3f0b6f6 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -6,6 +6,7 @@
+  */
+ #include <linux/auxiliary_bus.h>
+ #include <linux/devm-helpers.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+@@ -458,6 +459,12 @@ static const u8 sm8350_bat_prop_map[] = {
+ 	[POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX] = BATT_CHG_CTRL_LIM_MAX,
+ };
+ 
++static bool qcom_battmgr_is_sm8350_family(struct qcom_battmgr *battmgr)
++{
++	return battmgr->variant == QCOM_BATTMGR_SM8350 ||
++	       battmgr->variant == QCOM_BATTMGR_SM8550;
++}
++
+ static int qcom_battmgr_bat_sm8350_update(struct qcom_battmgr *battmgr,
+ 					  enum power_supply_property psp)
+ {
+@@ -537,6 +544,19 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		val->intval = battmgr->status.status;
++		/*
++		 * y700 (TB323FU): the firmware keeps reporting "Charging" while
++		 * external power is in but the battery is held (charge limit
++		 * reached, bypass) or is drained by the load. Tell those apart by
++		 * the battery current (positive = into the battery here).
++		 */
++		if (qcom_battmgr_is_sm8350_family(battmgr) &&
++		    val->intval == POWER_SUPPLY_STATUS_CHARGING &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    battmgr->status.current_now <= 0)
++			val->intval = battmgr->status.current_now < 0 ?
++				      POWER_SUPPLY_STATUS_DISCHARGING :
++				      POWER_SUPPLY_STATUS_NOT_CHARGING;
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_TYPE:
+ 		val->intval = battmgr->info.charge_type;
+@@ -570,6 +590,18 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 		break;
+ 	case POWER_SUPPLY_PROP_POWER_NOW:
+ 		val->intval = battmgr->status.power_now;
++		/*
++		 * y700: BATT_POWER_NOW is unusable on this firmware: it reads 0 at
++		 * first, and after a boot with a full battery it reported a
++		 * constant bogus 100121690 (uW) for the whole session. Always
++		 * derive it from the current and voltage (uA * uV / 10^6 = uW),
++		 * signed like current_now, as upower does.
++		 */
++		if (qcom_battmgr_is_sm8350_family(battmgr) &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_CURRENT_NOW) >= 0 &&
++		    qcom_battmgr_bat_sm8350_update(battmgr, POWER_SUPPLY_PROP_VOLTAGE_NOW) >= 0)
++			val->intval = (int)div_s64((s64)battmgr->status.current_now *
++						   battmgr->status.voltage_now, 1000000);
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+ 		if (unit != QCOM_BATTMGR_UNIT_mAh)
+@@ -1741,6 +1773,15 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 	battmgr->current_inverted = device_is_compatible(dev->parent,
+ 							 "qcom,kaanapali-pmic-glink");
+ 
++	/*
++	 * y700: only the SC8280XP battery-info message sets the unit. The
++	 * SM8350/SM8550 firmware answers BATT_CHG_FULL and BATT_CHG_FULL_DESIGN
++	 * in uAh (like BATT_CHG_COUNTER), so without this charge_full and
++	 * charge_full_design always read ENODATA and UPower shows 0 Wh.
++	 */
++	if (qcom_battmgr_is_sm8350_family(battmgr))
++		battmgr->unit = QCOM_BATTMGR_UNIT_mAh;
++
+ 	ret = qcom_battmgr_charge_control_thresholds_init(battmgr);
+ 	if (ret < 0)
+ 		return dev_err_probe(dev, ret,
+-- 
+2.53.0
+
