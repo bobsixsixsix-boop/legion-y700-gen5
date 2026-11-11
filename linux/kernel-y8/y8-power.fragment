@@ -29,6 +29,8 @@ CONFIG_RCU_LAZY=y
 # CONFIG_STM is not set
 # CONFIG_STM_PROTO_BASIC is not set
 # CONFIG_STM_PROTO_SYS_T is not set
-# a task stuck in D state for 60 s already panics the tablet (BOOTPARAM_HUNG_TASK_PANIC=1): with OTG
-# sticks and FUSE that is too eager - 180 s (detection takes 1-2 periods). The panic itself stays.
+# a task stuck in D state for 60 s was reported-and-panicked (BOOTPARAM_HUNG_TASK_PANIC=1, y8-y17): with OTG
+# sticks and FUSE that is too eager - 180 s (detection takes 1-2 periods). Since y18 the panic is off
+# (kbuild-y18.sh sets BOOTPARAM_HUNG_TASK_PANIC=0 as upstream t58: a USB disk gone under I/O leaves tasks
+# in D state and must not reboot the tablet); the 180 s only times the "blocked for more than" report now.
 CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=180

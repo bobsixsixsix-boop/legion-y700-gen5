@@ -49,6 +49,11 @@ PDRC_1015 = ("[AC][Display]\nDimDisplayWhenIdle=false\nTurnOffDisplayWhenIdle=fa
              "[BatteryManagement]\nBatteryCriticalAction=8\n\n"
              "[LowBattery][SuspendAndShutdown]\nAutoSuspendAction=0\nPowerButtonAction=128\n")
 KLRC_GOOD = "[Daemon]\nAutolock=false\nLockOnResume=false\n"
+# the Bluetooth lines of a y20 boot (11-05, journalctl -k -b -g BT_GREP -o cat): two setups, both with the firmware
+BT_SETUP = ("Bluetooth: hci0: setting up wcn7850\n"
+            "Bluetooth: hci0: QCA FW build version: BTFW.BRAHMA.2.0.1-00238-PATCHZ-1_DEF NVM_LABEL:BTFW.BRAHMA.2.0.1-00238-PATCHZ-1_DEF\n"
+            "Bluetooth: hci0: QCA setup on UART is completed\n")
+BT_GOOD = BT_SETUP * 2
 # journalctl --list-boots -o json as systemd 259 prints it (gpu_hangs' boot labels and retention, 10-23)
 BOOTS_JSON = [{"index": -1, "boot_id": PREV_ID, "first_entry": int((NOW - 3 * 86400) * 1e6), "last_entry": int((NOW - 5000) * 1e6)},
               {"index": 0, "boot_id": CUR_ID, "first_entry": int((NOW - 5000) * 1e6), "last_entry": int(NOW * 1e6)}]
@@ -182,6 +187,14 @@ XRDB_GOOD = "*customization:\t-color\nXcursor.size:\t45\nXcursor.theme:\tbreeze_
 SD_ENV = "DISPLAY=:0\nLANG=zh_CN.UTF-8\nWAYLAND_DISPLAY=wayland-0\nXAUTHORITY=/run/user/1000/xauth_qGEGkm\nXDG_SESSION_TYPE=wayland"
 
 
+# check_panel_size (11-04): kscreen-doctor -j's outputs as KWin lists them on kernel y18 (upstream 0144: 118 x 190 mm)
+def kscreen(w=118, h=190, scale=1.9, dsi=True):
+    return json.dumps({"outputs": [
+        {"id": 1, "name": "DSI-1", "connected": dsi, "enabled": dsi, "scale": scale, "sizeMM": {"height": h, "width": w}},
+        {"id": 2, "name": "DP-1", "connected": False, "enabled": False, "scale": 1, "sizeMM": {"height": 0, "width": 0}}]})
+KSCREEN_GOOD = kscreen()
+
+
 # y700-battery-report --json as the checklist sees it (S33): the diag block of DESIGN.md 6b.a, everything below every
 # threshold; the rest of the document is not read by the checklist. The screen-off pair is like with like (10-30
 # review): the measured P25 of the >= 20 min screen-off segments and the model's power for the same segments, F_off
@@ -197,6 +210,17 @@ def report_doc(coeffs=None, **diag):
                        "date": "2026-10-18", "source": "user"}, "diag": d}, ensure_ascii=False, separators=(",", ":"))
 
 
+def bt_journal(cmd):
+    """journalctl -k -b -g BT_GREP as systemd 259 answers (tablet, 11-05): no match = exit 1, and "-- No entries --"
+    on stdout unless -q or -o cat; S["bt_rc"] / S["bt_err"] force a failure (None = run_rc's backstop timeout)"""
+    log = S.get("bt_log", BT_GOOD).strip()
+    if "bt_rc" in S:
+        return S["bt_rc"], "", S.get("bt_err", "")
+    if log:
+        return 0, log, ""
+    return 1, "" if "-q" in cmd or "cat" in cmd else "-- No entries --", ""
+
+
 def fake_run_rc(cmd, user=False, timeout=20):
     """run_rc(): the report (check_battery_diag, 10-30) answers from S - stdout "report", exit status "report_rc"
     (None = run_rc's backstop timeout), stderr "report_err" - and records who ran it, how, for how long"""
@@ -204,6 +228,8 @@ def fake_run_rc(cmd, user=False, timeout=20):
         S.setdefault("report_calls", []).append((cmd, user, timeout))
         rc = S.get("report_rc", 0)
         return rc, "" if rc is None else S.get("report", report_doc()), S.get("report_err", "")
+    if cmd[:3] == ["journalctl", "-k", "-b"] and mod.BT_GREP in cmd:   # check_bt_firmware (11-05)
+        return bt_journal(cmd)
     return 0, fake_run(cmd, user, timeout), ""
 
 
@@ -232,6 +258,9 @@ def fake_run(cmd, user=False, timeout=20):
     if cmd[:3] == ["journalctl", "-k", "-b"] and "SDI disable: " in cmd:   # the download_mode check, y16's 1058 line (11-01)
         S.setdefault("sdi_asked", []).append(c)
         return S.get("sdi_log", "")
+    if cmd[:3] == ["journalctl", "-k", "-b"] and mod.BT_GREP in cmd:   # check_bt_firmware through run() (before the review)
+        rc, out, err = bt_journal(cmd)
+        return out
     if cmd[:3] == ["journalctl", "-k", "-b"] and mod.FSCK_GREP in cmd:   # check_bootfsck (11-01): per boot id, "0" = this one
         S.setdefault("fsck_asked", []).append(cmd[3])
         return S.get("fsck_logs", {}).get(cmd[3], "")
@@ -269,17 +298,34 @@ def fake_run(cmd, user=False, timeout=20):
         return S.get("blur_loaded", "b true")
     if cmd[0] == "busctl" and "isScriptLoaded" in cmd and "y700-edge" in cmd:
         return S.get("edge_loaded", "b true")
+    if cmd[0] == "busctl" and "isScriptLoaded" in cmd and "y700-stage" in cmd:   # check_stage (11-08)
+        return S.get("stage_loaded", "b true")
+    if cmd[0] == "busctl" and "isEffectLoaded" in cmd and "y700_stagecorners" in cmd:   # check_stage's corners (11-09)
+        return S.get("corners_loaded", "b true")
+    if cmd[0] == "busctl" and "isScriptLoaded" in cmd and "y700-split" in cmd:   # check_split (11-10)
+        return S.get("split_loaded", "b true")
+    if cmd[0] == "busctl" and "introspect" in cmd and "/org/y700/StageCorners" in cmd:   # check_split: the effect's methods
+        return S.get("corners_api", ".setSplitWindows method s - - .setSplitChrome method s - - .touchPoint method - s -")
     if cmd[0] == "busctl" and cmd[-1] == "list":           # who holds the notification service (check_shellbar, 10-22)
         return S.get("bus_list", "org.freedesktop.Notifications - - - (activatable) - -\n"
                                  "org.freedesktop.Notifications 4321 y700-shellbar user :1.9 y700-shellbar.service - -")
     if cmd[0] == "busctl":
         return "b true"
+    if "kscreen-doctor" in cmd and "-j" in cmd:          # check_panel_size (11-04): KWin's outputs, S["kscreen"] or the y18 truth
+        return S.get("kscreen", KSCREEN_GOOD)
     if cmd[0] == "kreadconfig6":                         # per key (S["kread"]), else one answer for all
         return S.get("kread", {}).get(cmd[cmd.index("--key") + 1], S.get("kreadconfig", "true"))
     if cmd[0] == "sh" and "y700-home: bottom edge" in c:
         return S.get("home_edge", "y700-home: bottom edge on")
     if cmd[0] == "sh" and "y700-taskswitcher: bottom edge" in c:
         return S.get("ts_edge", "y700-taskswitcher: bottom edge on")
+    if cmd[0] == "sh" and "kwin/scripts/y700-stage/contents" in c:   # check_stage (11-08): QML errors this boot
+        return S.get("stage_errs", "0")
+    if cmd[0] == "sh" and "kwin/scripts/y700-split/contents" in c:   # check_split (11-10): QML errors this boot
+        return S.get("split_errs", "0")
+    if cmd[0] == "sh" and "y700-stage: (loaded" in c:   # check_stage: the script's last on / off line
+        last = S.get("stage_last", "y700-stage: loaded, off")
+        return last.pop(0) if isinstance(last, list) else last
     if cmd[0] == "sh" and "y700-taskswitcher: loaded" in c:
         return S.get("ts_build", "y700-taskswitcher: loaded 6.6.5-0ubuntu0.1+abc123")
     if cmd[0] == "sh" and "app quit: StartUnit failed" in c:   # check_appquit (10-31): failures this boot
@@ -353,12 +399,23 @@ def rawdump_image(kmsg, rst=b"\x01\x00\x00\x00\x40\x00\x00\x00", pon=b"\x80\x00\
     return bytes(hdr) + bytes(body)
 
 
+MEM_KB = 15728640                                     # 15 GiB MemTotal; zram-generator's "ram" is that in MiB
+SWAP_ZRAM = f"/dev/zram0                              partition\t{MEM_KB - 4}\t0\t\t100\n"
+
+
 def base_tree(download_mode="off", aco="N", aso="N", recorder=True):
     """A tablet where every legacy check passes; the crash-forensics inputs are added per scenario."""
     shutil.rmtree(ROOT, ignore_errors=True)
     CTIME.clear(); LINKS.clear(); S.clear(); MODE.clear(); UID.clear(); FLAKY.clear()
     put("/proc/sys/kernel/random/boot_id", BOOT_ID + "\n")
     put("/proc/uptime", "5000.00 30000.00\n")
+    # zram B as y19 leaves it (S39): zram0 the only swap, disksize = MemTotal, zstd, swappiness 100, page-cluster 0
+    put("/proc/meminfo", f"MemTotal:       {MEM_KB} kB\nMemFree:         8000000 kB\n")
+    put("/proc/swaps", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n" + SWAP_ZRAM)
+    put("/sys/block/zram0/disksize", f"{MEM_KB * 1024}\n")
+    put("/sys/block/zram0/comp_algorithm", "lzo lzo-rle lz4 lz4hc [zstd] deflate 842\n")
+    put("/proc/sys/vm/swappiness", "100\n")
+    put("/proc/sys/vm/page-cluster", "0\n")
     put("/sys/module/qcom_scm/parameters/download_mode", download_mode + "\n")
     put("/sys/module/printk/parameters/time", "Y\n")
     put("/sys/module/cpuidle_psci_domain/parameters/allow_cluster_off", aco + "\n")
@@ -808,6 +865,87 @@ check("S21d edge script off + no fake_input grant -> one WARN naming both", has(
       and has(out, "WARN", "缺 fake_input"))
 out = ts(files={CC_UNIT: "[Unit]\n", CC_DESK: GOOD_DESK}, blur_loaded="b false")
 check("S21e blur effect not loaded -> WARN", has(out, "WARN", "模糊特效 blur 没加载"))
+
+# ---- S43a-k Stage Manager (linux/stage, 11-08): y700-stage loaded, its BuildId's folder there, Active vs the last line, QML errors
+STAGE_DIR = "/home/user/.local/share/kwin/scripts/y700-stage"
+def stage(active="false", bid="20261108233700", build=True, **kw):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    put(STAGE_DIR + "/metadata.json", "{}")
+    if build:
+        put(STAGE_DIR + "/contents/build-20261108233700/ui/Stage.qml", "Item {}")
+    for path, data in kw.pop("files", {}).items():
+        put(path, data)
+    S.update(kread={"Active": active, "BuildId": bid}, **kw)
+    return run_main()[1]
+out = ts()
+check("S43a not installed -> no line", not any("台前调度" in l for l in out))
+out = stage()
+check("S43b loaded, off, the log says off -> OK", has(out, "OK", "台前调度就绪（y700-stage 已加载，关着"), out)
+out = stage(active="true", stage_last="qml: y700-stage: on, 3 windows")
+check("S43c on and the log says on -> OK", has(out, "OK", "台前调度就绪（y700-stage 已加载，开着"), out)
+out = stage(active="true", stage_last="qml: y700-stage: loaded, on")
+check("S43d loaded on at login, no window yet logged -> OK", has(out, "OK", "开着"), out)
+out = stage(active="true", stage_last="qml: y700-stage: off, restored 2, 0 when shown")
+check("S43e Active on, the script off (the shortcut never landed) -> WARN", has(out, "WARN", "kwinrc 记的是「开」，脚本最后一句是「off, restored"), out)
+out = stage(active="true", stage_last=["qml: y700-stage: loaded, off", "qml: y700-stage: on, 1 windows"])
+check("S43f a tap between the reads -> the second read agrees, OK", has(out, "OK", "开着") and not has(out, "WARN", "台前调度"), out)
+out = stage(stage_loaded="b false")
+check("S43g not loaded -> WARN", has(out, "WARN", "y700-stage 没加载"), out)
+out = stage(bid="20261108000000")
+check("S43h BuildId with no folder -> WARN", has(out, "WARN", "BuildId「20261108000000」对不上"), out)
+out = stage(build=False, bid="")
+check("S43i no BuildId -> WARN", has(out, "WARN", "BuildId「」对不上"), out)
+out = stage(stage_errs="4")
+check("S43j QML errors this boot -> WARN", has(out, "WARN", "报了 4 条 QML 错误"), out)
+out = stage(stage_last="")
+check("S43k no load line this boot -> WARN", has(out, "WARN", "没有 y700-stage 的加载记录"), out)
+# S43l-p the round-corner effect (kwin-corners/, 11-09): its stamp against kwin-wayland ("1.0" in this tree), loaded while on
+CORNERS_STAMP = "/usr/local/share/y700-stage/stagecorners.kwin-version"
+out = stage(files={CORNERS_STAMP: "0.9\n"})
+check("S43l stamp from another KWin -> WARN naming both versions", has(out, "WARN", "圆角特效是为 KWin 0.9 编的，现在是 1.0"), out)
+out = stage(files={CORNERS_STAMP: "1.0\n"}, corners_loaded="b false")
+check("S43m stamp right, off, not loaded -> no corners line", not any("圆角" in l for l in out) and has(out, "OK", "关着"), out)
+out = stage(files={CORNERS_STAMP: "1.0\n"}, active="true", stage_last="qml: y700-stage: on, 2 windows", corners_loaded="b false")
+check("S43n on but the effect not loaded -> WARN", has(out, "WARN", "圆角特效却没加载"), out)
+out = stage(files={CORNERS_STAMP: "1.0\n"}, active="true", stage_last="qml: y700-stage: on, 2 windows")
+check("S43o on, stamp right, loaded -> OK and no corners WARN", has(out, "OK", "开着") and not has(out, "WARN", "圆角"), out)
+out = stage(active="true", stage_last="qml: y700-stage: on, 2 windows", corners_loaded="b false")
+check("S43p no stamp (never built here) -> no corners line", not any("圆角" in l for l in out), out)
+
+# ---- S43q-x split screen (linux/split, 11-10): y700-split loaded, its BuildId's folder, QML errors, KWin's own edge tiling
+# off, the corner effect's split part
+SPLIT_DIR = "/home/user/.local/share/kwin/scripts/y700-split"
+def split(bid="20261110230000", build=True, tiling="false", maximize="false", **kw):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    put(SPLIT_DIR + "/metadata.json", "{}")
+    if build:
+        put(SPLIT_DIR + "/contents/build-20261110230000/ui/Split.qml", "Item {}")
+    for path, data in kw.pop("files", {}).items():
+        put(path, data)
+    S.update(kread={"BuildId": bid, "ElectricBorderTiling": tiling, "ElectricBorderMaximize": maximize}, **kw)
+    return run_main()[1]
+out = ts()
+check("S43q not installed -> no line", not any("分屏" in l for l in out))
+out = split()
+check("S43r loaded, edges off, the effect has its split part -> OK", has(out, "OK", "分屏就绪"), out)
+out = split(split_loaded="b false")
+check("S43s not loaded -> WARN", has(out, "WARN", "y700-split 没加载"), out)
+out = split(bid="20261110000000")
+check("S43t BuildId with no folder -> WARN", has(out, "WARN", "分屏：kwinrc 的 BuildId「20261110000000」对不上"), out)
+out = split(split_errs="2")
+check("S43u QML errors this boot -> WARN", has(out, "WARN", "y700-split 报了 2 条 QML 错误"), out)
+out = split(tiling="", maximize="false")
+check("S43v KWin's own edge tiling back on (key gone) -> WARN naming it", has(out, "WARN", "ElectricBorderTiling 不是 false")
+      and not has(out, "WARN", "ElectricBorderMaximize"), out)
+out = split(corners_api=".setStageWindows method s - -")
+check("S43w an old effect (no split part), none built -> WARN: rebuild", has(out, "WARN", "圆角特效是旧的")
+      and has(out, "WARN", "重编后重新登录"), out)
+out = split(corners_api=".setStageWindows method s - -",
+            files={"/usr/lib/aarch64-linux-gnu/qt6/plugins/kwin/effects/plugins/y700_stagecorners.so": b"\x7fELF..setSplitWindows.."})
+check("S43w2 old in the session, the new one installed -> WARN: re-login only", has(out, "WARN", "新的已经装好，重新登录一次")
+      and not has(out, "WARN", "重编"), out)
+out = split(corners_api="")
+check("S43x the effect not loaded (no object) -> OK, no effect line", has(out, "OK", "分屏就绪") and not has(out, "WARN", "圆角"), out)
 
 # ---- S21f-j the curtain's live-screen blur test (10-22): its tools (the grants live in desktop files) and the last result
 BLUR_SH = "/usr/local/share/y700-control-center/tests/blur-flicker.sh"
@@ -2542,6 +2680,210 @@ check("S37l a repair at this boot, the last --save already ran in it -> not repo
 rc, out, fl = fsck_case({"0": fsck_log(Y17K, 0, 0)}, (SAVED_ID, CUR_ID), tune="")
 check("S37k tune2fs says nothing -> INFO, neither OK nor WARN", has(out, "INFO", "读不到根分区") and not has(out, "WARN", "ext4 状态"), fl)
 KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
+
+# ---- S38a-e the panel's physical size (11-04, kernel y18 / upstream 0144): kscreen-doctor -j's sizeMM of the DSI output
+def panel(kernel="7.3.0-tb323fu-t52-y18", **kw):
+    global KERNEL
+    KERNEL = kernel
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    S.update(kw)
+    rc, out = run_main()
+    KERNEL = "7.3.0-rc4-tb323fu-t49-y9"
+    return rc, out, [l for l in out if "面板尺寸" in l]
+rc, out, pl = panel()
+check("S38a y18, KWin sees 118 x 190 at scale 1.9 -> OK", has(out, "OK", "面板尺寸：内核报 118 × 190 mm（y18 起的真实尺寸），显示缩放 1.9")
+      and not has(out, "WARN", "面板尺寸"), pl)
+rc, out, pl = panel(kscreen=kscreen(168, 268))
+check("S38b y18 but 168 x 268 -> WARN (0144 not in this kernel?), exit 10",
+      has(out, "WARN", "面板尺寸：7.3.0-tb323fu-t52-y18 该报 118 × 190 mm，KWin 看到的是 168 × 268 mm") and rc == 10, pl)
+rc, out, pl = panel(kernel="7.3.0-tb323fu-t52-y17", kscreen=kscreen(168, 268))
+check("S38c y17 with 168 x 268 -> INFO only (the old size is that kernel's)", has(out, "INFO", "面板尺寸：内核报 168 × 268 mm（y18 前的内核")
+      and not has(out, "WARN", "面板尺寸") and not has(out, "OK", "面板尺寸"), pl)
+rc, out, pl = panel(kscreen="")
+check("S38d kscreen-doctor says nothing (no session) -> INFO, not WARN", has(out, "INFO", "面板尺寸：kscreen-doctor -j 读不到输出列表")
+      and not has(out, "WARN", "面板尺寸"), pl)
+rc, out, pl = panel(kscreen=kscreen(dsi=False))
+check("S38e no connected DSI output -> INFO", has(out, "INFO", "连着的 DSI 输出有 0 个") and not has(out, "WARN", "面板尺寸"), pl)
+
+# ---- S39a-e zram B (11-04, README「内核 y19」): zram0 the only swap, as big as RAM, zstd, swappiness 100, page-cluster 0
+SWAP_HDR = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+def zram(**files):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    for p, d in files.items():
+        put(p, d)
+    rc, out = run_main()
+    return rc, out, [l for l in out if "zram" in l]
+rc, out, zl = zram()
+check("S39a as y19 leaves it -> OK naming size = RAM, zstd, 100/0, exit 0",
+      has(out, "OK", "zram：zram0 15.0 GiB = 整个内存，zstd，优先级 100；swappiness 100、page-cluster 0") and not has(out, "WARN", "zram") and rc == 0, (rc, zl))
+rc, out, zl = zram(**{"/sys/block/zram0/disksize": f"{MEM_KB * 1024 // 2}\n"})
+check("S39b half-size zram0 (the old ram / 2) -> WARN naming zram-generator.conf, exit 10",
+      has(out, "WARN", "zram0 7.5 GiB，内存 15.0 GiB：/etc/systemd/zram-generator.conf 的 zram-size 不是 ram") and rc == 10, (rc, zl))
+rc, out, zl = zram(**{"/proc/sys/vm/swappiness": "60\n", "/proc/sys/vm/page-cluster": "3\n"})
+check("S39c the kernel defaults 60/3 -> WARN naming 90-y700-zram.conf",
+      has(out, "WARN", "vm.swappiness 60、vm.page-cluster 3（要 100、0）：/etc/sysctl.d/90-y700-zram.conf"), zl)
+rc, out, zl = zram(**{"/proc/swaps": SWAP_HDR})
+check("S39d no swap at all -> its own WARN (zram-setup did not run), no OK", has(out, "WARN", "zram：/proc/swaps 里没有任何 swap") and not has(out, "OK", "zram："), zl)
+rc, out, zl = zram(**{"/proc/swaps": SWAP_HDR + SWAP_ZRAM + "/swapfile                               file\t4194300\t0\t\t-2\n"})
+check("S39e a second swap -> WARN listing both", has(out, "WARN", "swap 不是只有 zram0：/dev/zram0、/swapfile"), zl)
+rc, out, zl = zram(**{"/sys/block/zram0/comp_algorithm": "lzo lzo-rle [lz4] zstd\n"})
+check("S39f lz4 selected -> WARN naming the algorithm and the conf file (11-04 review)",
+      has(out, "WARN", "zram0 的压缩算法不是 zstd（/etc/systemd/zram-generator.conf") and not has(out, "OK", "zram："), zl)
+rc, out, zl = zram(**{"/proc/meminfo": "MemFree:         8000000 kB\n"})
+check("S39g /proc/meminfo without MemTotal -> WARN, not a vacuous OK (11-04 review)",
+      has(out, "WARN", "读不到 /proc/meminfo 的 MemTotal 或 /sys/block/zram0/disksize") and not has(out, "OK", "zram："), zl)
+
+# ---- S40a-k the bottom USB-C port (11-04, README「USB-C 外接屏」): y700-dp-source installed next to y700-usb-port; with a
+# UFP partner the controller must be host (with a DFP: device, unless the controller went to the side port's gamepad);
+# with DP-1 connected the tablet must be the power source; the rule alone missing is the owner charging through a dock
+USBC_FILES = {"/usr/local/libexec/y700-usb-port": "#!/bin/sh\n", "/usr/local/libexec/y700-dp-source": "#!/bin/sh\n",
+              "/etc/udev/rules.d/71-y700-dp-source.rules": 'SUBSYSTEM=="drm"\n'}
+def usbc(partner=False, dr="[host] device", pr="[source] sink", role="host", dp="disconnected",
+         st="bottom port (gpio30 low)", **files):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    for p, d in {**USBC_FILES, **files}.items():
+        if d is not None:
+            put(p, d)
+    if partner:
+        put("/sys/class/typec/port0-partner/uevent", "DEVTYPE=typec_partner\n")
+    put("/sys/class/typec/port0/data_role", dr + "\n")
+    put("/sys/class/typec/port0/power_role", pr + "\n")
+    put("/sys/class/usb_role/a600000.usb-role-switch/role", role + "\n")
+    put("/sys/class/drm/card1-DP-1/status", dp + "\n")
+    put("/run/y700-usb-port.state", st + "\n")
+    rc, out = run_main()
+    return rc, out, [l for l in out if "USB-C 底部口" in l]
+rc, out, ul = usbc()
+check("S40a nothing plugged, rule installed -> OK, exit 0", has(out, "OK", "USB-C 底部口：没接东西；外接屏供电规则在") and rc == 0, (rc, ul))
+rc, out, ul = usbc(**{"/etc/udev/rules.d/71-y700-dp-source.rules": None})
+check("S40b the rule alone missing (removed to charge through a dock) -> INFO, still OK, no WARN, exit 0",
+      has(out, "INFO", "71-y700-dp-source.rules 被拿掉了") and has(out, "OK", "USB-C 底部口：没接东西")
+      and not has(out, "WARN", "USB-C 底部口") and rc == 0, (rc, ul))
+rc, out, ul = usbc(**{"/usr/local/libexec/y700-dp-source": None})
+check("S40c the script missing -> WARN naming it and install.sh, exit 10",
+      has(out, "WARN", "/usr/local/libexec/y700-dp-source 没装") and has(out, "WARN", "linux/usbport/install.sh") and rc == 10, (rc, ul))
+rc, out, ul = usbc(partner=True, role="device")
+check("S40d UFP partner but the controller in device mode -> WARN naming y700-usb-port and the recovery write",
+      has(out, "WARN", "而控制器 role 是 device：y700-usb-port") and has(out, "WARN", "echo host > /sys/class/usb_role"), ul)
+rc, out, ul = usbc(partner=True, pr="source [sink]", dp="connected")
+check("S40e DP-1 connected while sinking -> WARN naming y700-dp-source",
+      has(out, "WARN", "接着外接屏却在从它取电（power_role source [sink]）：y700-dp-source") and not has(out, "OK", "USB-C 底部口"), ul)
+rc, out, ul = usbc(partner=True, dp="connected")
+check("S40f monitor attached, tablet source and host -> OK naming the roles, exit 0",
+      has(out, "OK", "USB-C 底部口：有伙伴，data_role [host] device、power_role [source] sink、控制器 host，外接屏在") and rc == 0, (rc, ul))
+rc, out, ul = usbc(partner=True, dr="host [device]", pr="source [sink]", role="device")
+check("S40g a PC on the port (tablet UFP and sinking, controller device, no DP) -> OK, no WARN",
+      has(out, "OK", "USB-C 底部口：有伙伴，data_role host [device]") and not has(out, "WARN", "USB-C 底部口"), ul)
+rc, out, ul = usbc(partner=True, dr="host [device]", pr="source [sink]", role="host")
+check("S40h a PC on the port but the controller in host mode -> WARN naming the hidden gadget and the recovery write",
+      has(out, "WARN", "而控制器 role 是 host：电脑看不到平板的 gadget") and has(out, "WARN", "echo device > /sys/class/usb_role")
+      and rc == 10, (rc, ul))
+rc, out, ul = usbc(partner=True, dr="host [device]", pr="source [sink]", role="host",
+                   st="side port (gpio30 high), role host; bottom partner has no USB data (charger)")
+check("S40i the same with the controller routed to the side port (charger below, gamepad beside) -> OK, no WARN",
+      has(out, "OK", "USB-C 底部口：有伙伴，data_role host [device]") and not has(out, "WARN", "USB-C 底部口"), ul)
+rc, out, ul = usbc(partner=True, pr="source [sink]", dp="connected", **{"/etc/udev/rules.d/71-y700-dp-source.rules": None})
+check("S40j rule removed and DP-1 connected while sinking (charging through a dock) -> INFO, OK, no WARN, exit 0",
+      has(out, "INFO", "被拿掉了") and has(out, "OK", "USB-C 底部口：有伙伴") and not has(out, "WARN", "USB-C 底部口") and rc == 0, (rc, ul))
+rc, out, ul = usbc(**{"/usr/local/libexec/y700-usb-port": None})
+check("S40k y700-usb-port not installed -> the item does not appear", not ul, ul)
+
+# ---- S41a-i Magic Mouse 2 (11-04, README「Magic 键鼠」): y20 has hid-magicmouse in the kernel, y19 the out-of-tree build;
+# a connected mouse must be on magicmouse; the two module options; no transition files -> no item
+MM_FILES = {"/etc/udev/rules.d/90-y700-magicmouse.rules": 'ACTION=="add", SUBSYSTEM=="hid"\n', "/usr/local/sbin/y700-extra-modules": "#!/bin/sh\n"}
+MOUSE_UE = "DRIVER={drv}\nHID_ID=0005:0000004C:00000269\nHID_NAME=Magic Mouse 2\nMODALIAS=hid:b0005g0001v0000004Cp00000269\n"
+def magic(intree=True, extra=False, mouse=None, acc="Y\n", fnmode=None, **files):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    for p, d in {**MM_FILES, **files}.items():
+        if d is not None:
+            put(p, d)
+    if intree:
+        put(f"/lib/modules/{KERNEL}/kernel/drivers/hid/hid-magicmouse.ko", "ELF")
+    if extra:
+        put(f"/usr/local/lib/y700-extra-modules/{KERNEL}/hid-magicmouse.ko", "ELF")
+    if mouse is not None:
+        # the item reads HID_ID from the uevent, not from the directory name (a colon is not allowed in a Windows file name)
+        put("/sys/bus/hid/devices/0005.004C.0269.0003/uevent", MOUSE_UE.format(drv=mouse))
+    if acc is not None:
+        put("/sys/module/hid_magicmouse/parameters/scroll_acceleration", acc)
+    if fnmode is not None:
+        put("/sys/module/hid_apple/parameters/fnmode", fnmode)
+    rc, out = run_main()
+    return rc, out, [l for l in out if "Magic 鼠标驱动" in l]
+rc, out, ml = magic()
+check("S41a y20 layout, mouse not connected -> OK naming the in-kernel module, exit 0",
+      has(out, "OK", "Magic 鼠标驱动：没接；hid-magicmouse 内核自带，规则和加载脚本在") and rc == 0, (rc, ml))
+rc, out, ml = magic(mouse="magicmouse")
+check("S41b mouse connected on magicmouse -> OK counting it", has(out, "OK", "Magic 鼠标驱动：接着 1 个，驱动 magicmouse；hid-magicmouse 内核自带") and rc == 0, (rc, ml))
+rc, out, ml = magic(mouse="hid-generic")
+check("S41c mouse connected but on hid-generic -> WARN naming the driver, exit 10",
+      has(out, "WARN", "鼠标接着，驱动却是 hid-generic（没滚轮）") and not has(out, "OK", "Magic 鼠标驱动") and rc == 10, (rc, ml))
+rc, out, ml = magic(intree=False, extra=False, acc=None)
+check("S41d neither the in-kernel module nor the out-of-tree copy for this kernel -> WARN 换内核忘了带",
+      has(out, "WARN", f"内核 {KERNEL} 没带 hid-magicmouse，/usr/local/lib/y700-extra-modules/{KERNEL}/ 也没有——换内核忘了带") and rc == 10, (rc, ml))
+rc, out, ml = magic(intree=False, extra=True)
+check("S41e y19 layout (the out-of-tree copy only) -> OK naming 树外", has(out, "OK", "hid-magicmouse 树外 /usr/local/lib/y700-extra-modules/") and rc == 0, (rc, ml))
+rc, out, ml = magic(acc="N\n")
+check("S41f scroll_acceleration N -> WARN naming hid_magicmouse.conf", has(out, "WARN", "scroll_acceleration=N（要 Y）：/etc/modprobe.d/hid_magicmouse.conf"), ml)
+rc, out, ml = magic(fnmode="1\n")
+check("S41g hid_apple fnmode 1 -> WARN naming hid_apple.conf", has(out, "WARN", "hid_apple fnmode=1（要 2，F 键是 F 键）：/etc/modprobe.d/hid_apple.conf"), ml)
+rc, out, ml = magic(**{"/usr/local/sbin/y700-extra-modules": None})
+check("S41h the loader missing, the rule present -> WARN naming install.sh", has(out, "WARN", "少了一个（sh linux/owner-devices/install.sh）") and rc == 10, (rc, ml))
+rc, out, ml = magic(**{"/etc/udev/rules.d/90-y700-magicmouse.rules": None, "/usr/local/sbin/y700-extra-modules": None})
+check("S41i no transition files at all -> the item does not appear", not ml, ml)
+
+# ---- S42a-f Bluetooth firmware (11-05): hci_qca falls back to the chip's ROM firmware when the files are missing and
+# says so only in the kernel log; every setup of the boot must complete with a build version
+def bt(log=None, **kw):
+    base_tree(); archived(); state(prev_boot=PREV_ID)
+    if log is not None:
+        S["bt_log"] = log
+    S.update(kw)
+    rc, out = run_main()
+    return rc, out, [l for l in out if "蓝牙" in l]
+BT_ROM = ("Bluetooth: hci0: setting up wcn7850\n"
+          "Bluetooth: hci0: QCA Failed to request file: qca/brhbtfw20.mbn (-2)\n"
+          "Bluetooth: hci0: QCA Failed to download patch (-2)\n")
+rc, out, bl = bt()
+check("S42a two setups, both with the firmware -> OK naming the build, exit 0",
+      has(out, "OK", "蓝牙固件 BTFW.BRAHMA.2.0.1-00238-PATCHZ-1_DEF，这次开机初始化 2 次都加载上了") and rc == 0, (rc, bl))
+rc, out, bl = bt(BT_ROM)
+check("S42b the firmware file missing (ROM fallback) -> WARN naming the failed line and the files, exit 10",
+      has(out, "WARN", "蓝牙固件没加载上，芯片在用自带的旧固件跑：hci0: QCA Failed to download patch (-2)（ls /lib/firmware/qca/brhbt*")
+      and not has(out, "OK", "蓝牙") and rc == 10, (rc, bl))
+rc, out, bl = bt(BT_SETUP + BT_ROM)
+check("S42c the first setup fine, the second falls back -> still WARN", has(out, "WARN", "蓝牙固件没加载上") and rc == 10, (rc, bl))
+rc, out, bl = bt(BT_SETUP + "Bluetooth: hci0: setting up wcn7850\n")
+check("S42d the last setup without completion -> WARN counting setups and completions",
+      has(out, "WARN", "蓝牙芯片最后一次初始化没走完：这次开机初始化 2 次，完成 1 次、固件版本 没报") and rc == 10, (rc, bl))
+rc, out, bl = bt("")
+check("S42e no Bluetooth setup in this boot's log (journalctl: exit 1, nothing printed) -> no item",
+      not bl and rc == 0, (rc, bl))
+rc, out, bl = bt(bt_rc=127, bt_err="ERROR [Errno 2] No such file or directory: 'journalctl'")
+check("S42f journalctl unanswerable -> INFO, not a WARN", has(out, "INFO", "蓝牙固件：查不了") and not has(out, "WARN", "蓝牙"), bl)
+# 11-05 review: hci_qca retries an error other than -ENOENT / -EAGAIN inside the same setup (no new "setting up"); the
+# retry loading the firmware is a hiccup (OK + INFO), and so is a first setup on ROM firmware that a later one fixed
+BT_RETRY = ("Bluetooth: hci0: setting up wcn7850\n"
+            "Bluetooth: hci0: QCA Failed to download patch (-110)\n"
+            + BT_SETUP.split("\n", 1)[1])
+rc, out, bl = bt(BT_RETRY + BT_SETUP)
+check("S42g a -110 retried to completion -> OK (last setup loaded) + INFO naming the error, exit 0",
+      has(out, "OK", "蓝牙固件 BTFW.BRAHMA.2.0.1-00238-PATCHZ-1_DEF，这次开机初始化 2 次，最后一次加载上了")
+      and has(out, "INFO", "初始化出过岔子、后来好了：hci0: QCA Failed to download patch (-110)")
+      and not has(out, "WARN", "蓝牙") and rc == 0, (rc, bl))
+rc, out, bl = bt(BT_ROM + BT_SETUP)
+check("S42h the first setup on ROM firmware, the second loaded it -> OK + INFO, not the ROM WARN, exit 0",
+      has(out, "OK", "最后一次加载上了") and has(out, "INFO", "QCA Failed to download patch (-2)")
+      and not has(out, "WARN", "蓝牙") and rc == 0, (rc, bl))
+rc, out, bl = bt(BT_SETUP + "Bluetooth: hci0: setting up wcn7850\nBluetooth: hci0: QCA Failed to get version (-110)\n")
+check("S42i the last setup gave up on another error -> WARN naming it, without the firmware-files hint, exit 10",
+      has(out, "WARN", "蓝牙芯片最后一次初始化失败：hci0: QCA Failed to get version (-110)")
+      and not has(out, "WARN", "brhbt") and rc == 10, (rc, bl))
+rc, out, bl = bt(bt_rc=1, bt_err="Failed to open journal: Permission denied")
+check("S42j journalctl exit 1 with an error on stderr is a failure (INFO), not 'nothing matched'",
+      has(out, "INFO", "蓝牙固件：查不了，journalctl 没答上来（Failed to open journal") and rc == 0, (rc, bl))
+rc, out, bl = bt(bt_rc=None)
+check("S42k journalctl timed out -> INFO, exit 0", has(out, "INFO", "没答上来（超时）") and rc == 0, (rc, bl))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print(f"\n{len(FAILS)} failures", FAILS)

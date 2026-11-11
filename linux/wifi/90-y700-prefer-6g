@@ -8,6 +8,7 @@
 # A switch that worked blocks nothing after those 5 min, nor once the interface was recreated (ath12k reloaded
 # by the Wi-Fi watchdog or for CarPlay's hotspot): nothing runs this again, so the first fix (no switch for
 # 30 min after any switch) left the tablet on HOME_2.4G for the evening after such a drop (2026-10-31 review).
+# Giving up after 6 scans without HOME_6G is logged (2026-11-05): before, a night on HOME_2.4G left no trace of why.
 FAIL=/run/y700-prefer-6g.fail      # mtime = when a switch to HOME_6G last failed or did not hold
 HELD=/run/y700-prefer-6g.held      # the ifindex of the last switch to HOME_6G that worked, mtime = when
 NET=/sys/class/net
@@ -29,4 +30,7 @@ fi
 			exit 0
 		fi
 	done
+	# re-check: the connection may have changed (or the interface gone) after the last scan's check
+	[ "$(nmcli -g GENERAL.CONNECTION dev show "$1")" = "HOME_2.4G" ] &&
+		logger -t y700-prefer-6g "HOME_6G not seen in 6 scans (about 2.5 min): staying on HOME_2.4G until its next connection"
 ) >/dev/null 2>&1 &

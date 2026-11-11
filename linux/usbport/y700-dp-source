@@ -1,0 +1,30 @@
+#!/bin/sh
+# y700-dp-source -- with a DisplayPort monitor on the bottom USB-C port, make the
+# tablet the power source.
+#
+# 2026-11-04 (README「USB-C 外接屏」): sinking power from the monitor, the PD
+# firmware and the monitor dropped the connection every 5-10 s and re-attached
+# with the power roles swapped (the screen "connected" and "ejected" in a loop).
+# With the tablet as source (UCSI SET_PDR through typec's power_role; the
+# firmware swaps at once) the link held with no detach at all. The owner does
+# not want to charge from the monitor anyway.
+#
+# Run by 71-y700-dp-source.rules on every drm change event (DP-1 hotplug), once
+# at boot by tb323fu-usb-port.service (drop-in y700.conf: a monitor attached at
+# boot sends its hotplug event before the root udev rules exist) and once by
+# install.sh. Only acts when DP-1 is connected and port0 is sinking: writing
+# source while already source would ask the firmware to swap again.
+role=/sys/class/typec/port0/power_role
+for dp in /sys/class/drm/card*-DP-1/status; do
+	[ "$(cat "$dp" 2>/dev/null)" = connected ] && break
+	exit 0
+done
+case "$(cat $role 2>/dev/null)" in
+*"[sink]"*) ;;
+*) exit 0 ;;
+esac
+if echo source > $role 2>/dev/null; then
+	logger -t y700-dp-source "DP-1 connected while sinking: power role set to source ($(cat $role))"
+else
+	logger -t y700-dp-source "DP-1 connected while sinking: setting power role source failed ($(cat $role))"
+fi

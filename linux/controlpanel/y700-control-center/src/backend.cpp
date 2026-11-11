@@ -51,6 +51,7 @@ static const char *STATUS_CMD =
     " echo ===VOL; wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null; echo ===TS; timeout 3 tailscale status --json 2>/dev/null;"
     " echo ===REC; pw-cli ls Node 2>/dev/null | grep -c 'media.class = \"Stream/Input/Video\"';"
     " echo ===AB; systemctl --user is-active y700-autobright.service 2>/dev/null;"
+    " echo ===STAGE; kreadconfig6 --file kwinrc --group Script-y700-stage --key Active 2>/dev/null;"
     " echo ===TSBIN; command -v tailscale 2>/dev/null";     // last: section("TS") finds the first ===TS
 
 Backend::Backend(QObject *parent) : QObject(parent)
@@ -409,6 +410,8 @@ void Backend::parseStatus(const QString &out)
     // automatic brightness (linux/display/autobright/): whether its user service runs
     const QString ab = section("AB");
     st["autobright"] = ab == "active" || ab == "activating";
+    // Stage Manager (linux/stage): what y700-stage reads when it loads and the tile writes before the shortcut
+    st["stage"] = section("STAGE") == "true";
     const QString vol = section("VOL");           // "Volume: 0.40 [MUTED]"
     const QRegularExpressionMatch m = QRegularExpression("Volume: ([0-9.]+)").match(vol);
     st["volume"] = m.hasMatch() ? m.captured(1).toDouble() : 0.0;
@@ -434,7 +437,7 @@ void Backend::parseStatus(const QString &out)
     // is parsed (the Tailscale state was once assigned after this loop and undid the protection).
     static const QMap<QString, QString> keyOf = {{"wifi", "wifi"}, {"bt", "bt"}, {"rot", "rotLocked"}, {"hud", "hud"},
                                                  {"bypass", "bypass"}, {"torch", "torch"}, {"profile", "profile"}, {"hz", "hz"}, {"ts", "ts"},
-                                                 {"autobright", "autobright"}};
+                                                 {"autobright", "autobright"}, {"stage", "stage"}};
     for (auto it = keyOf.cbegin(); it != keyOf.cend(); ++it) {
         const qint64 last = m_lastAction.value(it.key(), 0);
         if (m_running.contains(it.key()) || m_queued.contains(it.key()) || last >= m_queryStart || now - last < 1500)
@@ -644,7 +647,8 @@ void Backend::startAction(const QString &name, const QString &cmd)
             // say so, and drop the optimistic value at once instead of letting it flip back silently
             static const QMap<QString, QString> label = {{"wifi", "Wi‑Fi"}, {"bt", "蓝牙"}, {"rot", "旋转锁定"}, {"hud", "性能浮层"},
                 {"bypass", "旁路供电"}, {"torch", "手电筒"}, {"profile", "性能模式"}, {"hz", "刷新率"}, {"android", "切换到 Android"},
-                {"power", "电源操作"}, {"wifi-connect", "连接 Wi‑Fi"}, {"bt-dev", "蓝牙设备"}, {"ts", "Tailscale"}, {"autobright", "自动亮度"}};
+                {"power", "电源操作"}, {"wifi-connect", "连接 Wi‑Fi"}, {"bt-dev", "蓝牙设备"}, {"ts", "Tailscale"}, {"autobright", "自动亮度"},
+                {"stage", "台前调度"}};
             err = err.section('\n', -1).left(80);
             showToast(label.value(name, name) + QStringLiteral("失败") + (err.isEmpty() ? QString() : QStringLiteral("：") + err));
             m_lastAction[name] = 0;

@@ -21,6 +21,8 @@
 # fake-osk.py (10-30, kbtile.sh: the keyboard's D-Bus name on the bed's bus) likewise. A scenario that taps the 「键盘」
 # tile must start it first: the bed's XDG_DATA_DIRS reach ~user/.local/share, so a call to the keyboard's name with
 # nobody owning it would start the real y700-osk inside the bed (D-Bus activation)
+# kbzone.py (11-09, stagestrip.sh: a bottom band with a layer-shell exclusive zone, as the docked keyboard reserves)
+# likewise; it needs LD_PRELOAD=libgtk4-layer-shell.so.0
 # SB_BAR=PATH: another build of y700-shellbar (its QML comes from its prefix: cmake -DCMAKE_INSTALL_PREFIX=/opt/y700-next),
 # so a new bar is tried here before the live one is replaced.
 # SB_CC=PATH: another build of y700-control-center (say one installed with -DCMAKE_INSTALL_PREFIX=/opt/y700-next;
@@ -77,6 +79,7 @@ printf '[General]\nnavigationPanelEnabled=false\nconvergenceModeEnabled=true\n' 
 cp "$GT/tests/ts-app.py" "$HERE/sb-wall.py" "$HERE/sb-notifyd.py" "$T/bin/"
 [ -f "$HERE/fake-sni.py" ] && cp "$HERE/fake-sni.py" "$T/bin/"
 [ -f "$HERE/fake-osk.py" ] && cp "$HERE/fake-osk.py" "$T/bin/"
+[ -f "$HERE/kbzone.py" ] && cp "$HERE/kbzone.py" "$T/bin/"
 cp "$SCEN" "$T/scenario.sh"
 cp "$WALL" "$T/wall.png"
 chmod 700 "$T/run"
@@ -147,12 +150,15 @@ IN
 chown -R $U:$U "$T" "$OUT"
 # env -i: the scenario sees nothing of the caller's environment but what is listed. GLASS_FRAMES / CAPSEQ are
 # dock-glass.sh's knobs (empty = its defaults); a new scenario knob goes here too, or it is silently dead.
+# SB_STAGE (11-09, stagestrip.sh): a checkout of the stage script to run instead of the installed one.
+# SB_SPLIT (11-10, splittile.sh): a checkout of the split screen script (linux/split/y700-split) for the bed's KWin.
 # Y700_BATTERY_REPORT (batpage-run.sh): the control centre inherits it, so the page its pill opens (batpage.sh p8)
 # reads the canned report too instead of running the real one against the bed. Passed only when set and not empty:
 # an empty one would still be "set" to the page (fixture mode on a file named ""). XDG_CACHE_HOME / XDG_STATE_HOME:
 # see above
 sudo -u $U env -i HOME=/home/$U PATH=/usr/bin:/bin LANG=zh_CN.UTF-8 XDG_RUNTIME_DIR="$T/run" \
     XDG_CONFIG_HOME="$T/config" XDG_DATA_HOME="$T/data" GLASS_FRAMES="${GLASS_FRAMES:-}" CAPSEQ="${CAPSEQ:-}" \
+    SB_STAGE="${SB_STAGE:-}" SB_SPLIT="${SB_SPLIT:-}" \
     XDG_CACHE_HOME="$T/cache" XDG_STATE_HOME="$T/state" \
     ${Y700_BATTERY_REPORT:+"Y700_BATTERY_REPORT=$Y700_BATTERY_REPORT"} \
     XDG_DATA_DIRS=/home/$U/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share:/home/$U/.local/share \

@@ -1,0 +1,64 @@
+From 84a37e41c95045572476729292efb0dec79e009a Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 16:05:00 +0000
+Subject: [PATCH] wifi: ath12k: wcn7860_5g_160 knob to limit 5 GHz to 80 MHz
+
+WCN7860 with the Android GNG firmware lost beacons and stopped
+transmitting some seconds after joining a 5 GHz BSS at 160 MHz.
+ath12k.wcn7860_5g_160=0 drops the 160 MHz capability on 5 GHz only (VHT
+and HE); default on (unchanged behaviour). (y2)
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 30 +++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 99bf5cf79..4d9ea66bd 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -9056,6 +9056,34 @@ static int ath12k_mac_copy_sband_iftype_data(struct ath12k *ar,
+ 	return idx;
+ }
+ 
++/* y700 (TB323FU): WCN7860 with the Android GNG firmware loses beacons and stops
++ * transmitting some seconds after joining a 5 GHz BSS at 160 MHz (36-64, the upper
++ * half DFS). wcn7860_5g_160=0 drops the 160 MHz capability on 5 GHz only (VHT and
++ * HE), so such BSSs are joined at 80 MHz. 2.4 and 6 GHz are untouched.
++ */
++static bool ath12k_wcn7860_5g_160 = true;
++module_param_named(wcn7860_5g_160, ath12k_wcn7860_5g_160, bool, 0444);
++MODULE_PARM_DESC(wcn7860_5g_160, "Allow 160 MHz on 5 GHz on WCN7860 (default: on)");
++
++static void ath12k_mac_wcn7860_limit_5g(struct ath12k *ar)
++{
++	struct ieee80211_supported_band *sband = &ar->mac.sbands[NL80211_BAND_5GHZ];
++	int i;
++
++	if (ath12k_wcn7860_5g_160 || ar->ab->hw_rev != ATH12K_HW_WCN7860_HW20 ||
++	    !sband->n_channels)
++		return;
++
++	sband->vht_cap.cap &= ~(IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK |
++				IEEE80211_VHT_CAP_SHORT_GI_160 |
++				IEEE80211_VHT_CAP_EXT_NSS_BW_MASK);
++	for (i = 0; i < NUM_NL80211_IFTYPES; i++)
++		ar->mac.iftype[NL80211_BAND_5GHZ][i].he_cap.he_cap_elem.phy_cap_info[0] &=
++			~(IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_160MHZ_IN_5G |
++			  IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_80PLUS80_MHZ_IN_5G);
++	ath12k_info(ar->ab, "5 GHz limited to 80 MHz (wcn7860_5g_160=0)\n");
++}
++
+ static void ath12k_mac_setup_sband_iftype_data(struct ath12k *ar,
+ 					       struct ath12k_pdev_cap *cap)
+ {
+@@ -9093,6 +9121,8 @@ static void ath12k_mac_setup_sband_iftype_data(struct ath12k *ar,
+ 		_ieee80211_set_sband_iftype_data(sband, ar->mac.iftype[band],
+ 						 count);
+ 	}
++
++	ath12k_mac_wcn7860_limit_5g(ar);
+ }
+ 
+ static int __ath12k_set_antenna(struct ath12k *ar, u32 tx_ant, u32 rx_ant)
+-- 
+2.53.0
+

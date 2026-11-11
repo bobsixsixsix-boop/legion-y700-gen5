@@ -425,8 +425,8 @@ PM_SLEEP_DEBUG y  baldur.fragment
 DPM_WATCHDOG y  STABILITY: hung suspend callback -> panic -> pstore (baldur.fragment)
 SOFTLOCKUP_DETECTOR y  STABILITY: soft lockup -> panic -> dump (baldur.fragment)
 BOOTPARAM_SOFTLOCKUP_PANIC y  STABILITY (value 1)
-DETECT_HUNG_TASK y  STABILITY: hung task -> panic (baldur.fragment)
-BOOTPARAM_HUNG_TASK_PANIC y  STABILITY (value 1)
+DETECT_HUNG_TASK y  STABILITY: hung task -> "blocked for more than" report (baldur.fragment; the daily check greps it)
+BOOTPARAM_HUNG_TASK_PANIC y  STABILITY (value 1 until y17; 0 since y18 as upstream t58 - report only, no reboot for a USB disk gone under I/O; kbuild-y18.sh asserts =0)
 CPU_IDLE y  cpuidle
 CPU_IDLE_GOV_MENU y  current governor
 PM_GENERIC_DOMAINS y  genpd (debugfs pm_genpd used by our tools)

@@ -1,5 +1,8 @@
-// The status bar (OriginOS pad layout): time on the left, Wi-Fi / Bluetooth / battery on the right, 28 px.
-// See-through on the desktop; over an app it is solid (maximized windows start under it, the exclusive zone).
+// The status bar (OriginOS pad layout): time on the left, Wi-Fi / Bluetooth / battery on the right, 28 px; with them
+// a crescent while do not disturb is on and a keyboard's / mouse's battery while one is connected (11-03, 11-04: the
+// Magic Keyboard, the Magic Mouse).
+// See-through on the desktop and over the stage manager's backdrop; over an app it is solid (maximized windows start
+// under it, the exclusive zone).
 // A pull down from it opens the sheets (src/main.cpp Puller): left half = notifications, right half = controls.
 // Nothing here animates while idle: the clock wakes once a minute, the icons only when status says so.
 import QtQuick
@@ -21,7 +24,7 @@ Window {
     Rectangle {
         anchors.fill: parent
         color: "#0e0f12"
-        opacity: bar.shellRoot.onDesktop ? 0 : 1
+        opacity: bar.shellRoot.onDesktop || shell.stage ? 0 : 1   // see-through over the stage's backdrop too
         Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     }
 
@@ -63,12 +66,29 @@ Window {
         opacity: clock.opacity   // away with the clock while the sheet is open
     }
 
-    // ---- right: Wi-Fi, Bluetooth, battery
+    // ---- right: do not disturb, Wi-Fi, Bluetooth, the keyboard's and the mouse's battery, battery
     Row {
         anchors.right: parent.right
         anchors.rightMargin: 22
         anchors.verticalCenter: parent.verticalCenter
         spacing: 12
+
+        // do not disturb (Banners.qml dnd; fn+F6 on the Magic Keyboard): a crescent
+        Item {
+            visible: !!bar.shellRoot.bannerWin && bar.shellRoot.bannerWin.dnd
+            width: 15; height: 15
+            anchors.verticalCenter: parent.verticalCenter
+            Shape {
+                width: 24; height: 24
+                scale: 15 / 24
+                transformOrigin: Item.TopLeft
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: "transparent"; fillColor: bar.ink
+                    PathSvg { path: "M21 12.8A9 9 0 1 1 11.2 3A7 7 0 0 0 21 12.8z" }
+                }
+            }
+        }
 
         // Wi-Fi: three arcs and a dot (24-unit drawing scaled to 17 px); arcs above the strength are dim
         Item {
@@ -131,6 +151,65 @@ Window {
                 color: bar.ink
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: 16
+            }
+        }
+        // the keyboard's battery (a Bluetooth keyboard that reports one: the Magic Keyboard), then its number;
+        // green on the cable, red at 15 and under as the tablet's own
+        Row {
+            id: kbdBattery
+            visible: sysStatus.kbdBattery >= 0
+            spacing: 5
+            anchors.verticalCenter: parent.verticalCenter
+            readonly property color tint: sysStatus.kbdCharging ? "#34c759" : sysStatus.kbdBattery <= 15 ? "#ff3b30" : bar.ink
+            Rectangle {   // a keyboard: the outline, two rows of keys, the space bar
+                width: 19; height: 13; radius: 3
+                anchors.verticalCenter: parent.verticalCenter
+                color: "transparent"
+                border.width: 1.5
+                border.color: kbdBattery.tint
+                Repeater {
+                    model: 8
+                    Rectangle {
+                        required property int index
+                        x: 3.5 + (index % 4) * 3.3
+                        y: 3 + Math.floor(index / 4) * 2.8
+                        width: 1.6; height: 1.6; radius: 0.4
+                        color: kbdBattery.tint
+                    }
+                }
+                Rectangle { x: 6; y: 9; width: 7; height: 1.5; radius: 0.75; color: kbdBattery.tint }
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                color: kbdBattery.tint
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                font.features: { "tnum": 1 }
+                text: sysStatus.kbdBattery
+            }
+        }
+        // the mouse's battery (the Magic Mouse), the same way
+        Row {
+            id: mouseBattery
+            visible: sysStatus.mouseBattery >= 0
+            spacing: 5
+            anchors.verticalCenter: parent.verticalCenter
+            readonly property color tint: sysStatus.mouseCharging ? "#34c759" : sysStatus.mouseBattery <= 15 ? "#ff3b30" : bar.ink
+            Rectangle {   // a mouse: the body, the line between its two buttons
+                width: 10; height: 15; radius: 5
+                anchors.verticalCenter: parent.verticalCenter
+                color: "transparent"
+                border.width: 1.5
+                border.color: mouseBattery.tint
+                Rectangle { x: 4.25; y: 2.5; width: 1.5; height: 4; radius: 0.75; color: mouseBattery.tint }
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                color: mouseBattery.tint
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                font.features: { "tnum": 1 }
+                text: sysStatus.mouseBattery
             }
         }
         // battery: cell + level, then the number (vivo puts the number next to the cell)

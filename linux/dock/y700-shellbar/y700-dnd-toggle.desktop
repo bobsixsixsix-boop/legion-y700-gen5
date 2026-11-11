@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=勿扰模式
+Comment=开关勿扰模式（Magic Keyboard 的 fn+F6）
+Exec=busctl --user call fyi.y700.Shellbar /Shellbar fyi.y700.Shellbar toggleDoNotDisturb
+Icon=notifications-disabled
+NoDisplay=true
+X-KDE-GlobalAccel-CommandShortcut=true

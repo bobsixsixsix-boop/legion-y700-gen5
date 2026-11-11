@@ -15,7 +15,9 @@ awk '!/^#/ && !/^[A-Z]+=/' "$P" | grep -q '/run/\|/sys/' && { echo "$P names a /
 cat > "$T/bin/nmcli" <<'EOF'
 #!/bin/sh
 case "$*" in
-"-g GENERAL.CONNECTION dev show "*) cat "$F/active" ;;
+"-g GENERAL.CONNECTION dev show "*)   # from the 7th call on, $F/after6 (if there) is the answer: a change after the last scan
+	n=$(($(cat "$F/shows" 2>/dev/null || echo 0) + 1)); echo $n > "$F/shows"
+	if [ $n -gt 6 ] && [ -e "$F/after6" ]; then cat "$F/after6"; else cat "$F/active"; fi ;;
 "-g SSID dev wifi list "*) cat "$F/ssids" ;;
 "con up "*)
 	echo "up $3" >> "$F/log"
@@ -45,34 +47,39 @@ age() {        # minutes: every stamp the script wrote is now that old
 }
 back24() { echo HOME_2.4G > "$F/active"; up; }   # NetworkManager is back on HOME_2.4G, the dispatcher runs
 tries() { grep -cx "up HOME_6G" "$F/log"; }
+gaveup() { grep -c "HOME_6G not seen in 6 scans" "$F/log"; }
 ok() {         # name, condition
 	if eval "$2"; then echo "PASS  $1"
 	else echo "FAIL  $1  [log: $(tr '\n' ';' < "$F/log")]"; fail=$((fail + 1)); fi
 }
 
 setup "HOME_2.4G HOME_6G"; up
-ok "HOME_6G visible: switched" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_6G ]'
+ok "HOME_6G visible: switched" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_6G ] && [ "$(gaveup)" = 0 ]'
 
 # the loop of the audit: the switch fails, the fallback brings HOME_2.4G up, the dispatcher runs again
 setup "HOME_2.4G HOME_6G" fails; up; up; up
-ok "HOME_6G cannot be joined: one try, then stays on HOME_2.4G" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_2.4G ]'
+ok "HOME_6G cannot be joined: one try, then stays on HOME_2.4G" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_2.4G ] && [ "$(gaveup)" = 0 ]'
 rm "$F/6g-fails"; age 31; up
-ok "a HOME_2.4G connection 31 min after that: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ]'
+ok "a HOME_2.4G connection 31 min after that: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ] && [ "$(gaveup)" = 0 ]'
 
 # the switch worked, HOME_6G dropped at once: NetworkManager is back on HOME_2.4G 1 min later, same interface
 setup "HOME_2.4G HOME_6G"; up; age 1; back24
-ok "back on HOME_2.4G 1 min after a switch: stays" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_2.4G ] && grep -q staying "$F/log"'
+ok "back on HOME_2.4G 1 min after a switch: stays" '[ "$(tries)" = 1 ] && [ "$(cat "$F/active")" = HOME_2.4G ] && grep -q "less than 30 min ago: staying on HOME_2.4G" "$F/log" && [ "$(gaveup)" = 0 ]'
 age 10; up
 ok "... that was a failure: a HOME_2.4G connection 10 min later still stays" '[ "$(tries)" = 1 ]'
 
 # the review of the fix: a switch that held must not block the way back to HOME_6G after an unrelated drop
 setup "HOME_2.4G HOME_6G"; up; age 10; back24
-ok "back on HOME_2.4G 10 min after a switch that held: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ]'
+ok "back on HOME_2.4G 10 min after a switch that held: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ] && [ "$(gaveup)" = 0 ]'
 setup "HOME_2.4G HOME_6G"; up; age 1; echo 4 > "$F/net/wlp1s0/ifindex"; back24
-ok "ath12k reloaded (new ifindex) 1 min after a switch: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ]'
+ok "ath12k reloaded (new ifindex) 1 min after a switch: switches again" '[ "$(tries)" = 2 ] && [ "$(cat "$F/active")" = HOME_6G ] && [ "$(gaveup)" = 0 ]'
 
 setup "HOME_2.4G"; up
-ok "HOME_6G not in the scan: nothing" '[ "$(tries)" = 0 ]'
+ok "HOME_6G not in the scan: no switch, says it gave up once" '[ "$(tries)" = 0 ] && [ "$(gaveup)" = 1 ]'
+setup "HOME_2.4G"; echo HOME_6G > "$F/after6"; up
+ok "connection changed after the last scan: no give-up line" '[ "$(tries)" = 0 ] && [ "$(gaveup)" = 0 ]'
+setup "HOME_2.4G HOME_6G"; echo HOME_6G > "$F/active"; up
+ok "already off HOME_2.4G when the loop looks: nothing, no give-up line" '[ "$(tries)" = 0 ] && [ "$(gaveup)" = 0 ]'
 
 setup "HOME_2.4G HOME_6G"; up HOME_6G
 ok "another connection came up: nothing" '[ "$(tries)" = 0 ]'

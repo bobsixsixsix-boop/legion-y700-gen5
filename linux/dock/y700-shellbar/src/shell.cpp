@@ -1,9 +1,18 @@
 #include "shell.h"
+#include "apps.h"
 #include "wlblur.h"
 #include <LayerShellQt/Window>
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusServiceWatcher>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QPainterPath>
 #include <QVariantMap>
 #include <QWindow>
@@ -19,6 +28,70 @@ Shell::Shell(QObject *parent) : QObject(parent)
     // changing hands = the curtain gone. A match rule on the bus, no wakeups but that
     auto *w = new QDBusServiceWatcher(CC, QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
     connect(w, &QDBusServiceWatcher::serviceOwnerChanged, this, [this] { onCcOpen(false); });
+}
+
+// Plasma's wallpaper (org.kde.image in the desktop's appletsrc): a file:// URL, a path, or a wallpaper package
+// directory (its biggest picture). Read when the stage opens - no file watcher: a new wallpaper shows the next time.
+// shortcut: the first containment with an image wins (one screen, one activity on the tablet); per-screen wallpapers
+// would need the containment of this screen (lastScreen=).
+static QString readWallpaper()
+{
+    QFile f(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+            + QStringLiteral("/plasma-org.kde.plasma.desktop-appletsrc"));
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+    bool in = false;
+    while (!f.atEnd()) {
+        const QString l = QString::fromUtf8(f.readLine()).trimmed();
+        if (l.startsWith(u'[')) { in = l.endsWith(QLatin1String("[Wallpaper][org.kde.image][General]")); continue; }
+        if (!in || !l.startsWith(QLatin1String("Image="))) continue;
+        QString v = l.mid(6);
+        if (v.startsWith(QLatin1String("file:"))) v = QUrl(v).toLocalFile();
+        if (QFileInfo(v).isDir()) {
+            const auto pics = QDir(v + QStringLiteral("/contents/images")).entryInfoList(QDir::Files, QDir::Size);
+            v = pics.isEmpty() ? QString() : pics.first().absoluteFilePath();
+        }
+        return QFileInfo(v).isFile() ? QUrl::fromLocalFile(v).toString() : QString();
+    }
+    return {};
+}
+
+void Shell::setStage(bool on)
+{
+    if (on == m_stage) return;
+    m_stage = on;
+    if (on) m_wallpaper = readWallpaper();
+    qInfo("stage %s%s", on ? "on" : "off", on && m_wallpaper.isEmpty() ? " (no wallpaper found)" : "");
+    Q_EMIT stageChanged();
+}
+
+QString Shell::dockApps() const
+{
+    QJsonArray out;
+    if (m_apps)
+        for (const QString &id : m_apps->pinned()) {
+            const QVariantMap e = m_apps->entry(id);
+            if (e.isEmpty()) continue;   // uninstalled since it was pinned: the dock skips it too
+            out.append(QJsonObject{{"id", id}, {"name", e.value("name").toString()},
+                                   {"icon", e.value("icon").toString()}, {"wmclass", e.value("wmclass").toString()}});
+        }
+    return QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact));
+}
+
+void Shell::launchApp(const QString &id)
+{
+    if (m_apps) m_apps->launch(id, nullptr);
+}
+
+QString Shell::wallpaperUrl() const
+{
+    return readWallpaper();
+}
+
+void Shell::holdDock(int ms)
+{
+    ms = qBound(0, ms, 3000);
+    qInfo("hold dock %d ms", ms);
+    Q_EMIT dockHeld(ms);
 }
 
 void Shell::onCcOpen(bool open)

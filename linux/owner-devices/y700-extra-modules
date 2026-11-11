@@ -1,0 +1,16 @@
+#!/bin/sh
+# Load a module the running kernel lacks: an out-of-tree build for this release, which its read-only module image
+# (the squashfs on /lib/modules/<release>) does not have: /usr/local/lib/y700-extra-modules/<release>/<name>.ko.
+# Options from /etc/modprobe.d ("options <name> ...") are passed on as modprobe would; a module already in is left
+# alone, and a kernel that has the module itself (/root/y8-fragments/owner-devices.fragment from the build after y19
+# on) gets its own through modprobe.
+# Run by udev when a device that needs it appears (90-y700-magicmouse.rules).
+#   y700-extra-modules <name>     e.g. hid-magicmouse
+name=$1
+mod=$(echo "$name" | tr - _)
+[ -d /sys/module/$mod ] && exit 0
+modprobe -q -n "$mod" 2>/dev/null && exec modprobe "$mod"
+ko=/usr/local/lib/y700-extra-modules/$(uname -r)/$name.ko
+[ -e "$ko" ] || { echo "y700-extra-modules: no $ko and no $mod in this kernel" >&2; exit 1; }
+opts=$(sed -n "s/^options[[:space:]]\{1,\}$mod[[:space:]]\{1,\}//p" /etc/modprobe.d/*.conf 2>/dev/null | tr '\n' ' ')
+exec insmod "$ko" $opts

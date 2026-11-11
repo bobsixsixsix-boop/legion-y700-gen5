@@ -1,0 +1,13 @@
+# owner-devices fragment (2026-11-04): drivers for devices the owner connects that config-t49.release leaves off.
+# NOT applied by kbuild-y19.sh or earlier: y19 is built without it. The next kbuild script applies it like the others,
+#   apply_fragment $FR/owner-devices.fragment        (after y8-power.fragment)
+# and adds this file to check_config's fragment loop. Its pre-build config delta against y19 is then exactly the
+# CONFIG_ lines below (checked 11-04: scripts/config + olddefconfig on config-t52-y19.pre-build gives that one line,
+# nothing else moves).
+# Until a kernel has it, y19 loads an out-of-tree build when the mouse connects: /usr/local/lib/y700-extra-modules/
+# 7.3.0-tb323fu-t52-y19/hid-magicmouse.ko through /etc/udev/rules.d/90-y700-magicmouse.rules ->
+# /usr/local/sbin/y700-extra-modules, which uses the kernel's own module instead as soon as there is one.
+#
+# Magic Mouse 2 (Bluetooth 004C:0269): without it hid-generic drives the mouse - no scrolling, no middle click.
+# Options (scroll_acceleration=1) are in /etc/modprobe.d/hid_magicmouse.conf.
+CONFIG_HID_MAGICMOUSE=m

@@ -1,0 +1,285 @@
+From 43a2ce6a26ef44b10865f79f41d54651dfdde9ea Mon Sep 17 00:00:00 2001
+From: bobsixsixsix-boop <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 03:00:00 +0000
+Subject: [PATCH] cpuidle: psci-domain: baldur: allow_system_off flips
+ RPM_ALWAYS_ON on the system domain at run time
+
+On the Lenovo TB323FU (Y700 Gen5, kaanapali) patch 0106 keeps the system
+power domain ("power-domain-system": the SoC-level idle state ss3 "apps-pc"
+0x0200c354, the only way into CX collapse, AOSS sleep and DDR self-refresh)
+out of runtime idle with GENPD_FLAG_RPM_ALWAYS_ON, because the silent reset
+it was blamed for is not understood. The flag makes genpd_power_off() return
+at its first check (drivers/pmdomain/core.c:966-969 in v7.3-rc4:
+"genpd_is_always_on(genpd) || genpd_is_rpm_always_on(genpd)" -> return), so
+the domain is never attempted: no GENPD_NOTIFY_PRE_OFF, no rpmh_flush() of
+the sleep/wake TCSes, no PSCI domain state, and Usage/Rejected in
+/sys/kernel/debug/pm_genpd/power-domain-system/idle_states stay 0. That is
+why qcom_stats apss/cxsd/aosd/ddr are all 0 while awake
+(linux/power/cx-collapse/RESEARCH.md 1.3).
+
+The runtime-CX experiments (linux/power/cx-collapse/PROTOCOL.md E3a-c, E4,
+E5) need to switch that behaviour on the running kernel, one variable at a
+time, without booting a different kernel. Add a module parameter:
+
+  /sys/module/cpuidle_psci_domain/parameters/allow_system_off   (mode 0644)
+
+  N (default)  the 0106 behaviour: RPM_ALWAYS_ON set on the system domain,
+               the system state is used in s2idle only. Identical to y9.
+  Y            upstream behaviour: RPM_ALWAYS_ON cleared, the system domain
+               state may be entered in runtime idle too. It is reachable
+               only while allow_cluster_off (0118) is Y as well, because
+               the system domain can only power off after both cluster
+               domains did.
+
+Why flip the flag instead of returning -EBUSY from psci_pd_power_off() the
+way 0118 does for the clusters (PROTOCOL.md section 6, superseded by
+RESEARCH.md 3.3): an -EBUSY on the system domain is new behaviour, not the
+0106 baseline. _genpd_power_off() (core.c:877-925) first runs the PRE_OFF
+notifier chain -- for the system domain that is rpmh_rsc_pd_callback(),
+which flushes the sleep/wake sets into the TCSes -- and only then calls
+->power_off(); an -EBUSY there rolls back with GENPD_NOTIFY_ON and counts
+Rejected. With the -EBUSY variant every last-cluster power-off would flush
+RPMh and bump Rejected, while today's 0106 kernel does neither. The flag
+variant is exactly 0106 at N and exactly upstream at Y, so an A/B has one
+variable.
+
+What changes:
+ - psci_pd_init(): the 0106 quirk still sets GENPD_FLAG_RPM_ALWAYS_ON at
+   probe (the default is unchanged) and now remembers the system genpd in
+   psci_system_pd and applies the parameter, so a command-line
+   cpuidle_psci_domain.allow_system_off=1 takes effect at probe. The
+   command line is NOT changed by this series: the default N is the
+   fail-safe and does not depend on it.
+ - allow_system_off_set(): param_set_bool(), then clears or sets
+   GENPD_FLAG_RPM_ALWAYS_ON in psci_system_pd->flags and prints one line
+   when the value changed. The ops carry KERNEL_PARAM_OPS_FL_NOARG like
+   param_ops_bool, so a bare cpuidle_psci_domain.allow_system_off on the
+   command line means =1, exactly as 0118's allow_cluster_off behaves.
+ - CONFIG_PREEMPT_RT: psci_system_pd_apply() returns early, so the flag RT
+   sets on every CPU domain on purpose is never cleared; the parameter is
+   recorded but has no effect, and the report line keeps saying "in system
+   suspend only". Not our config, but the patch has to be right there too.
+ - psci_pd_init()'s error path and psci_pd_remove() forget the pointer.
+
+Locking: none, on purpose. genpd's lock is private to core.c (struct
+genpd_lock_ops is defined there). After pm_genpd_init() nothing else
+writes pd->flags for this domain (core.c: the only "->flags |=" after
+allocation is the always-on-governor case inside pm_genpd_init() itself).
+Parameter writes are serialised by the kernel_param lock
+(kernel/params.c param_attr_store(); the command-line parse holds it too).
+The reader, genpd_power_off(), takes the domain lock and reads flags as a
+plain unsigned int load, which cannot tear against a single-bit
+read-modify-write on arm64. The writer runs on a CPU whose own CPU domain,
+cluster domain and therefore the system domain (sd_count > 0) are on, so
+the system domain is never in the middle of powering off while the flag
+changes. Clearing the flag while the domain is on is sufficient: the next
+time the last cluster powers off, genpd_power_off(system) passes the check
+at core.c:966-969, the apps_rsc device counts as suspended (rpmh-rsc.c
+rpmh_rsc_pd_attach(): devm_pm_runtime_enable() without a get, so
+pm_runtime_suspended() is true), pm_domain_cpu_gov decides, and
+_genpd_power_off() runs PRE_OFF -> rpmh_flush() -> psci_pd_power_off().
+Setting the flag again makes the very next attempt return early.
+
+The same early return (core.c:966-969) also tests genpd->stay_on, new in
+7.3: a domain that was on at pm_genpd_init() stays on until its provider's
+sync_state. For these DT-only providers that is genpd_provider_sync_state()
+(GENPD_SYNC_STATE_SIMPLE, core.c:3721-3725), which clears stay_on and
+tries genpd_power_off() once; our command line's fw_devlink.sync_state=
+timeout makes it run at late_initcall_sync at the latest. It is what
+already lets the cluster domains reach 0118's -EBUSY and count Rejected on
+y9, and it clears the system domain the same way, so after boot only the
+RPM_ALWAYS_ON bit stands between the system domain and _genpd_power_off().
+
+Ordering without a barrier: the system domain cannot power off before the
+writer's own CPU goes idle, and on that way the CPU takes the CPU-domain,
+cluster-domain and (as last CPU of its cluster) system-domain spinlocks
+that every later power-off decision takes as well, so the new flag value
+is ordered before any decision that could act on it.
+
+The lock-taking alternative, dev_pm_genpd_rpm_always_on() (core.c:752-766),
+is per device: it sets dev_gpd_data(dev)->rpm_always_on under the genpd
+lock and genpd_power_off() honours it at core.c:993-995, also before the
+governor and before PRE_OFF, so it would be equivalent in effect. It needs
+the struct device of a consumer attached to the domain (here only the
+apps_rsc device, owned by rpmh-rsc.c), so using it would mean touching a
+second driver or looking the device up by node; and it is not what 0106
+does. Not used.
+
+s2idle is the same either way: genpd_sync_power_off() (core.c:1404-1410)
+checks GENPD_FLAG_ALWAYS_ON only, so with the knob at N the system state is
+used in s2idle exactly as with 0106.
+
+How to switch:
+  echo 1 > /sys/module/cpuidle_psci_domain/parameters/allow_system_off
+  echo 0 > /sys/module/cpuidle_psci_domain/parameters/allow_system_off
+(cx-exp.sh's EXIT trap writes 0; a reset comes back with N as well.)
+
+How to verify it booted:
+  dmesg | grep 'CPUidle PSCI: power-domain-system: allow_system_off=N'
+    -> "... system domain state in system suspend only (lenovo,baldur quirk, boot)"
+  cat /sys/module/cpuidle_psci_domain/parameters/allow_system_off  -> N
+  stat -c %a /sys/module/cpuidle_psci_domain/parameters/allow_system_off -> 644
+  sed -n 2p /sys/kernel/debug/pm_genpd/power-domain-system/idle_states
+    -> Usage 0 Rejected 0 (while N and no s2idle happened)
+  echo 1 > .../allow_system_off; dmesg | tail -1
+    -> "... allow_system_off=Y, system domain state in runtime idle too (parameter written)"
+  With allow_cluster_off still N nothing else changes (the clusters never
+  power off, so the system domain is never reached): the toggle alone is a
+  zero-risk test of the mechanism; echo 0 back afterwards.
+
+Applies on top of 0106 and 0118 (both touch this file; the hunk contexts
+are those of the 0118-patched file) and after our 1041/1042, which do not
+touch it. Upgrade hazard (RESEARCH.md 2.7): linux-next's "cpuidle/pmdomain:
+Correctly track state of excluded CPU clusters" passes is_off=use_osi to
+pm_genpd_init(), which rejects an always-on domain that starts off
+(core.c:2443-2447); 0106 and this patch must be reworked when the base
+moves past v7.3.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ drivers/cpuidle/cpuidle-psci-domain.c | 99 ++++++++++++++++++++++++++-
+ 1 file changed, 97 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci-domain.c b/drivers/cpuidle/cpuidle-psci-domain.c
+index a0979f829..f76238360 100644
+--- a/drivers/cpuidle/cpuidle-psci-domain.c
++++ b/drivers/cpuidle/cpuidle-psci-domain.c
+@@ -37,6 +37,87 @@ module_param(allow_cluster_off, bool, 0644);
+ MODULE_PARM_DESC(allow_cluster_off,
+ 		 "Use the idle states of cluster domains (parents of CPU domains) in runtime idle (default: Y)");
+ 
++/*
++ * y700 1043: allow_system_off.
++ *
++ * Patch 0106 keeps the domain above the clusters ("power-domain-system": the
++ * SoC-level state, ss3 "apps-pc" 0x0200c354 on kaanapali, the only way into
++ * CX collapse, AOSS sleep and DDR self-refresh) out of runtime idle on
++ * lenovo,baldur with GENPD_FLAG_RPM_ALWAYS_ON: genpd_power_off() returns
++ * before anything happens (no PRE_OFF notifier, no rpmh flush, no PSCI
++ * domain state; Usage and Rejected of the domain stay 0). This knob flips
++ * that flag on the system domain at run time:
++ *   N (default): the 0106 behaviour.
++ *   Y: upstream behaviour, the system state may be used in runtime idle too
++ *      (reachable only while allow_cluster_off is Y as well).
++ * s2idle is the same either way: genpd_sync_power_off() checks
++ * GENPD_FLAG_ALWAYS_ON only.
++ *
++ * No genpd lock is taken: it is not exported and none is needed. After
++ * pm_genpd_init() nothing but this code writes pd->flags, parameter writes
++ * are serialised by the kernel_param lock, and a single-bit change of an
++ * unsigned int cannot be read torn. The reader, genpd_power_off(), runs on
++ * a CPU whose own domain chain is on, so the system domain is on while
++ * anybody can write here; the new value simply decides the next attempt.
++ */
++static struct generic_pm_domain *psci_system_pd;
++static bool allow_system_off;
++
++static void psci_system_pd_apply(void)
++{
++	unsigned int flags;
++
++	/* PREEMPT_RT sets RPM_ALWAYS_ON on every CPU domain on purpose: keep it. */
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		return;
++	if (!psci_system_pd)
++		return;
++
++	flags = psci_system_pd->flags;
++	if (READ_ONCE(allow_system_off))
++		flags &= ~GENPD_FLAG_RPM_ALWAYS_ON;
++	else
++		flags |= GENPD_FLAG_RPM_ALWAYS_ON;
++	WRITE_ONCE(psci_system_pd->flags, flags);
++}
++
++static void psci_system_pd_report(const char *why)
++{
++	pr_info("%s: allow_system_off=%c, system domain state %s (%s)\n",
++		psci_system_pd->name, allow_system_off ? 'Y' : 'N',
++		(psci_system_pd->flags & GENPD_FLAG_RPM_ALWAYS_ON) ?
++			"in system suspend only" : "in runtime idle too",
++		why);
++}
++
++static int allow_system_off_set(const char *val, const struct kernel_param *kp)
++{
++	bool old = allow_system_off;
++	int ret;
++
++	ret = param_set_bool(val, kp);
++	if (ret)
++		return ret;
++
++	/* From the command line this runs before psci_pd_init(): recorded only. */
++	if (!psci_system_pd)
++		return 0;
++
++	psci_system_pd_apply();
++	if (allow_system_off != old)
++		psci_system_pd_report("parameter written");
++	return 0;
++}
++
++static const struct kernel_param_ops allow_system_off_ops = {
++	.flags = KERNEL_PARAM_OPS_FL_NOARG,
++	.set = allow_system_off_set,
++	.get = param_get_bool,
++};
++module_param_cb(allow_system_off, &allow_system_off_ops, &allow_system_off, 0644);
++MODULE_PARM_DESC(allow_system_off,
++		 "lenovo,baldur: also use the system domain idle state in runtime idle; s2idle always does (default: N)");
++
+ static bool psci_pd_is_cluster(struct generic_pm_domain *pd)
+ {
+ 	struct gpd_link *link;
+@@ -94,8 +175,15 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ 		if (IS_ENABLED(CONFIG_PREEMPT_RT))
+ 			pd->flags |= GENPD_FLAG_RPM_ALWAYS_ON;
+ 		if (of_machine_is_compatible("lenovo,baldur") &&
+-		    of_node_name_eq(np, "power-domain-system"))
++		    of_node_name_eq(np, "power-domain-system")) {
+ 			pd->flags |= GENPD_FLAG_RPM_ALWAYS_ON;
++			/*
++			 * 1043: remembered for allow_system_off; a command-line
++			 * allow_system_off=1 takes effect here.
++			 */
++			psci_system_pd = pd;
++			psci_system_pd_apply();
++		}
+ 	} else {
+ 		pd->flags |= GENPD_FLAG_ALWAYS_ON;
+ 	}
+@@ -114,6 +202,8 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ 	pd_provider->node = of_node_get(np);
+ 	list_add(&pd_provider->link, &psci_pd_providers);
+ 
++	if (pd == psci_system_pd)
++		psci_system_pd_report("lenovo,baldur quirk, boot");
+ 	pr_debug("init PM domain %s\n", pd->name);
+ 	return 0;
+ 
+@@ -122,6 +212,8 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ free_pd_prov:
+ 	kfree(pd_provider);
+ free_pd:
++	if (pd == psci_system_pd)
++		psci_system_pd = NULL;
+ 	dt_idle_pd_free(pd);
+ out:
+ 	pr_err("failed to init PM domain ret=%d %pOF\n", ret, np);
+@@ -138,8 +230,11 @@ static void psci_pd_remove(void)
+ 		of_genpd_del_provider(pd_provider->node);
+ 
+ 		genpd = of_genpd_remove_last(pd_provider->node);
+-		if (!IS_ERR(genpd))
++		if (!IS_ERR(genpd)) {
++			if (genpd == psci_system_pd)
++				psci_system_pd = NULL;
+ 			kfree(genpd);
++		}
+ 
+ 		of_node_put(pd_provider->node);
+ 		list_del(&pd_provider->link);
+-- 
+2.53.0
+

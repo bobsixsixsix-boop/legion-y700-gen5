@@ -1,0 +1,4 @@
+# Magic Mouse 2 (Bluetooth 004C:0269, USB 05AC:0269) and the USB-C one (0323). The kernel image has no hid-magicmouse
+# (CONFIG_HID_MAGICMOUSE is off in config-t52-y19), so hid-generic takes the mouse: no scrolling, no middle click.
+# Load the module built for this kernel (y700-extra-modules); HID moves the mouse over to it as it registers.
+ACTION=="add", SUBSYSTEM=="hid", ENV{MODALIAS}=="hid:b0005g*v0000004Cp00000269|hid:b0003g*v000005ACp00000269|hid:b0005g*v0000004Cp00000323|hid:b0003g*v000005ACp00000323", RUN+="/usr/local/sbin/y700-extra-modules hid-magicmouse"

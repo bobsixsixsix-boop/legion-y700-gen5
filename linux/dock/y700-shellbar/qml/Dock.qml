@@ -1,6 +1,7 @@
 // The dock, OriginOS pad style (geometry and press motion: linux/dock/rom-report.md):
 //   [all apps] [pinned …] | [up to 3 recent, not pinned]      icon 60, padding 16, gap 20, height 92, 18 above the edge,
-//   radius 30, divider 2 × 22. No running dots (the reference dock has none).
+//   radius 30, divider 2 × 22. A 6 px dot under each app with a window open (the reference dock has none: see
+//   AppButton).
 // Material: KWin blur behind the rounded body plus a tint; OriginOS 7 glass on top of it (a 1 px light rim, a sheen,
 // and light that spreads from the finger, 「点触光感」). In an app (revealed) the tint is the lighter in-app one.
 // Shown on the desktop; in an app only after reveal(), then away again after 4 s untouched, or when an app comes up.
@@ -185,18 +186,48 @@ Window {
         }
     }
 
-    component AppButton: DockButton {
+    // An app with a window open (Main.qml running: minimized ones count) has a dot under its icon (11-10, the owner:
+    // the dock did not show which apps run). The reference dock has none (rom-report.md); this borrows the nearest
+    // dot on that screen, the desktop's selected page indicator point (6 dp, white), centred
+    // in the 16 px under the icon. No ring: a 1 px dark one (tried 11-10 for the in-app dock over a white app, light
+    // grey there) turned the 6 px dot into a hollow "o"; the bare dot reads on that grey too (sb-bed rundot.sh d3:
+    // core 255 on about 200). It sits beside the button, not in it, so the press scale leaves it in place; it fades
+    // with the dock's add / remove timing (250 / 200 ms, cubic(.25,.10,.25,1)).
+    component AppButton: Item {
+        id: app
         property string appId
         readonly property var entry: { apps.all; return apps.entry(appId) }   // apps.all: re-read after a rescan
+        readonly property bool running: win.r.running[appId] === true
+        width: 60
+        height: 60
         visible: entry.id !== undefined
         anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-        onPressedAt: (pt) => body.press(this, pt)
-        onReleased: body.release()
-        onTapped: win.r.open(appId, win)
-        Kirigami.Icon {
-            anchors.fill: parent
-            source: entry.icon || "application-x-executable"
-            roundToIconSize: false
+        DockButton {
+            id: btn
+            onPressedAt: (pt) => body.press(btn, pt)
+            onReleased: body.release()
+            onTapped: win.r.open(app.appId, win)
+            Kirigami.Icon {
+                anchors.fill: parent
+                source: app.entry.icon || "application-x-executable"
+                roundToIconSize: false
+            }
+        }
+        Rectangle {
+            x: 27
+            y: 65
+            width: 6
+            height: 6
+            radius: 3
+            color: "white"
+            opacity: app.running ? 1 : 0
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: app.running ? 250 : 200
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: [0.25, 0.10, 0.25, 1, 1, 1]
+                }
+            }
         }
     }
 }

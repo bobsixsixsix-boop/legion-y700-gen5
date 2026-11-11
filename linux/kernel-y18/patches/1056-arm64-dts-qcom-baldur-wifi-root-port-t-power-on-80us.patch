@@ -1,0 +1,65 @@
+From 66b7c7f4a1ed447573b4041b92ac63dc0ef52201 Mon Sep 17 00:00:00 2001
+From: y700 workspace <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 03:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: baldur-wifi: give the Wi-Fi root port
+ T_POWER_ON = 80 us
+
+The Root Port's L1 PM Substates capability reports T_POWER_ON = 0, so
+aspm.c computes LTR_L1.2_THRESHOLD and T_PwrOn as if the PHY/REFCLK
+came back instantly on L1.2 exit; Qualcomm describes the result as
+"improper L1.2 exit behavior" with AER reports ("PCI: qcom: Program
+correct T_POWER_ON value for L1.2 exit timing", 2025-11, where 80 us =
+scale 1 value 8 was hardcoded for all their targets). The property is
+consumed by pcie-qcom since v7.3 (e9769bb17269 "PCI: qcom: Program
+T_POWER_ON"), which writes it into the Root Port's L1SS capability;
+no upstream DT sets it yet. Zero effect until the link really uses
+L1.2, which today it almost never does (31 entries in 4 h vs 1.63 M
+L1.1 entries).
+
+y700 (kernel y15): part 1 of
+linux/kernel-y8/1045-pcie-qcom-l1ss-t-power-on-ltr-max.patch, its
+baldur-wifi.dtsi hunk byte for byte; author and date are 1045's, the
+paragraph above is its part 1 text with one clause added. Part 2 (the
+pcie_qcom.ltr_max_latency_us module parameter in pcie-qcom.c) stays
+out: it is a contingency that needs bench evidence first, and kbuild
+still refuses a tree that has it. 1045 was never built; its notes
+recommend part 1 regardless, and the 10-23 evaluation (README, kernel
+y14 to-do) parked this line for the next kernel build. Rebasing:
+none, the hunk applies to t52 at its own line numbers
+(baldur-wifi.dtsi is still blob 01f07af, as when 1045 was written).
+Why: corrective only; the 10-23 read-only probe still showed
+PortTPowerOnTime 0 us on both ends of the link.
+
+y700 patch file: 1056-arm64-dts-qcom-baldur-wifi-root-port-t-power-on-80us.patch
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/baldur-wifi.dtsi | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi b/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
+index 01f07af5c..e0115c2fc 100644
+--- a/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
++++ b/arch/arm64/boot/dts/qcom/baldur-wifi.dtsi
+@@ -191,6 +191,17 @@
+ 	wake-gpios = <&tlmm 104 GPIO_ACTIVE_LOW>;
+ 	reset-gpios = <&tlmm 102 GPIO_ACTIVE_LOW>;
+ 
++	/*
++	 * The Root Port's L1SS capability reports T_POWER_ON = 0, so aspm.c
++	 * derives LTR_L1.2_THRESHOLD and T_PwrOn as if the PHY and REFCLK
++	 * came back instantly on L1.2 exit. 80 us is what Qualcomm programs
++	 * on all its targets ("PCI: qcom: Program correct T_POWER_ON value
++	 * for L1.2 exit timing", 2025-11: scale 1, value 8); pcie-qcom reads
++	 * it from the Root Port node since v7.3 (e9769bb17269). It changes
++	 * nothing until the link really uses L1.2.
++	 */
++	t-power-on-us = <80>;
++
+ 	wifi@0 {
+ 		compatible = "pci17cb,110e";
+ 		reg = <0x10000 0x0 0x0 0x0 0x0>;
+-- 
+2.55.0.windows.3
+

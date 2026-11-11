@@ -5,6 +5,7 @@
 //   dockWin    the dock: on the desktop always, in an app only after reveal() (mode B+)
 //   gridWin    all apps, full screen, from the dock's first button
 //   bannerWin  notification banners at the top - and the notification server itself (Banners.qml)
+//   backWin    the stage manager's blurred backdrop, Bottom layer, while the KWin script says so (Backdrop.qml)
 import QtQuick
 import QtQuick.Window
 import org.kde.taskmanager as TaskManager
@@ -51,6 +52,11 @@ QtObject {
         if (activeId) touchRecent(activeId);
     }
     property Timer revealTimer: Timer { interval: 4000; onTriggered: root.revealed = false }
+    // the stage manager's flights (linux/stage, a card tapped or dropped): it puts the staged windows down as the
+    // copies start and brings the next ones up as they land, 0.5 s on; holdDock(ms) says so, and for that long no
+    // window up keeps onDesktop as it was (11-09: the dock slid in and out on every swap)
+    property real heldUntil: 0
+    property Timer heldTimer: Timer { onTriggered: root.recompute() }
     property Connections shellConn: Connections {
         target: shell
         function onRevealRequested() {
@@ -61,6 +67,11 @@ QtObject {
             root.revealTimer.restart();
         }
         function onHideRequested() { shell.log("hideDock"); root.revealed = false }
+        function onDockHeld(ms) {
+            root.heldUntil = Date.now() + ms;
+            root.heldTimer.interval = Math.max(1, ms);
+            root.heldTimer.restart();
+        }
     }
     function keepRevealed() { if (revealed) revealTimer.restart() }
 
@@ -116,7 +127,7 @@ QtObject {
             if (o.active && !o.minimized && o.fullscreen) fs = true;
         }
         winRows = list;
-        onDesktop = shown === 0;
+        if (shown > 0 || Date.now() >= heldUntil) onDesktop = shown === 0;
         fullscreenActive = fs;
         if (!seeded && list.length) {
             seeded = true;
@@ -162,4 +173,5 @@ QtObject {
     property Window hudWin: HudWidget { shellRoot: root }
     property Window gridWin: AppGrid { shellRoot: root }
     property Window bannerWin: Banners { shellRoot: root }
+    property Window backWin: Backdrop { shellRoot: root }
 }

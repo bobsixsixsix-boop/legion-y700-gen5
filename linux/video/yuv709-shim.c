@@ -15,6 +15,7 @@
 // size is HD. Y700_YUV709=0 turns it off; Y700_YUV709_DEBUG=1 logs the first 20 rewrites and the activation to stderr.
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <limits.h>
 #include <link.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,19 +44,46 @@ __attribute__((constructor)) static void init(void) {
 	else if (!strcmp(exe, "/opt/google/chrome/chrome")) want = 1;
 }
 
+// dl_iterate_phdr holds the loader's dl_load_write_lock while it runs the callback; dlopen / dlsym take dl_load_lock,
+// and a dlopen in another thread holds dl_load_lock and then wants dl_load_write_lock: calling either from the
+// callback is an ABBA deadlock (11-09, test KWin hung at its first dmabuf import while its QQmlThread loaded a QML
+// plugin; linux/stage/README 踩坑 17). So the callback only copies the paths of the loaded libgallium-*, with no dl*,
+// no malloc, no stdio, and they are opened after dl_iterate_phdr has returned.
+#define MAX_GALLIUM 4
+struct gallium_paths {
+	int n;
+	char path[MAX_GALLIUM][PATH_MAX];
+};
+
 static int find_gallium(struct dl_phdr_info *i, size_t sz, void *out) {
 	(void)sz;
+	struct gallium_paths *g = out;
 	const char *b = strrchr(i->dlpi_name, '/');
-	if (!b || strncmp(b + 1, "libgallium-", 11)) return 0;
-	void *h = dlopen(i->dlpi_name, RTLD_NOW | RTLD_NOLOAD);
-	void *f = h ? dlsym(h, "dri2_from_dma_bufs") : NULL;
-	if (!f) return 0;
-	*(void **)out = f;
-	layout_ok = !strncmp(b + 1, "libgallium-26.0.", 16);
-	if (debug && want == 1)
-		fprintf(stderr, "y700-yuv709: %s in pid %d, %s\n", b + 1, getpid(),
-		        layout_ok ? "HD 601 -> 709 active" : "unknown argument layout, passing through");
-	return 1;
+	size_t len = strlen(i->dlpi_name);
+	if (!b || strncmp(b + 1, "libgallium-", 11) || len >= PATH_MAX) return 0;
+	memcpy(g->path[g->n], i->dlpi_name, len + 1);
+	return ++g->n == MAX_GALLIUM;
+}
+
+// the first loaded libgallium-* that defines dri2_from_dma_bufs, or NULL; sets layout_ok for it. No loader lock held
+// here (see above), so dlopen / dlsym may wait for another thread's dlopen but cannot deadlock with it.
+static void *lookup_real(void) {
+	struct gallium_paths g;
+	g.n = 0;
+	dl_iterate_phdr(find_gallium, &g);
+	for (int k = 0; k < g.n; k++) {
+		// RTLD_NOLOAD: only a reference to the copy already mapped (never dlclosed: the pointer must stay valid)
+		void *h = dlopen(g.path[k], RTLD_NOW | RTLD_NOLOAD);
+		void *f = h ? dlsym(h, "dri2_from_dma_bufs") : NULL;
+		if (!f) continue;
+		const char *b = strrchr(g.path[k], '/') + 1;
+		layout_ok = !strncmp(b, "libgallium-26.0.", 16);
+		if (debug && want == 1)
+			fprintf(stderr, "y700-yuv709: %s in pid %d, %s\n", b, getpid(),
+			        layout_ok ? "HD 601 -> 709 active" : "unknown argument layout, passing through");
+		return f;
+	}
+	return NULL;
 }
 
 // called by the trampoline with the caller's stack pointer (the stacked arguments) and the 3 int arguments it needs;
@@ -67,7 +95,7 @@ static void *no_import(void) { return NULL; }
 __attribute__((visibility("hidden"), used)) void *y700_yuv709_fixup(uint64_t *stack, int width, int height, int fourcc) {
 	void *f = __atomic_load_n(&real, __ATOMIC_ACQUIRE);
 	if (!f) {
-		dl_iterate_phdr(find_gallium, &f);
+		f = lookup_real();
 		if (!f) {
 			static int told;
 			if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED))

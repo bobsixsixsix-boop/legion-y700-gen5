@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "y700"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Round corners for the windows the y700 stage manager script puts on the stage (it names them over D-Bus).",
+        "EnabledByDefault": false,
+        "License": "GPL-2.0-or-later",
+        "Name": "y700 stage corners"
+    },
+    "org.kde.kwin.effect": {
+        "internal": true
+    }
+}

@@ -31,16 +31,16 @@ y700：联想拯救者 Y700 第五代（TB323FU）上的 Linux 与 Android 个�
 | 多任务卡片：`linux/gesture/taskswitcher/y700-taskswitcher.patch`、`ui/`、`metadata.json` | GPL-2.0-or-later（与 Plasma Mobile 的任务切换器相同） | Devin Lin 及 Plasma Mobile 的贡献者；bobsixsixsix-boop |
 | Wayland 协议描述：`linux/controlpanel/y700-control-center/protocol/blur.xml`、`fake-input.xml`，`linux/gesture/tests/ftouch/fake-input.xml` | LGPL-2.1-or-later（文件头） | Martin Gräßlin、Marco Martin（KDE plasma-wayland-protocols） |
 | `linux/power/cx-collapse/dczva-stress.c` | GPL-2.0-or-later | bobsixsixsix-boop |
-| 带桌面壁纸的截图：`linux/dock/tests/shots/` 里的 `01-desktop.png`、`c2-notes.png`、`c3-swiped.png`、`c4-cleared.png`、`h-widget-grid.png`、`r1-notes-real.png`、`r4-banners-real.png`、`r8-notes-real.png` | CC-BY-SA-4.0（与壁纸相同） | bobsixsixsix-boop；壁纸「Sub-Arctic」（KDE Plasma 6.6 默认壁纸）的作者 Krystian Zajdel |
+| 带桌面壁纸的截图：`linux/dock/tests/shots/` 里的 `01-desktop.png`、`c2-notes.png`、`c3-swiped.png`、`c4-cleared.png`、`d-rundot.png`、`h-widget-grid.png`、`r1-notes-real.png`、`r4-banners-real.png`、`r8-notes-real.png` | CC-BY-SA-4.0（与壁纸相同） | bobsixsixsix-boop；壁纸「Sub-Arctic」（KDE Plasma 6.6 默认壁纸）的作者 Krystian Zajdel |
 
 对其他项目的补丁（`linux/video/wiliwili-*.patch`、`linux/video/libva-v4l2-patches/`、`linux/camera/patches/`）只包含为该项目写的改动和少量上下文行；上下文行仍属于原项目，适用原项目的许可证。
 
 ## 第三方代码与来源
 
-- **tb323fu-linux**（Joonhoe Kim and contributors，<https://github.com/joonhoekim/tb323fu-linux>）：本仓库的基础。上面列出的副本和改写文件来自上游的 helper 0.4.2 与 main 分支（`0c7c0c4`）；`linux/kernel-y2/upstream-patches/` 里的 0097、0117 和 `linux/kernel-y8/t51/` 里的 0131、0132 是上游内核补丁；`linux/kernel-y5/baldur-extra.fragment` 与 `config-tb323fu-t49`、`linux/kernel-y8/inventory/config-t49.release` 是上游 t49 的配置；`linux/kernel-y17/init` 和 `linux/kernel-y17/test-root-selection.sh` 改写自上游 `kernel-t54` tag 的 `kernel/initramfs/init` 及其离线测试。
+- **tb323fu-linux**（Joonhoe Kim and contributors，<https://github.com/joonhoekim/tb323fu-linux>）：本仓库的基础。上面列出的副本和改写文件来自上游的 helper 0.4.2 与 main 分支（`0c7c0c4`）；`linux/kernel-y2/upstream-patches/` 里的 0097、0117 和 `linux/kernel-y8/t51/` 里的 0131、0132，以及 `linux/kernel-y18/patches/` 里的 0144、0147–0153（`linux/kernel-y19/patches/` 沿用其中除 0153 外的 7 个）是上游内核补丁，后者来自 `kernel-t58`；`linux/kernel-y5/baldur-extra.fragment` 与 `config-tb323fu-t49`、`linux/kernel-y8/inventory/config-t49.release` 是上游 t49 的配置；`linux/kernel-y17/init` 和 `linux/kernel-y17/test-root-selection.sh` 改写自上游 `kernel-t54` tag 的 `kernel/initramfs/init` 及其离线测试。
 - **内核补丁的其他来源**：ArmadaOS（armada-os/armada）、Kettle（gennro）、Diogo Trindade（armada-os/armada PR #718）、code002-2/sm8750-video-accel、radxa-pkg/libva-v4l2（Xilin Wu）、h0cheung/tb322fc-linux-kernel 以及 xiaqinghuan 发到 lore 的补丁、Shenghan Gao 发到 lore 的 ath12k 补丁、justririll/x1e-sleep 和 Marc Zyngier 的 arm-platforms 树外勘误补丁、linux-next 中 Akhil P Oommen（Qualcomm）的 a6xx 补丁、SuperTurtleDev/iceland-mainline-kernel-linux（Yibo Wang）。逐个补丁的说明见 [PATCHES.md](PATCHES.md)。
 - **mzakamin-hub/iceland-mainline**（<https://github.com/mzakamin-hub/iceland-mainline>）：`linux/camera/patches/` 的 0001–0004（libcamera 的反差式自动对焦，作者 Osilvfe、mzak）取自它的 `packaging/libcamera/`（提交 `990a0597`）。
-- **LIVI**（GPL-3.0，<https://github.com/f-io/LIVI>）：CarPlay 与无线 Android Auto 的接收端，原样运行，不随附。集成脚本针对 9.4.0 和 10.0.0 编写，用到了上游提交 `b82707ad`（经 Wi‑Fi 使用 Siri 的修复）。
+- **LIVI**（GPL-3.0，<https://github.com/f-io/LIVI>）：CarPlay 与无线 Android Auto 的接收端，原样运行，不随附。集成脚本先后针对 9.4.0、10.0.0 和 10.3.0 编写，用到了上游提交 `b82707ad`（经 Wi‑Fi 使用 Siri 的修复）。
 - **hostapd / wpa_supplicant**（<https://w1.fi/>）与 Linux 的 **ath12k** 驱动：热点调试工具参照和修补的对象。
 - **kwin-effect-upscale**（Jens Koehler，JensKSP/kwin-effect-upscale，GPL-2.0-or-later）：SGSR 移植的宿主。
 - **Snapdragon Game Super Resolution 1**（Qualcomm Innovation Center, Inc.，BSD-3-Clause）：`sgsr.frag` 的来源，即 SnapdragonGameStudios/snapdragon-gsr 的 `sgsr/v1/include/glsl/sgsr1_shader_mobile.frag`。
@@ -81,16 +81,16 @@ A file's own SPDX header takes precedence; files without one are covered by [REU
 - Task cards (`linux/gesture/taskswitcher/` patch, `ui/`, `metadata.json`): GPL-2.0-or-later (Devin Lin and the Plasma Mobile contributors, bobsixsixsix-boop).
 - Wayland protocol files `blur.xml` and `fake-input.xml`: LGPL-2.1-or-later (Martin Gräßlin, Marco Martin; KDE plasma-wayland-protocols).
 - `linux/power/cx-collapse/dczva-stress.c`: GPL-2.0-or-later.
-- Screenshots in `linux/dock/tests/shots/` that show the desktop wallpaper (`01-desktop.png`, `c2-notes.png`, `c3-swiped.png`, `c4-cleared.png`, `h-widget-grid.png`, `r1-notes-real.png`, `r4-banners-real.png`, `r8-notes-real.png`): CC-BY-SA-4.0, bobsixsixsix-boop and Krystian Zajdel (the KDE Plasma 6.6 default wallpaper "Sub-Arctic").
+- Screenshots in `linux/dock/tests/shots/` that show the desktop wallpaper (`01-desktop.png`, `c2-notes.png`, `c3-swiped.png`, `c4-cleared.png`, `d-rundot.png`, `h-widget-grid.png`, `r1-notes-real.png`, `r4-banners-real.png`, `r8-notes-real.png`): CC-BY-SA-4.0, bobsixsixsix-boop and Krystian Zajdel (the KDE Plasma 6.6 default wallpaper "Sub-Arctic").
 
 Patches against other projects (`linux/video/wiliwili-*.patch`, `linux/video/libva-v4l2-patches/`, `linux/camera/patches/`) contain only the changes written for that project plus a few context lines; the context lines remain the original project's and fall under its license.
 
 ### Third-party code and sources
 
-- **tb323fu-linux** (Joonhoe Kim and contributors): the base of this work. The copies and adaptations listed above come from upstream helper 0.4.2 and the main branch (`0c7c0c4`); patches 0097, 0117, 0131 and 0132 and the t49 configuration files are upstream's; `linux/kernel-y17/init` and `test-root-selection.sh` are adapted from upstream's `kernel-t54` tag (`kernel/initramfs/init` and its offline test).
+- **tb323fu-linux** (Joonhoe Kim and contributors): the base of this work. The copies and adaptations listed above come from upstream helper 0.4.2 and the main branch (`0c7c0c4`); patches 0097, 0117, 0131 and 0132, the `kernel-t58` patches 0144 and 0147–0153 under `linux/kernel-y18/patches/` (y19 carries them without 0153) and the t49 configuration files are upstream's; `linux/kernel-y17/init` and `test-root-selection.sh` are adapted from upstream's `kernel-t54` tag (`kernel/initramfs/init` and its offline test).
 - **Other kernel patch sources**: ArmadaOS (armada-os/armada), Kettle (gennro), Diogo Trindade (armada-os/armada PR #718), code002-2/sm8750-video-accel, radxa-pkg/libva-v4l2 (Xilin Wu), h0cheung/tb322fc-linux-kernel and xiaqinghuan's patch on lore, Shenghan Gao's ath12k patch on lore, justririll/x1e-sleep and Marc Zyngier's out-of-tree erratum patch in arm-platforms, Akhil P Oommen's (Qualcomm) a6xx patches in linux-next, SuperTurtleDev/iceland-mainline-kernel-linux (Yibo Wang). See [PATCHES.md](PATCHES.md) for each patch.
 - **mzakamin-hub/iceland-mainline** (<https://github.com/mzakamin-hub/iceland-mainline>): patches 0001–0004 under `linux/camera/patches/` (contrast-detect autofocus for libcamera, by Osilvfe and mzak) come from its `packaging/libcamera/` at commit `990a0597`.
-- **LIVI** (GPL-3.0, <https://github.com/f-io/LIVI>): the CarPlay and wireless Android Auto receiver, run unmodified and not included. The integration targets 9.4.0 and 10.0.0 and relies on upstream commit `b82707ad` (the Siri-over-Wi-Fi fix).
+- **LIVI** (GPL-3.0, <https://github.com/f-io/LIVI>): the CarPlay and wireless Android Auto receiver, run unmodified and not included. The integration targeted 9.4.0, then 10.0.0, now 10.3.0, and relies on upstream commit `b82707ad` (the Siri-over-Wi-Fi fix).
 - **hostapd / wpa_supplicant** (<https://w1.fi/>) and the Linux **ath12k** driver: referenced and patched by the hotspot debugging tools.
 - **kwin-effect-upscale** (Jens Koehler, JensKSP/kwin-effect-upscale, GPL-2.0-or-later): host of the SGSR port.
 - **Snapdragon Game Super Resolution 1** (Qualcomm Innovation Center, Inc., BSD-3-Clause): source of `sgsr.frag`, which ports `sgsr/v1/include/glsl/sgsr1_shader_mobile.frag` from SnapdragonGameStudios/snapdragon-gsr.

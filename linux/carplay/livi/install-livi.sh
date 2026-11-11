@@ -1,9 +1,9 @@
 #!/bin/bash
-# linux/carplay/livi/install-livi.sh -- set LIVI 10.0.0 up for the y700 "CarPlay" icon, by hand instead of LIVI's own
-# install.sh (2026-10-17; 9.4.0 until 10-23). Run as root on the tablet from a copy of this directory; running it
-# again is safe.
+# linux/carplay/livi/install-livi.sh -- set LIVI 10.3.0 up for the y700 "CarPlay" icon, by hand instead of LIVI's own
+# install.sh (2026-10-17; 9.4.0 until 10-23, 10.0.0 until 11-04). Run as root on the tablet from a copy of this
+# directory; running it again is safe.
 #
-# Expects /opt/livi-10.0.0 (the official arm64 AppImage unpacked with --appimage-extract, /opt/livi -> it) and the
+# Expects /opt/livi-10.3.0 (the official arm64 AppImage unpacked with --appimage-extract, /opt/livi -> it) and the
 # MFi authentication coprocessor on I2C bus 99 (/dev/i2c-99, not part of this tree), and gcc (for the colorimetry shim). Does:
 #   0. the unpacked tree's directories 0755: 10.0.0's AppImage has them at 0700, which works on its FUSE mount (owned
 #      by whoever runs it) but, unpacked as root, kept the desktop user out of resources/ (10-23); a file or
@@ -45,7 +45,7 @@ export LC_ALL=C
 HERE=$(cd "$(dirname "$0")" && pwd)
 U=user
 H=/home/$U
-LIVI=/opt/livi-10.0.0
+LIVI=/opt/livi-10.3.0
 RES=$LIVI/resources
 HELPER=$RES/driver/livi-helperd
 

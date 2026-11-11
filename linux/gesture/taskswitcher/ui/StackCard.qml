@@ -21,6 +21,9 @@ Item {
     required property var icon
     required property real zoomK            // 1 / ratio: how far the anchor card is blown up at most
     required property real dpr              // the output's scale (the layer is sized in device pixels)
+    // a ▾ after the name, its menu 「分屏」 (linux/split, 11-10): only while the split screen script runs and the stage
+    // manager is off, never on a game (TaskSwitcher.makeCard)
+    required property bool menuable
 
     // the window fills the work area (maximized, or a fullscreen game that also covers the panel):
     // then the card IS the window (a fullscreen game's card is a little taller); otherwise the card is
@@ -43,6 +46,8 @@ Item {
     property bool hires: false              // full-resolution layer: the anchor while it zooms (not at rest in the stack)
     property bool shown: true
     property int zk: 0
+    property bool headDown: false           // a finger on the header (its menu opens on the release)
+    readonly property real headW: head.width   // for TaskSwitcher's hit rect of the header
 
     // guarded card: the first swipe arms it (red band, 3 s), the second closes
     property bool armed: false
@@ -130,13 +135,14 @@ Item {
         visible: opacity > 0.01
     }
 
-    // header above the card: icon 30, name 16/600, 「防误关」 tag for games
+    // header above the card: icon 30, name 16/600, 「防误关」 tag for games, ▾ (its menu, TaskSwitcher.openMenu)
     Row {
+        id: head
         x: 9
         y: -40
         height: 30
         spacing: 10
-        opacity: card.phead
+        opacity: card.phead * (card.headDown ? 0.6 : 1)
         visible: opacity > 0.005
 
         Kirigami.Icon {
@@ -172,6 +178,22 @@ Item {
                 color: Qt.rgba(1, 1, 1, 0.86)
                 font.pixelSize: 13
                 font.weight: Font.Medium
+            }
+        }
+        // ▾: 16 px, 6 px after the name (the row's 10 less 4), dimmer than the name
+        Item {
+            visible: card.menuable
+            width: 12
+            height: 30
+            opacity: card.pname
+            Kirigami.Icon {
+                x: -4
+                anchors.verticalCenter: parent.verticalCenter
+                width: 16
+                height: 16
+                source: "arrow-down"
+                isMask: true
+                color: Qt.rgba(1, 1, 1, 0.7)
             }
         }
     }

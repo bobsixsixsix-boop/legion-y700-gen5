@@ -12,9 +12,9 @@
 # It never reboots and never touches the passphrase or config.json.
 export LC_ALL=C
 UNIT=y700-carplay-test-guard
-CORE='^/opt/livi-10.0.0/resources/core/livi-core'
+CORE='^/opt/livi-10.3.0/resources/core/livi-core'
 LAUNCHER='/usr/local/bin/y700-carplay'
-HELPER=/opt/livi-10.0.0/resources/driver/livi-helperd
+HELPER=/opt/livi-10.3.0/resources/driver/livi-helperd
 AP=livi-wifi-ap.service
 NM_CONF=/etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf
 IF=wlp1s0

@@ -142,6 +142,7 @@ int main(int argc, char **argv)
 
     Status status;
     Apps apps;
+    shell.setApps(&apps);   // before any D-Bus call is served: the event loop starts below
     Hud hud;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("shell", &shell);
@@ -153,8 +154,9 @@ int main(int argc, char **argv)
     QObject *root = engine.rootObjects().first();
 
     QQuickWindow *bar = win(root, "statusWin"), *strip = win(root, "stripWin"), *dock = win(root, "dockWin"),
-                 *grid = win(root, "gridWin"), *banners = win(root, "bannerWin"), *hudw = win(root, "hudWin");
-    if (!bar || !strip || !dock || !grid || !banners || !hudw) return 1;
+                 *grid = win(root, "gridWin"), *banners = win(root, "bannerWin"), *hudw = win(root, "hudWin"),
+                 *back = win(root, "backWin");
+    if (!bar || !strip || !dock || !grid || !banners || !hudw || !back) return 1;
     // Scope "dock" (KWin: window type Dock, as Plasma's own panel) for what maps and unmaps often: KWin's scale
     // effect animates every window of the plain type as it maps (0.8 -> 1 with a fade; the blur effect skips a
     // transformed window, so the frosted body came in sharp and blurred only at the end, 10-22) and leaves docks
@@ -178,6 +180,9 @@ int main(int argc, char **argv)
     // the screen's edge, not below the bar's exclusive zone, so the bar moving layers never shifts it
     layer(hudw, LS::LayerBottom, {LS::AnchorTop | LS::AnchorLeft}, -1, "dock");
     LS::get(hudw)->setMargins(QMargins(22, 28 + 18, 0, 0));
+    // the stage manager's backdrop: the whole screen, Bottom layer too; it maps after the widget, so it is above it
+    // (the widget only shows on the desktop, where the backdrop is away anyway)
+    layer(back, LS::LayerBottom, {LS::AnchorTop | LS::AnchorBottom | LS::AnchorLeft | LS::AnchorRight}, -1, "dock");
     new Puller(&shell, bar);
     new Puller(&shell, strip);
 

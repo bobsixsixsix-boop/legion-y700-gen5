@@ -1,0 +1,8 @@
+# y19 build outputs on the tablet, /usr/local/src/y700-kernel-y19/ (built 2026-11-04 20:19 JST, y19-branch HEAD 05c8bc5831e5, tree e007de00615d)
+1ecd62e46f8af7236b3a05b72310a23a371db0d1d7b48f66777aea564e46231d  Image-t52-y19
+88ac65a40d08d3c7e6593f1db99814487d87da6950fac15d15d322691a0fa2d5  Image-t52-y19.gz
+836938bcfa1eb6a7b8f999c6481ca399c8a20992f1c7f7f4a0c21ec149251b09  kaanapali-lenovo-baldur-display.dtb
+8ed8a0ce7252b07de9ef9518b8ce4fa9f85336c837d0cadb7455b212167b05b0  config-t52-y19
+fa6d0ce7a37acbc538797bef92616debe39ed9d5888a13361361d58a4fdaf868  config-t52-y19.pre-build
+8b3c2345095264254d7a4c04fcc9d9a4bfdba4c6d5fc3a48f20fdcbe5b47e2b7  y700-y19.patch
+e2393a75bba012f44fb5d0d7171646405cf0b11335bc8515b876f2d0f933b39d  initramfs.cpio.gz

@@ -15,7 +15,7 @@
    | 谁 | 实测 | 根因（出处见各节） | 修法 | 代价 |
    |---|---|---|---|---|
    | PowerDevil `display_recheck` | 10/s | libddcutil 2.2.5 的 `display_recheck_thread`：`g_async_queue_timeout_pop(queue, 100 ms)` 空转，PowerDevil 启动时无条件 `ddca_start_watch_displays()`；这台机的屏是 DSI，根本没有 DDC/CI | 用户单元 drop-in `Environment=POWERDEVIL_NO_DDCUTIL=1`（PowerDevil 自己的开关） | 外接 USB‑C DP 显示器失去 DDC 亮度控制 |
-   | tb323fu-helperd | 7+3/s | 主循环和 LED 环线程各自每 5 s 醒一次，每次读一遍电池属性（每个属性一次 glink 往返） | 树外补丁 [helperd-slow-poll.patch](helperd-slow-poll.patch)：`[poller] poll_s_display_off = 30`，熄屏时两个线程都按它睡 | 熄屏时插拔充电器的 PropertiesChanged 最多迟 30 s |
+   | tb323fu-helperd | 7+3/s | 主循环和 LED 环线程各自每 5 s 醒一次，每次读一遍电池属性（每个属性一次 glink 往返） | 树外补丁 [helperd-slow-poll.patch](helperd-slow-poll.patch)（11-08 按 0.4.2 重写，**没编没装**）：`[poller] poll_s_display_off = 30`，熄屏且用电池时两个线程 30 s 一轮，中间每 5 s 看一眼屏幕和充电器 | 熄屏用电池时 PropertiesChanged 最多迟 30 s；插上充电器 5 s 内看到，灯环 5–10 s 变色（原 5 s 内） |
    | tailscaled | ≈35/s | 周期性的只有 portlist **每 1 s** 扫一遍监听端口（Linux 的 `init()` 把通用的 5 s 改成 1 s；四次 netlink `inet_diag` 查询，有新 socket 时再遍历 `/proc/*/fd`）、netmon 15 s 看墙钟、DERP 60 s keepalive；STUN/心跳在无流量 45 s 后已自动停。35/s 的大头很可能就是这每秒一簇的 goroutine 交接（算作上下文切换），加上测量时若 ssh 走的是 tailnet，它自己的流量 | 系统单元 drop-in `TS_PORTLIST=false`（[tailscaled-wakeups.conf](tailscaled-wakeups.conf)） | 管理台看不到这台机的 "Services" 列 |
    | Claude 桌面版 / Chrome | 22/s | Electron/Chromium 后台定时器；官方应用改不了 | 可选的用户服务 [y700-screen-off-freeze](y700-screen-off-freeze)：熄屏 60 s 后 cgroup 冻结，亮屏即解冻；永不冻 Telegram，永不冻正在播放的 MPRIS 播放器 | **冻住 Claude 桌面版等于冻住里面跑着的 agent 会话**；实测只省 0.01 W |
    | 内核 memlat 统计回读 | 11 次 `apss_cpucp_mbox` 中断/s（3 个 `devfreq_monitor` 定时器是 deferrable，不独立叫醒空闲核） | `polling_interval=1000`（我们自己从 2 ms 改来的；0126 的缺省是 `cpucp_sample_ms/2`，没设 `profile.timer`） | udev 规则改 10000 或 0（同时改体检脚本的期望值） | `trans_stat` 变粗/不更新；`cur_freq` 仍是现查 |
@@ -79,21 +79,38 @@ Environment=POWERDEVIL_NO_DDCUTIL=1
 
 ### 2.2 tb323fu-helperd 的 5 s 轮询（7+3/s）——树外补丁
 
-**它在做什么**（`helper/crates/tb323fu-helperd/src/main.rs:582-627`，上游 0c7c0c4）：主循环每 `Duration::from_secs(5)` 一轮：`profile_tick`（GPU/CPU 限频、热配置、Wi‑Fi 省电跟随 ppd）、`panel_tick`（面板过热限亮度）、`haptics_tick`、`full_by_tick`（读电池）、USB wake 复位，然后对**每个** D-Bus 对象做一次 `watch::<T>()`——取属性快照比对、变了就发 `PropertiesChanged`；Battery 的快照要读 `status/capacity/current_now/voltage_now/temp/...`，**每个属性都是一次到 ADSP 的 glink 往返**（RESEARCH §3.4 对飞行记录器的同一条修正），每次往返一睡一醒，所以一轮 5 s 的轮询在 whoawake 里是 35 次上下文切换 = 7/s。另一个线程是 LED 环（`led.rs`）：`const IDLE = 5 s`，每 5 s 重读一次 `battery_info()` 决定充电指示色（屏幕关着没人看），3/s 就是它。
+**它在做什么**（`helper/crates/tb323fu-helperd/src/main.rs:759-805`，`helper-v0.4.2` = `43ee432`，平板装的 dpkg 包就是这版）：主循环每 `Duration::from_secs(5)` 一轮：`profile_tick`（GPU/CPU 限频、热配置、Wi‑Fi 省电跟随 ppd）、`panel_tick`（面板过热限亮度）、`haptics_tick`、`full_by_tick`、`charge_tick`（0.4.2 新增：旁路的 current 方式、充电卡住自动重启、重启充电的 Raise/Low/Wait 几个阶段）、USB wake 复位，然后对**每个** D-Bus 对象做一次 `watch::<T>()`——取属性快照比对、变了就发 `PropertiesChanged`；Battery 的快照要读 `status/capacity/current_now/voltage_now/temp/...`，**每个属性都是一次到 ADSP 的 glink 往返**（RESEARCH §3.4 对飞行记录器的同一条修正），每次往返一睡一醒，所以一轮 5 s 的轮询在 whoawake 里是 35 次上下文切换 = 7/s。另一个线程是 LED 环（`led.rs`）：`const IDLE = 5 s`，每 5 s 重读一次 `battery_info()` 决定充电指示色（屏幕关着没人看），3/s 就是它。11-03 熄屏实测 helperd 9.62 次/秒（10-16 同口径 9.9）。
 
-**补丁** [helperd-slow-poll.patch](helperd-slow-poll.patch)（对仓库副本 `linux/tb323fu-linux` 的 `helper/`，`git apply --check` 通过；**没编译**——本机没有 cargo，规则也不许在这里构建）：
+**补丁** [helperd-slow-poll.patch](helperd-slow-poll.patch)（11-08 按 0.4.2 重写；对 `git -C linux/tb323fu-linux archive helper-v0.4.2 helper` 解出的干净树，`git apply --check` 和 `patch -p1 --dry-run` 都通过；**没编译**——本机没有 cargo，平板缺 crate，见下）：
 
-- `config.rs`：新增 `[poller]` 段 `poll_s = 5`、`poll_s_display_off = 30`（serde default：旧的 helper.toml 照常加载，下次保存时写出新段）。
-- `features.rs`：`display_off() -> Option<bool>`——只看 `/sys/class/drm/card*-DSI-*` 里 `status == connected` 的接口的 `dpms`（断开的 DP 和 Writeback 接口永远报 On，自动亮度当年就栽在这里）。
-- `main.rs` 循环末尾：面板关着就睡 `poll_s_display_off`，否则 `poll_s`。
-- `led.rs`：去掉 `const IDLE`，改成按同一配置算的 `idle_wait(&cfg)`，充电色重读和 condvar 等待都用它。
-- `data/helper.toml.example`：写上两个键。
+- **为什么重写**：第一版（10-16，基于 0.4.1）在 DSI 面板 dpms 为 Off 时一律睡 30 s，从没编过也没装过。0.4.2 的 `charge_tick` 按 5 s 一轮走阶段，一律放慢会让熄屏充电时重启充电、卡住救援的各个阶段拉长 6 倍，所以第一版不能直接搬。
+- `config.rs`：新增 `[poller]` 段 `poll_s_display_off = 30`（serde default：没有这段的旧 helper.toml 照常加载；0 或不超过 5 s 就等于不改）。`Poller::round()` 算等多久，单元测试 `poller_round`（含「没有 `[poller]` 段的配置拿到默认值」）。
+- `main.rs` 每轮末尾：**放慢的条件**是四个同时成立——熄屏（`perf::screen_off()`，上游自己的判断：背光 `bl_power != 0` 或 `actual_brightness == 0`）、没接外部电源（`f::external_power()`）、没在重启充电（`rt.arm` 为空）、热档不是 performance（它的过热保护在 `thermal_tick` 里每轮查）。放慢时下一整轮在 `poll_s_display_off` 之后，但每 5 s 看一眼（读一次背光 sysfs + power_supply 的 online，约两次 glink），屏幕亮了或插了充电器就立刻结束等待、马上跑一整轮。所以主线程仍是每 5 s 醒一次，省的是每轮读整套电池属性的 glink 往返。条件不成立时照旧 5 s。
+- `led.rs`：主循环每轮用 `Led::set_quiet()` 告诉灯环线程现在快还是慢；慢的时候充电色 `poll_s_display_off` 秒重读一次。**变速时**（充电器插上/拔掉、屏幕亮了）当场重读一次、5 s 后再读一次（电池状态可能比充电器晚一拍），而且不重启硬件呼吸灯（`kick` 会重启）。这个标记放在灯环自己的锁里，灯环线程不碰 `rt` 锁，不会和主循环互锁。
+- `data/helper.toml.example`：写上这个键。
 
-**构建与安装（平板上做，补丁头里有完整命令）**：`apt install cargo rustc`（Rust ≥ 1.80，helper/README.md）→ 在 `/usr/local/src/tb323fu-linux` 打补丁 → `cd helper && cargo build --release -p tb323fu-helperd`（workspace 排除了 GTK 设置应用，不需要 GTK 开发库）→ 二进制装到 `/usr/local/libexec/tb323fu-helperd` → **不要跑 install.sh**：平板上的 helper 是 dpkg 包 `tb323fu-helper 0.4.1`（`/usr/libexec/tb323fu-helperd`、`/usr/lib/systemd/system/tb323fu-helperd.service`），用 drop-in `/etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf` 把 `ExecStart` 指到我们的二进制即可，包升级不会覆盖 drop-in；helper 的自更新对 dpkg 安装的实例本来就拒绝。然后 `/etc/tb323fu/helper.toml` 里把 `poll_s_display_off` 改 60 也行，`tb323fu-ctl reload`。
+**构建与安装（平板上做，补丁头里有完整命令）**：
+- **卡在下载**：平板 `/root/.cargo` 里缺约 28 个 Linux 目标要用的 crate（`minisign-verify` 哪里都没有，其余只有相近版本），要先 `cargo fetch --locked --target aarch64-unknown-linux-gnu` 从 crates.io 下约 2–3 MB。**作者 11-08 说先不下**，所以到这里为止。
+- 作者点头之后：在 Win11 上 `git archive` 出 `helper-v0.4.2` 的 `helper/`，连同补丁 `scp -O` 到平板 `/usr/local/src/` → `patch -p1` → `cargo fetch` → `cargo test --offline --locked -p tb323fu-helper-core` → `cargo build --release --offline --locked -p tb323fu-helperd`（workspace 排除了 GTK 设置应用，不需要 GTK 开发库；实际要 Rust ≥ 1.82，上游已经在用 `Option::is_none_or`）→ `install -m755` 到 `/usr/local/libexec/tb323fu-helperd` → **不要跑 install.sh、不替换厂商二进制**：平板上的 helper 是 dpkg 包 `tb323fu-helper 0.4.2`（`/usr/libexec/tb323fu/tb323fu-helperd`、`/usr/lib/systemd/system/tb323fu-helperd.service`），用 drop-in `/etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf`（`ExecStart=` 清空再指到我们的二进制）即可，包升级不会覆盖 drop-in → `systemctl daemon-reload && systemctl restart tb323fu-helperd`（重启前先说一声：灯环和 D-Bus 应答会断一秒）。
+- 换了路径自更新也不会动它：helper 的自更新除了看程序本身，还看 polkit 策略和 D-Bus service 文件归谁，这几个仍归 dpkg，所以照样拒绝（11-08 在平板上核对过）。
+- 想更省可以把 `/etc/tb323fu/helper.toml` 里的 `poll_s_display_off` 改成 60，`tb323fu-ctl reload`。
+- 撤销：删 drop-in、`daemon-reload`、重启 helperd。原版守护进程不认识 `[poller]` 也不报错（没有 `deny_unknown_fields`），下次保存时把它丢掉。
 
-**副作用**：熄屏期间插拔充电器，`PropertiesChanged`/LED 充电色最多迟 `poll_s_display_off` 秒；`wifi_tick` 的"每 12 轮复查一次性能档 Wi‑Fi 省电"变成每 6 分钟（熄屏跑性能档本来就不常见）；内核自动检查按时间判断，不受影响。亮屏时行为完全不变。
+**副作用**（只在熄屏且用电池时）：
+- 所有对象的 `PropertiesChanged`（电量百分比等）最多迟 `poll_s_display_off` 秒；屏幕关着没人看，D-Bus 方法调用（tb323fu-ctl、GNOME 扩展、我们的控制中心）照旧实时回答。
+- 插上充电器：5 s 内看到，马上跑一整轮（`charge_tick`、`PropertiesChanged`），节奏回到 5 s；灯环大约 5–10 s 变成充电色（原版 5 s 内）。
+- 拔掉充电器：灯环当场和 5 s 后各重读一次，不会在一整轮慢节奏里一直亮着琥珀色。
+- `wifi_tick` 的「每 12 轮复查一次性能档 Wi‑Fi 省电」从 1 分钟变成约 6 分钟（只在开了 `[wifi] low_latency_performance` 并且 GPU 是性能档时才有意义）。
+- `haptics_tick`（马达驱动重载后重写增益）和 USB wake 复位从 5 s 变成 30 s；内核自动检查按时间判断，不受影响。
+- power-profiles-daemon 换档最多迟 30 s 生效。经 D-Bus（`set_bypass`、Reload）发起的重启充电，第一步最多等 30 s（用电池时无害，插上充电器就结束等待）。经 D-Bus 把热档设成 performance 会当场跑 `thermal_tick`，从下一轮起回到 5 s。
+- Reload 改了 `poll_s_display_off`：主循环从下一轮起生效，灯环经 `kick` 当场生效。
+- 亮屏或插着电：行为完全不变。
 
-**预期**：10/s → 约 1.7/s（两个线程各 30 s 一轮）；设 60 则 0.8/s。周期性义务：`tb323fu-helper` 包升级后要重打补丁重编（体检：drop-in 在、运行中的 `/proc/<pid>/exe` 不在 `/usr/local/libexec` → WARN；包版本变化 → CHANGED 提示重编）。
+**有意不做**：
+- 5 s 那一眼只读 UCSI 的 `ucsi-source-psy*/online`（内核缓存的接口状态，不走 glink），每 30 s 能再少约 15 % 的 glink 往返（11-08 第二轮复核提的）。没做：这等于在上游的充电器判断旁边另起一套，而且没人在平板上核对过普通 5 V（非 PD）充电器 UCSI 报不报；漏报的代价是多等一整轮慢节奏。
+- 不加 tb323fu-ctl 子命令（改 helper.toml 再 `tb323fu-ctl reload`），不改 docs/helper-reference.md，不报上游。
+
+**预期**（估算，没实测）：熄屏用电池时 helperd 约 9.6 → 2.5 次上下文切换/秒（每 30 s 的 glink 读少约八成，这是上下文切换的大头；定时器自醒每 30 s 12 次 → 7 次，因为 5 s 的那一眼还在）；设 60 再少一些。**验收**：`y700-checklist` 打出 OK「tb323fu-helperd 跑的是自编的熄屏慢轮询版」；熄屏、用电池、测量期间不 ssh，`y700-wakeups 60 --off` 里 helperd 远低于 9.6/s；熄屏插充电器，灯环 10 s 内变琥珀色。**周期性义务**：`tb323fu-helper` 包升级后要在新 tag 上重打补丁重编（体检：drop-in 在、运行中的 `/proc/<pid>/exe` 不在 `/usr/local/libexec` → WARN；包版本变化 → CHANGED 提示重编）；0.4.7/0.4.8 改过 led.rs 里同样的三处等待，到时候得重新改。
 
 ### 2.3 Claude 桌面版 / Chrome（22/s）——熄屏冻结服务（可选）
 

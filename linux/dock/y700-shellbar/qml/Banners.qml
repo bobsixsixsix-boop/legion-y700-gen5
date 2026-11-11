@@ -11,6 +11,8 @@
 // clocks, not the model's: that one is the 3-minute history expiry. When the curtain comes down every banner is
 // expired at once, the waiting ones too: the centre shows them all. Only the cards take touches (setInputRects)
 // and are blurred (setBlurRects); the window is a 680 px band hung from the top edge, KWin centres it (src/main.cpp).
+// Do not disturb (11-03; fn+F6 on the Magic Keyboard -> shell.toggleDoNotDisturb()): only critical notifications
+// come up as banners, the rest go straight to the notification centre and do not come up when it is switched off.
 import QtQuick
 import QtQuick.Window
 import org.kde.kirigami as Kirigami
@@ -36,6 +38,14 @@ Window {
         showExpired: false
         showDismissed: false
         limit: 3
+        // do not disturb: what the server marks as added during it (Server.inhibited, below; it marks every one) stays
+        // out, except the urgencies here. libnotificationmanager 6.6.6 applies urgencies only to those marked rows:
+        // urgencies alone let a normal one through (bed 11-03), so both. The marks go when it goes off, so what came in
+        // meanwhile is expired just before (held, below)
+        urgencies: win.dnd ? NotificationManager.Notifications.CriticalUrgency
+                           : NotificationManager.Notifications.LowUrgency | NotificationManager.Notifications.NormalUrgency
+                             | NotificationManager.Notifications.CriticalUrgency
+        showAddedDuringInhibition: false
         groupMode: NotificationManager.Notifications.GroupDisabled
         sortMode: NotificationManager.Notifications.SortByDate
         sortOrder: Qt.DescendingOrder
@@ -43,6 +53,28 @@ Window {
             window = win;                    // the xdg-activation token a tapped notification's app gets
             shell.log("notifications: serving org.freedesktop.Notifications");
         }
+    }
+
+    // Do not disturb, kept where plasmashell's applet kept it (plasmanotifyrc [DoNotDisturb] Until, a year ahead
+    // when switched on, as the applet did), so it outlives a restart; the server's Inhibited tells the apps.
+    // Date.now() is read when the setting changes, not as time goes: nothing here sets an "until" closer than a year
+    NotificationManager.Settings { id: notifSettings; live: true }
+    readonly property bool dnd: {
+        const until = notifSettings.notificationsInhibitedUntil;
+        return !!until && !isNaN(until.getTime()) && until.getTime() > Date.now();
+    }
+    onDndChanged: shell.log("do not disturb " + (dnd ? "on" : "off"))
+    Binding { target: NotificationManager.Server; property: "inhibited"; value: win.dnd }
+    // every notification still up, marked rows too: while do not disturb is on, the non-critical ones are exactly
+    // those that came in during it (it expires what is up as it goes on). They are expired just before it goes off,
+    // or they would all come up late as the marks go (bed 11-03); they wait in the notification centre
+    NotificationManager.Notifications {
+        id: held
+        showNotifications: true
+        showJobs: false
+        showExpired: false
+        showDismissed: false
+        groupMode: NotificationManager.Notifications.GroupDisabled
     }
 
     // mapped while there is a card, and a moment longer so a leaving card finishes its fade; never under the curtain.
@@ -75,6 +107,28 @@ Window {
         function onCcOpenChanged() {
             if (!shell.ccOpen) return;
             for (let k = 0; k < 200 && notes.rowCount() > 0; k++) notes.expire(notes.index(0, 0));
+        }
+        // switched on: the banners up now are done as under the curtain (they would come back when it goes off)
+        function onDndToggleRequested() {
+            if (win.dnd) {
+                // from the end: an expired row leaves, the ones before it keep their index; a critical one is up
+                // as a banner already and stays
+                let n = 0;
+                for (let i = held.rowCount() - 1; i >= 0; i--) {
+                    const ix = held.index(i, 0);
+                    if (held.data(ix, NotificationManager.Notifications.UrgencyRole) === NotificationManager.Notifications.CriticalUrgency) continue;
+                    held.expire(ix);
+                    n++;
+                }
+                if (n) shell.log("do not disturb: " + n + " held back, to the notification centre");
+                notifSettings.notificationsInhibitedUntil = undefined;   // reset: off
+            } else {
+                for (let k = 0; k < 200 && notes.rowCount() > 0; k++) notes.expire(notes.index(0, 0));
+                const until = new Date();
+                until.setFullYear(until.getFullYear() + 1);
+                notifSettings.notificationsInhibitedUntil = until;
+            }
+            notifSettings.save();
         }
     }
 

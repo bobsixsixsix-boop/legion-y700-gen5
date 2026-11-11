@@ -1,0 +1,103 @@
+From 06092fe33d8051b9d598530fc5ddbd6c8f8fd870 Mon Sep 17 00:00:00 2001
+From: y700 workspace <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 16:00:00 +0000
+Subject: [PATCH] media: iris: vpu4x: size the AV1 line buffer for 10-bit
+ output
+
+On Kaanapali (vpu4x), some AV1 10-bit streams fail to decode into P010.
+The firmware rejects HFI_CMD_START with HFI_ERROR_INSUFFICIENT_RESOURCES,
+and every buffer queued afterwards gets "invalid operation for current
+state":
+
+  session error received 0x1000005: unknown
+  session error received 0x4000005: insufficient resources
+  session error received 0x1000009: unknown
+  session error received 0x4000004: invalid operation for current state
+
+This is the signature that commit "media: iris: vpu4x: size the decoder
+OPB line buffer for 10-bit output" fixed for HEVC Main10 and VP9 profile
+2. That commit doubled the per-pipe DPB/OPB part of the vpu4x H265 and
+VP9 line buffers for 10-bit output. AV1 still uses the shared
+hfi_buffer_line_av1d(), which takes no bit depth and has no per-pipe
+DPB/OPB part. In split mode it doubles the whole line buffer instead.
+
+Add the 10-bit per-pipe DPB/OPB part on top of the shared size when the
+capture format is 10-bit. Size it for the largest AV1 superblock
+(128x128) so that it does not depend on the stream. 8-bit sizes are
+unchanged.
+
+The cost is one larger line buffer per 10-bit session: about 0.6 MiB
+more at 720p, 0.85 MiB at 1080p and 1.6 MiB at 2160p.
+
+y700 (kernel y15): written here, not taken from upstream. Evidence from
+kernel y14 with qcom-va-driver v1.1.1, decoding 5-frame libaom realtime
+streams through VA-API (av1-10bit-probe.sh, 2026-10-29): START fails
+for 1280x720 10-bit with 64x64 and with 128x128 superblocks, 1920x1080
+10-bit with 128x128 and 2560x1440 10-bit with 128x128; it succeeds for
+1920x1080 10-bit with 64x64 superblocks, for 3840x2160 10-bit and for
+the 8-bit controls, and those decodes match dav1d byte for byte. At the
+same frame size the superblock size decides, and 4K starts while 720p
+fails. That fits the line buffer: its kernel size is dominated by
+width-scaled terms, while the missing 10-bit part scales with the frame
+height and the superblock size. A buffer that scales with the whole
+frame would fail at 4K first. The firmware log did not
+name the buffer (the flush_debug_queue dynamic-debug site was on, but
+no "Attach Internal" line came), so the buffer type is inferred, and
+the size rule is a fitted model, not derived from firmware sources. The
+model predicted that 2560x1440 10-bit would start with a 13 KB margin,
+and it fails, so the real need is somewhat larger than modelled; the
+part added here is 0.57 MiB or more, many times the modelled shortfall.
+Only 10-bit AV1 sessions get a different LINE size, and those fail
+today. Check on y15: av1-10bit-probe.sh, then tests/decoder/av1.py
+--extended.
+
+y700 patch file: 1057-media-iris-vpu4x-size-the-AV1-line-buffer-for-10-bit-output.patch
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../platform/qcom/iris/iris_vpu_buffer.c      | 22 ++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+index 1248e3c..39ac6c1 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+@@ -1868,6 +1868,25 @@ static u32 hfi_vpu4x_buffer_line_h265d(u32 frame_width, u32 frame_height, bool i
+ 		ALIGN(qp_size, DMA_ALIGNMENT);
+ }
+ 
++static u32 hfi_vpu4x_buffer_line_av1d(u32 frame_width, u32 frame_height, bool is_opb,
++				      u32 num_vpp_pipes, bool ten_bit)
++{
++	u32 size = hfi_buffer_line_av1d(frame_width, frame_height, is_opb, num_vpp_pipes);
++
++	/*
++	 * The shared AV1 formula has no per-pipe DPB/OPB part. In split mode it
++	 * doubles the whole line buffer instead, which covers the 8-bit part but
++	 * not the 10-bit one: 10-bit output samples take two bytes. Add the
++	 * 10-bit per-pipe DPB/OPB part, sized for the largest AV1 superblock so
++	 * that it does not depend on the stream's superblock size.
++	 */
++	if (is_opb && ten_bit)
++		size += size_dpb_opb(frame_height, AV1D_LCU_MAX_SIZE_PELS, true) *
++			num_vpp_pipes;
++
++	return ALIGN(size, DMA_ALIGNMENT);
++}
++
+ static u32 iris_vpu4x_dec_line_size(struct iris_inst *inst)
+ {
+ 	u32 num_vpp_pipes = inst->core->iris_platform_data->num_vpp_pipe;
+@@ -1890,7 +1909,8 @@ static u32 iris_vpu4x_dec_line_size(struct iris_inst *inst)
+ 		return hfi_vpu4x_buffer_line_vp9d(width, height, out_min_count, is_opb,
+ 						  num_vpp_pipes, ten_bit);
+ 	else if (inst->codec == V4L2_PIX_FMT_AV1)
+-		return hfi_buffer_line_av1d(width, height, is_opb, num_vpp_pipes);
++		return hfi_vpu4x_buffer_line_av1d(width, height, is_opb, num_vpp_pipes,
++						  ten_bit);
+ 
+ 	return 0;
+ }
+-- 
+2.55.0.windows.3
+

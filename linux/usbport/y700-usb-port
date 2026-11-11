@@ -58,6 +58,12 @@ set_role() {
 	# role (host exit alone takes ~100 ms): when ucsi has just set it, an
 	# early read still shows the old one and the write would be skipped
 	sleep 1
+	# port0 was empty when route() looked but has a partner now: it detached and re-attached within
+	# that second (11-04, README「USB-C 外接屏」: a monitor; a PC on a loose cable does the same) and
+	# ucsi has already set the role for it. The decision is stale: writing device would take the
+	# controller away from a monitor's hub, writing host (a gamepad on the side port) would hide the
+	# gadget from a PC. Leave the role to ucsi; the partner add event routes again.
+	[ "$p0" = no ] && [ -e /sys/class/typec/port0-partner ] && return
 	[ "$(cat $role 2>/dev/null)" = "$1" ] || echo "$1" > "$role" 2>/dev/null
 }
 

@@ -204,6 +204,7 @@ path = [
   "linux/dock/tests/shots/c2-notes.png",
   "linux/dock/tests/shots/c3-swiped.png",
   "linux/dock/tests/shots/c4-cleared.png",
+  "linux/dock/tests/shots/d-rundot.png",
   "linux/dock/tests/shots/h-widget-grid.png",
   "linux/dock/tests/shots/r1-notes-real.png",
   "linux/dock/tests/shots/r4-banners-real.png",
@@ -229,3 +230,22 @@ SPDX-FileCopyrightText = [
   "2026 bobsixsixsix-boop",
 ]
 SPDX-License-Identifier = "LGPL-2.1-or-later"
+
+# 19. The Stage Manager and split-screen KWin scripts: own code, MIT as their
+#     metadata.json declares (ideas from HyprKwin's stage layout, no code taken).
+[[annotations]]
+path = [
+  "linux/stage/y700-stage/**",
+  "linux/split/y700-split/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "MIT"
+
+# 20. The KWin corner effect for both: own code built against KWin,
+#     GPL-2.0-or-later as KWin and as its metadata.json declares.
+[[annotations]]
+path = "linux/stage/kwin-corners/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 bobsixsixsix-boop"
+SPDX-License-Identifier = "GPL-2.0-or-later"

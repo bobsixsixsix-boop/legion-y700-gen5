@@ -10,10 +10,10 @@
 
 ## 设计
 
-LIVI 原样使用，另需一个 MFi 认证组件（不在本仓库）。10-23 起用 10.0.0，全是官方 AppImage 原件。之前的 9.4.0 有个例外（10-20 至 10-23）：`livi-core` 和 `livi-gst-host` 两个文件是在平板上带上游 Siri 修复自编的（见进度「Siri、地图语音听不到」「换版 LIVI 10.0.0」）。
+LIVI 原样使用，另需一个 MFi 认证组件（不在本仓库）。10-23 起用 10.0.0，11-04 起用 10.3.0，全是官方 AppImage 原件。之前的 9.4.0 有个例外（10-20 至 10-23）：`livi-core` 和 `livi-gst-host` 两个文件是在平板上带上游 Siri 修复自编的（见进度「Siri、地图语音听不到」「换版 LIVI 10.0.0」）。
 
 - **LIVI**（github.com/f-io/LIVI，GPL-3.0-or-later）：现成的 Linux 车机 App，作者写明在 Ubuntu 26.04 上测过。
-  - 使用官方 `LIVI-10.0.0-linux-arm64.AppImage`（10-23 起），sha256 `9ddce395…8911`；之前是 `LIVI-9.4.0-linux-arm64.AppImage`，sha256 `38849d50…f4922`。两个都与 GitHub 发布页的 digest 一致。
+  - 使用官方 `LIVI-10.3.0-linux-arm64.AppImage`（11-04 起，见下文「换版 LIVI 10.3.0」），sha256 `286b951d…74a2`；之前是 `LIVI-10.0.0-linux-arm64.AppImage`（10-23 起），sha256 `9ddce395…8911`，再之前是 `LIVI-9.4.0-linux-arm64.AppImage`，sha256 `38849d50…f4922`。三个都与 GitHub 发布页的 digest 一致。
   - 它包办这些：全屏车机界面（10.0.0 起是 Slint 的 `livi-ui`，9.4.0 是 Electron）；后台程序 `livi-helperd`（Rust，经 sudoers 以 root 运行）；BlueZ 配对和 iAP2；自开 hostapd 热点；GStreamer 硬解；音频、麦克风、Siri。
   - 唯一缺的是 MFi 认证。它只认两种：板上 I²C 芯片（`/dev/i2c-<carPlayMfiI2cBus>`），或刷过机的 LIVI Link 加密狗。
 - **MFi 认证组件（不在本仓库）**：LIVI 从 `/dev/i2c-<carPlayMfiI2cBus>` 读认证协处理器（读写方式见 LIVI 的 `native/livi-helperd/crates/iap2-mfi/src/linux.rs`）。这里配的是总线 99（`carPlayMfiI2cBus` 99，`carPlayMfiPowerGpio` -1），启动器起 LIVI 前检查 `/dev/i2c-99` 在不在。LIVI 的 helper 只在启动时打开一次认证设备，那时设备必须已经存在。LIVI 本身一行不改。
@@ -42,7 +42,7 @@ LIVI 原样使用，另需一个 MFi 认证组件（不在本仓库）。10-23 �
 | `livi/test-guard.sh` | 实测时的自恢复。root 在平板上跑（`/root/src-carplay-livi/`）：`arm [分钟]` 用 systemd-run 定一个瞬时定时器（单元 `y700-carplay-test-guard`，默认 20 分钟）；`disarm` 取消；`restore` 照 LIVI 自己退出的路子收尾——给 livi-core 发 TERM，`y700-carplay` 随后停热点、teardown、收 helper、停 avahi——然后逐项复查，确认 wlp1s0 回到 NetworkManager 并连上；`state` 只看状态。不重启，不碰 config.json |
 | `livi/dev.f-io.livi.desktop` | 应用菜单 `~/.local/share/applications/`（文件名要和 LIVI 窗口的 app_id `dev.f-io.livi` 一致，任务栏图标才对得上），另存一份为桌面图标 `~/Desktop/CarPlay.desktop`（755） |
 
-下载件（LIVI AppImage）不进仓库：`LIVI-10.0.0-linux-arm64.AppImage`（112 MB）、之前的 `LIVI-9.4.0-linux-arm64.AppImage`（222 MB），从 LIVI 的 GitHub 发布页下载。
+下载件（LIVI AppImage）不进仓库：`LIVI-10.3.0-linux-arm64.AppImage`（111 MB）、之前的 `LIVI-10.0.0-linux-arm64.AppImage`（112 MB）和 `LIVI-9.4.0-linux-arm64.AppImage`（222 MB），从 LIVI 的 GitHub 发布页下载。
 
 ## 进度
 
@@ -536,6 +536,89 @@ LIVI 原样使用，另需一个 MFi 认证组件（不在本仓库）。10-23 �
   - 其余是 AA 和面板尺寸的日志少打几遍，以及 Arch Linux 的安装脚本（我们不用它的 install.sh）。自带的 libwayland-client 还是 1.23.1，踩坑四的预加载照样要。
   - **反而多一个变量**：10.0.1 把自带的 libva 2.22 挪进 `lib/libva-compat`，只在系统 libva 低于 2.21 或缺 drm/x11 时才放到前面（`livi-core/src/resources.rs`）。平板上系统 libva 是 2.23，drm、x11 都在，所以 gst-host 会改用系统的 libva（`/usr/local` 里还有 radxa 的 libva-v4l2），VA 那条链路变了，硬解要重看。
   - 换版要下 AppImage（10.0.0 是 112 MB，先问作者），还要作者在场用 iPhone 重测。等下一个和无线有关的版本一起换，上游巡检照常盯 f-io/LIVI 的发布。真要换时照上面 10.0.0 的流程走，多看一眼 gst-host.log 的 `decoder=` 还是不是 `v4l2h265dec (hw)`。
+- [x] **换版 LIVI 10.3.0（11-04：装好了，无线空跑通过；20:46–20:56 作者在场用 iPhone 实测通过，内核 y19；只剩「unstick 之后 iPhone 能不能回来」这次没碰上）**。
+  - **起因**：作者 11-04 要换 10.3.0。10.3.0（tag `68332422`，11-03 发布）包含没单独发布的 10.2.0，也包含 10.1.0 和 10.0.1。
+  - **核对**：逐条读了 v10.0.0..v10.3.0 的源码 diff（核对记录不随公开仓库发布），结论见下面「和我们有关的变化」。
+  - **上游改写过 git 历史**：v10.0.0 现为 `53907df7`，Siri 修复现为 `66253d44`，10.3.0 里有它。上面 10.0.0 一节写的 `91f7ced8`、`b82707ad` 是当时的事实，没改。
+  - **下载**：官方 `LIVI-10.3.0-linux-arm64.AppImage`，111 MB（116439560 字节），sha256 `286b951d…74a2`，和发布页的 digest 一致。作者 11-04 同意后，平板直接从 GitHub 下到 `/root/livi-10.3.0-dl/`（root 0700 的家目录里）。
+  - **10.3.0 里和我们有关的变化**（读源码核对过）：
+    - 不用改的：
+      - 包结构；
+      - `LIVI_GST_SINK`、`LIVI_GST_PRELOAD`；
+      - 色彩修正库改的那段（`BAD_COLORIMETRY` 还是 1:4:5:1）；
+      - config.json 的键（只加不改名：`screenWidthMm/HeightMm`、`touchCalibration`、`textColorDark/Light`）；
+      - 热点和蓝牙（`wifi_ap.rs`、`bluetoothd.rs` 只加了许可证头）；
+      - sudoers 和热点单元的模板。
+    - 自带的 `libwayland-client` 还是 1.23.1，踩坑四的预加载照样要。
+    - udev 规则模板从 `LIVI-RULE-VERSION=6` 升到 7，多了 OPPO 的安卓一行（`22d9`）。livi-core 启动时比对已装规则里的版本行，对不上就经 helper 把原版装回去，原版带着我们滤掉的安卓那几行（`livi-core/src/udev_rule.rs`）。所以换版后一定要重跑 `install-livi.sh`。
+    - 踩坑五的根因上游修了（`a690ddf7`）：livi-core 现在按 `kiosk.main` 叫 compositor 全屏，窗口的全屏状态变了也会写回 `kiosk`。
+    - 报给 iPhone 的毫米尺寸改了算法（`5bf2d6da`）：dpi 是 0、又没设 mm 时，直接用面板报的尺寸，不再按投屏缩放。y17 内核下 10.0.0 算出约 268×168，10.3.0 直接是 268×168，按理界面大小不变。但内核 y18 的补丁 0144 把面板的物理尺寸从 168×268（12.4 寸屏的数）改成了真的 8.8 寸 118×190，KWin 把它交给 livi-compositor，所以 y19 上实测报的是 `panel 'main': 190x118 mm over 1600x1002 px`，iPhone 界面比 10.0.0 时略大（见下面实测）。
+    - libva 换了一份：10.0.1 起包里的 libva 2.22 挪进 `lib/libva-compat`，只在系统的不到 2.21 或缺 drm/x11 时才用。平板的系统 libva 是 2.23，所以 gst-host 从包里那份换成了系统的。我们的硬解 `v4l2h265dec` 不走 VA，但要实测确认。
+    - 新增的简体中文界面、触摸校准（只在 DRM 直跑时有用）、视频播放控件、遥测的 `darkMode` 和打开投屏 app 的 `path`，都不碰我们的集成。
+  - **改了的写死路径**：
+    - `install-livi.sh` 的 `LIVI=`；
+    - 启动器的 `CORE`/`HELPER`；
+    - `test-guard.sh` 的 `CORE`/`HELPER`；
+    - `dryrun-wireless.sh` 的 `CORE`；
+    - desktop 文件的 `Icon`（`/opt/livi-10.3.0/livi.png`）和 Comment；
+    - 体检那行注释。
+
+    体检的 CHANGED 提示列的正是这几处，没漏。
+  - **有意不做**：
+    - **KWin 全屏规则留着**：`a690ddf7` 之后 LIVI 自己会全屏。规则和 `kiosk.main` 都要全屏，不打架；留着还能兜住上游以后再退化。体检照旧要求有这条规则。
+    - **仍不用 `LIVI_KIOSK=1`**：原因同踩坑五，那样设置里的 Power Off 会关掉平板。
+    - **界面不切中文**：安装脚本不改已有配置，config.json 还是 `language: en`。要切在 LIVI 设置里点。
+    - **4000 口不加防火墙**：LIVI 的遥测口照旧无鉴权、监听所有网卡，10.3.0 还多了能改的东西（`darkMode`、`path` 打开投屏 app）。CarPlay 期间 wlp1s0 是热点，能连进来的只有知道热点口令的设备，作者决定不挡。自己部署时按需要加。
+    - **不改用 `screenWidthMm/HeightMm`**：y19 起面板报的 190×118 mm 是真尺寸。界面因此略大，作者 11-04 实测后觉得可以接受，所以不拿这两个键把它调回 268×168。
+  - **踩坑和观察**：
+    - **目录又是 0700**：这次 17 个目录全是 root 0700，连根目录也是。`install-livi.sh` 第 0 步全改成 0755，没有 setuid，没有组或别人可写的文件；user 能执行 livi-core。
+    - **空跑时 iPhone 照旧抢在热点前面**：16:19:41，iPhone 经蓝牙要 CarPlay，热点 16:19:44 才起来，日志是 `CarPlayStartSession not sent: no link-local on "wlp1s0"`。`unstick` 照设计在 16:19:44 断开了它的蓝牙（`unstick: … (1/3, 16:19:44)`），这是 unstick 第一次在平板上真的出手。之后 50 秒里，LIVI 的重连循环一直在叫另一台配对过的手机，每秒一次，都是 `br-connection-busy`，没有再叫 iPhone，空跑就结束了。10.0.0 的上一份日志里，同样的 busy 有 182 条，不是这次换版带来的。真机实测时看：iPhone 被断开后多久回来（它自己回来，还是要等 LIVI 叫它）。
+    - **启动时保持亮屏多亮 12 秒**：10.3.0 一启动就新建一个空的 `gst-host.log`。启动器把「gst-host.log 15 s 内更新过」当成有画面，空跑时 16:19:50–16:20:02 挡住了闲置变暗。LIVI 的界面这时本来就在屏幕上，没有坏处，没改。
+  - **平板上的步骤（11-04 16:15–16:21）**：
+    1. 平板直接下载，核对 sha256。`--appimage-extract` 解到 `/root/livi-10.3.0-dl/` 下新建的临时目录，chown root 后 mv 成 `/opt/livi-10.3.0`（293 MB）。五个二进制 `ldd` 都不缺库。`/opt/livi-10.0.0` 留着回滚用。
+    2. 和 10.0.0 比：除了 `resources/` 下多了 LICENSE 和 NOTICE，第三层以内的文件一样；模板只有 udev 规则不同。
+    3. 仓库的 `linux/carplay/livi/` 整个 scp 到 `/root/src-carplay-livi/`，逐个比 sha256 都一致，平板上没有多余的文件。
+    4. 确认 LIVI 不在跑，备份 `/root/99-LIVI-helper.10.0.0` 和 `/root/99-LIVI.rules.10.0.0`，`ln -sfn livi-10.3.0 /opt/livi`，跑 `install-livi.sh`（输出在 `/root/livi-10.3.0-dl/install-20261104.log`），rc 0。结果：
+       - 17 个目录改成 0755；
+       - sudoers 和原来比只差路径，`visudo -c` 通过，`sudo -l -U user` 列出新路径；
+       - udev 规则是 `LIVI-RULE-VERSION=7`，没有 `22d9` 那行；
+       - 启动器、ps-restore、NM 的 dispatcher 钩子都和仓库逐字节相同；
+       - KWin 规则原来就有，没动；
+       - config.json 没改。
+    5. 体检换成新版（只改了一行注释）。跑一遍只多一条 `CHANGED LIVI livi-10.0.0 -> livi-10.3.0`，CarPlay 一项 OK。基线这时没存，iPhone 实测后 20:57 才 `--save`（见实测）。
+  - **无线空跑（16:19:33–16:20:51，`dryrun-wireless.sh`，内核 7.3.0-tb323fu-t52-y17）**：
+    - 认证组件：`opening MFi bus=99 gpio=-1` → `MFi addr=0x10`。
+    - 第一次开着无线启动时，livi-core 照 10.0.0 那样，按自己的 helper 重装了热点那三样（16:19:38）：
+      - `/usr/local/sbin/livi-helperd` 和 10.3.0 的逐字节相同；
+      - `/etc/sudoers.d/99-LIVI-wifi-ap` 和热点单元也重写了。
+
+      我们的 drop-in 照样挂得上：ap-settle、ps-restore 都跑了。
+    - 蓝牙：`[hfp] HF profile registered`、`[aa] profile registered (RFCOMM ch 8)`、`[aa] BLE advertisement registered`、`_airplay._tcp` 发布了。网卡名是「Y700 CarPlay」，可发现，AA 的 UUID 在，TCP 5277 在听。
+    - 热点：ap-settle 重载 ath12k 用了 1.46 s，`AP up — ssid=Y700 CarPlay ip=10.10.0.1 channel=40 (5200 MHz) width=80MHz 802.11ax`。
+    - 退出：guard restore 之后没有残留进程，热点单元 inactive，NM 的 unmanaged 配置撤了，Wi‑Fi 回到原来的网络，`removed 6 Wi-Fi profile copies`，`power save restored after the CarPlay access point: Power save: on, 4s`。体检 CarPlay 一项 OK。
+  - **实测（11-04 20:46–20:56，作者在场，插着 USB 线，进平板走 USB 网络；内核 `7.3.0-tb323fu-t52-y19`）**：
+    - 实测前：11-04 20:22 平板换成了内核 y19（20:27 keep）。重启后核过：`/opt/livi`、sudoers、udev 规则版本 7 都在；认证组件在；热点单元 inactive；没有 unmanaged 配置；开机保护因为没有残留，按条件跳过；省电 on。体检两条 CHANGED（内核 y17→y19、LIVI），CarPlay 一项 OK。
+    - 日志在 `/root/carplay-tests-20261017/livi1030-20261104/`（root 0700，热点密码已滤掉）。监视脚本是 `/root/carplay-tests-20261017/cp1030-watch.sh`。
+    - [x] CarPlay 连上、出画面：20:46:50 经蓝牙发 `CarPlayStartSession`，20:46:56 `mfi4: the phone and LIVI proved each other`，同一秒 `RECORD (session started)`。这次 iPhone 是热点起来以后才来的，没出现空跑时那种抢跑。
+    - [x] 解码器还是 `decoder=v4l2h265dec (hw)`，换成系统 libva 2.23 没影响。只有一路 `0x7a000001`。10.3.0 的 `[cp_screen] recv` 行在 `gst-host.log`，不在 `LIVI.log`（每 5 秒一行）。不动时每 5 秒 150 帧（30 fps）；作者连续滑 10 秒，每 5 秒 288–296 帧，`dropped=0`，约 59 fps。
+    - [x] 窗口 1600×1002 铺满，没有标题栏。界面比 10.0.0 时略大，原因是内核 0144 改了面板毫米尺寸（见上面「和我们有关的变化」）。作者看了觉得可以接受，不调。
+    - [x] Siri、地图语音：作者确认都正常。Siri 在 20:53:35–20:53:38 建了三路 `audioType=speechRecognition`（Opus）。在这之前，20:52:42 和 20:52:51 各建了一路 `audioType=media`（AAC-LC）。
+    - [x] 退出（20:56:24，`LIVI exited rc=0`）：没有残留进程，热点单元 inactive，NM 的 unmanaged 配置撤了，Wi‑Fi 回到原来的网络。退出时 `LIVI.log` 有一行 `Error running winit event loop: Exit Failure: 1`，10.0.0 的 10-23 日志里也有，不是换版带来的。
+    - [x] 省电这次走的是 10-24 做的 NM dispatcher 那条路（10-24 16:31、10-28 13:59 和 19:41 也走过）：20:56:24 `iw set power_save on left 'Power save: off', 0s, deferred to NetworkManager's dispatcher`。20:56:30 NM 把 wlp1s0 连上，`restored when NetworkManager brought wlp1s0 up (pending since 2026-11-04 20:56:24): Power save: on, 0s`。
+    - [x] 桌面图标：`~user/Desktop/CarPlay.desktop` 和 `~/.local/share/applications/dev.f-io.livi.desktop` 都指向 `/opt/livi-10.3.0/livi.png`，它和 10.0.0 那张逐字节相同（sha256 `40aa70ef…`）。
+    - [ ] unstick 之后 iPhone 能不能回来（见上面「踩坑和观察」）：这次 iPhone 来得晚，unstick 没出手，没测到。下次日志里有 `unstick:` 时再看。
+    - 无线 Android Auto：先放着，不测。
+    - 体检：20:57 `y700-checklist --save`，三条 CHANGED 一起存进基线：
+      - 内核 y17→y19；
+      - LIVI 10.0.0→10.3.0；
+      - claude-desktop 4.4212.0→4.16336.0（20:43:11 作者自己用 apt 升级的）。
+
+      claude-desktop 那条的义务「Electron 大版本变了就熄屏复测合成线程（`linux/power/cx-collapse/runs/day-20261018/bfsclaude.sh`）」核过：内置 Electron 仍是 44.9.3（Chromium 152），大版本没变，不用复测。存完再跑一遍 rc 0，CarPlay 一项 OK。
+  - **回滚到 10.0.0**（10.3.0 用不了时）：
+    1. 退出 LIVI，`ln -sfn livi-10.0.0 /opt/livi`。
+    2. 把换版之前那版 `linux/carplay/livi/`（公开仓库的提交 4240ea7）整个传到 `/root/src-carplay-livi/`，跑它的 `install-livi.sh`。sudoers、启动器、desktop 文件会换回 10.0.0 的路径。udev 规则会写成版本 6；不重跑的话，10.0.0 见到版本 7 的规则对不上，会装回带安卓行的原版。
+    3. config.json 不用改：10.0.0 读配置只认它自己的键，10.3.0 新加的键它不读。热点那三样，10.0.0 下次开无线时会自己装回它那份。
+- [x] **CarPlay Ultra（11-07 试过一次，不做）**：只改 config.json 的主题和车型键试了一次。iPhone 重新配对后换上了 Ultra 界面，但只占屏幕上面一条，空调页一直转圈；LIVI 这边的 Ultra 通道（`uiSync`）没建起来，日志显示是 iPhone 没开这条通道。普通 CarPlay 没受影响。作者叫停，当晚整份还原了配置，Ultra 不再做。试验脚本和记录不随公开仓库发布。
 
 ## 已知副作用（要告诉作者）
 

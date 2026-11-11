@@ -1,0 +1,108 @@
+From 52b3d4aac005954aeb299831fb46da2bbf214b2a Mon Sep 17 00:00:00 2001
+From: Armada <noreply@armada.local>
+Date: Tue, 27 Oct 2026 13:46:00 -0500
+Subject: [PATCH] HID: uhid: read the output queue under qlock
+
+uhid_queue() stores outq[head] and then advances head while holding qlock,
+but uhid_char_read() checks head == tail and loads outq[tail] without it.
+Nothing orders the two producer stores for that lockless reader, so on a
+weakly ordered CPU it can see the new head before the slot store lands and
+pass a NULL source to copy_to_user():
+
+  Unable to handle kernel NULL pointer dereference at virtual address 0
+  pc : __arch_copy_to_user+0x180/0x248
+  lr : uhid_char_read+0x190/0x240
+
+It was hit on an AYN Odin 2 Portal (SM8550) while InputPlumber served a
+virtual Steam Deck controller and Steam was issuing feature reports. The oops
+kills the reader with devlock held and its file reference taken, so the uhid
+device can never be read, written or released again. Its hidraw node stays
+behind and every HIDIOCSFEATURE Steam sends to it blocks for the full report
+timeout, which stalls Steam's controller thread and delays or drops input
+from the live controller until reboot.
+
+Snapshot the slot under qlock so the load pairs with the producer's release,
+and clear the slot and advance tail in the same critical section. devlock
+still serialises readers, and the producer never writes the tail slot, so the
+event can be copied to userspace outside the spinlock.
+
+y700 (kernel y15): source armada-os/armada commit f19400c38f65
+("fix(kernel): stop uhid reads oopsing on an unpublished queue slot",
+FeralAI), which adds packages/kernel/patches/1008-HID-uhid-read-the-output-queue-under-qlock.patch;
+the file was cut byte for byte out of
+https://github.com/armada-os/armada/commit/f19400c3.patch (blob
+b1f842f17 matches). armada lists it as "upstream: local". The file
+has no Date, no sign-off and a placeholder author, all kept as is;
+the date is that armada commit's. Rebasing: none, both hunks apply to
+t52 at their own line numbers (uhid.c in t52 is v7.3's); the file had
+no "diff --git" header, so the hunk headers here are git's. Why: the
+same lockless read is in v7.3, the tablet's Oryon cores are weakly
+ordered, and BlueZ serves Bluetooth LE keyboards and game pads
+through /dev/uhid (HID over GATT), whose output and feature reports
+(rumble, LEDs) go through this queue. It has not been seen on the
+tablet; this is a preventive fix.
+
+y700 patch file: 1054-HID-uhid-read-the-output-queue-under-qlock.patch
+---
+ drivers/hid/uhid.c | 35 +++++++++++++++++++++++------------
+ 1 file changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/hid/uhid.c b/drivers/hid/uhid.c
+index 37b60c3aa..ead1f5772 100644
+--- a/drivers/hid/uhid.c
++++ b/drivers/hid/uhid.c
+@@ -673,6 +673,7 @@ static ssize_t uhid_char_read(struct file *file, char __user *buffer,
+ 				size_t count, loff_t *ppos)
+ {
+ 	struct uhid_device *uhid = file->private_data;
++	struct uhid_event *ev;
+ 	int ret;
+ 	unsigned long flags;
+ 	size_t len;
+@@ -696,21 +697,31 @@ try_again:
+ 	if (ret)
+ 		return ret;
+ 
+-	if (uhid->head == uhid->tail) {
++	/*
++	 * uhid_queue() publishes outq[head] and then head under qlock. Read
++	 * both under qlock too: a lockless reader on a weakly ordered CPU can
++	 * observe the new head before the slot store and copy from NULL.
++	 * devlock serialises readers, so the slot stays ours until tail moves.
++	 */
++	spin_lock_irqsave(&uhid->qlock, flags);
++	ev = uhid->head == uhid->tail ? NULL : uhid->outq[uhid->tail];
++	spin_unlock_irqrestore(&uhid->qlock, flags);
++
++	if (!ev) {
+ 		mutex_unlock(&uhid->devlock);
+ 		goto try_again;
++	}
++
++	len = min(count, sizeof(*ev));
++	if (copy_to_user(buffer, ev, len)) {
++		ret = -EFAULT;
+ 	} else {
+-		len = min(count, sizeof(**uhid->outq));
+-		if (copy_to_user(buffer, uhid->outq[uhid->tail], len)) {
+-			ret = -EFAULT;
+-		} else {
+-			kfree(uhid->outq[uhid->tail]);
+-			uhid->outq[uhid->tail] = NULL;
+-
+-			spin_lock_irqsave(&uhid->qlock, flags);
+-			uhid->tail = (uhid->tail + 1) % UHID_BUFSIZE;
+-			spin_unlock_irqrestore(&uhid->qlock, flags);
+-		}
++		spin_lock_irqsave(&uhid->qlock, flags);
++		uhid->outq[uhid->tail] = NULL;
++		uhid->tail = (uhid->tail + 1) % UHID_BUFSIZE;
++		spin_unlock_irqrestore(&uhid->qlock, flags);
++
++		kfree(ev);
+ 	}
+ 
+ 	mutex_unlock(&uhid->devlock);
+-- 
+2.55.0.windows.3
+

@@ -1,0 +1,41 @@
+From b5238f9e59be2be85766d5277570f5d521ae1f0a Mon Sep 17 00:00:00 2001
+From: y700 workspace <304558835+bobsixsixsix-boop@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 03:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: baldur-stats: hand qcom_stats the AOSS QMP
+
+On SM8450 and later the AOP fills in the duration fields of the DDR
+statistics only when asked: qcom_ddr_stats_show() sends
+"{class: ddr, action: freqsync}" before reading MSG RAM, but only when
+the rpmh-stats node has a qcom,qmp phandle. Without it ddr_stats reads
+"Duration (ticks):0" for every DDR low-power mode and frequency, so
+there is no way to tell whether DDR self-refresh is ever reached with
+the screen off.
+
+sm8750.dtsi has the property on the same node, and so do the
+kaanapali.dtsi of infiniti-mainline and of the OnePlus Pad 4 tree
+(SuperTurtleDev/iceland-mainline-kernel-linux 03896b28).
+
+Side effects: qcom_stats now defers its probe until aoss_qmp is up
+(CONFIG_QCOM_AOSS_QMP=y here) and fails the probe on any other
+qmp_get() error, which would take every qcom_stats file with it; each
+read of ddr_stats sends one QMP message and waits up to 1 s for the
+AOP to take it. The other files (apss, cxsd, aosd, ddr, subsystems) are
+read as before.
+---
+ arch/arm64/boot/dts/qcom/baldur-stats.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/baldur-stats.dtsi b/arch/arm64/boot/dts/qcom/baldur-stats.dtsi
+index 26b710a..0e30a6b 100644
+--- a/arch/arm64/boot/dts/qcom/baldur-stats.dtsi
++++ b/arch/arm64/boot/dts/qcom/baldur-stats.dtsi
+@@ -9,5 +9,6 @@
+ 	sram@c3f0000 {
+ 		compatible = "qcom,rpmh-stats";
+ 		reg = <0x0 0x0c3f0000 0x0 0x400>;
++		qcom,qmp = <&aoss_qmp>;
+ 	};
+ };
+-- 
+2.55.0.windows.3
+

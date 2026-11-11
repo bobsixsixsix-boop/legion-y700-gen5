@@ -1,7 +1,7 @@
 #!/bin/sh
 # /usr/local/bin/y700-carplay -- the desktop icon "CarPlay" (linux/carplay/livi/, 2026-10-17): wireless CarPlay and,
 # since 10-20, wireless Android Auto (LIVI's own; on in config.json, see install-livi.sh).
-# Runs LIVI 10.0.0 unmodified (/opt/livi -> /opt/livi-10.0.0, unpacked from the official arm64 AppImage) as the
+# Runs LIVI 10.3.0 unmodified (/opt/livi -> /opt/livi-10.3.0, unpacked from the official arm64 AppImage) as the
 # desktop user, and tidies up around it. Since 10.0.0 the AppImage's entry is the sh script LIVI, which execs
 # resources/core/livi-core; core starts the compositor and the Slint UI (livi-ui) itself. So $pid below is livi-core.
 #   before: the MFi authentication coprocessor (/dev/i2c-99, not part of this tree) must be up - LIVI's helper opens /dev/i2c-99 once, at its start. avahi-daemon is
@@ -32,8 +32,8 @@
 #           link dropped once the access point is up, so LIVI asks it again (unstick below).
 # Log of the last two runs: ~/.cache/y700-carplay/livi.log (and .log.1).
 LIVI=/opt/livi/LIVI
-CORE=/opt/livi-10.0.0/resources/core/livi-core
-HELPER=/opt/livi-10.0.0/resources/driver/livi-helperd
+CORE=/opt/livi-10.3.0/resources/core/livi-core
+HELPER=/opt/livi-10.3.0/resources/driver/livi-helperd
 UNIT=livi-wifi-ap.service
 NM_CONF=/etc/NetworkManager/conf.d/99-livi-ap-unmanaged.conf
 IFACE=wlp1s0            # the hotspot's interface, wifiInterface in config.json (install-livi.sh)

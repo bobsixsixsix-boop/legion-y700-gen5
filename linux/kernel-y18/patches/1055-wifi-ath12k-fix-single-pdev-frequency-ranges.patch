@@ -1,0 +1,65 @@
+From 280f44b62f24c9005d713ab986dfe1d9a1d535b8 Mon Sep 17 00:00:00 2001
+From: Shenghan Gao <gsh20040816@gmail.com>
+Date: Wed, 15 Jul 2026 06:52:18 +0000
+Subject: [PATCH] wifi: ath12k: fix frequency range for single-pdev devices
+
+This restores the frequency range fix originally posted upstream at
+https://lore.kernel.org/r/20260715065218.41232-1-gsh20040816@gmail.com
+
+WMI band capabilities are bit flags, not indices into cap.band[]. Use
+NL80211_BAND_* indices, and include 5 GHz when a single pdev covers both
+5 and 6 GHz, even if supports_6ghz is true.
+
+y700 (kernel y15): source armada-os/armada,
+packages/kernel/patches/1021-wifi-ath12k-fix-single-pdev-frequency-ranges.patch,
+https://raw.githubusercontent.com/armada-os/armada/main/packages/kernel/patches/1021-wifi-ath12k-fix-single-pdev-frequency-ranges.patch
+(fetched 2026-10-28, identical to the copy at 21316f049f14; sha256
+96c1094f2403d73304adfc79d6eee6e38f1b055175b40d4e5982c04a2d53d25c).
+The file has no Date; the one here is the send time in the lore
+Message-ID (git send-email writes it in UTC). Rebasing: none, both
+hunks apply to t52 at their own line numbers. Why: the WCN7860 is a
+single-pdev device, so ath12k indexed cap.band[] with the WMI flags
+(1 = the 5 GHz slot for 2.4 GHz) and skipped the 5 GHz range because
+supports_6ghz is set. Under the JP regulatory domain the union of
+the ranges, and so the channel list sent to the firmware, does not
+change (linux/wifi/5GHZ-ARMADA-594-EVAL.md); a country without 6 GHz
+rules would lose 5 GHz. A small, correct fix carried with the next
+kernel build, as that evaluation asked; it does not address the 5 GHz
+beacon loss.
+
+y700 patch file: 1055-wifi-ath12k-fix-single-pdev-frequency-ranges.patch
+
+Signed-off-by: Shenghan Gao <gsh20040816@gmail.com>
+---
+ drivers/net/wireless/ath/ath12k/reg.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
+index 89abf2e87..c3bb1df2b 100644
+--- a/drivers/net/wireless/ath/ath12k/reg.c
++++ b/drivers/net/wireless/ath/ath12k/reg.c
+@@ -300,7 +300,7 @@ int ath12k_regd_update(struct ath12k *ar, bool init)
+ 
+ 	if (supported_bands & WMI_HOST_WLAN_2GHZ_CAP) {
+ 		if (ab->hw_params->single_pdev_only) {
+-			phy_id = ar->pdev->cap.band[WMI_HOST_WLAN_2GHZ_CAP].phy_id;
++			phy_id = ar->pdev->cap.band[NL80211_BAND_2GHZ].phy_id;
+ 			reg_cap = &ab->hal_reg_cap[phy_id];
+ 		}
+ 
+@@ -310,9 +310,10 @@ int ath12k_regd_update(struct ath12k *ar, bool init)
+ 		ath12k_mac_update_freq_range(ar, freq_low, freq_high);
+ 	}
+ 
+-	if (supported_bands & WMI_HOST_WLAN_5GHZ_CAP && !ar->supports_6ghz) {
++	if (supported_bands & WMI_HOST_WLAN_5GHZ_CAP &&
++	    (!ar->supports_6ghz || ab->hw_params->single_pdev_only)) {
+ 		if (ab->hw_params->single_pdev_only) {
+-			phy_id = ar->pdev->cap.band[WMI_HOST_WLAN_5GHZ_CAP].phy_id;
++			phy_id = ar->pdev->cap.band[NL80211_BAND_5GHZ].phy_id;
+ 			reg_cap = &ab->hal_reg_cap[phy_id];
+ 		}
+ 
+-- 
+2.55.0.windows.3
+

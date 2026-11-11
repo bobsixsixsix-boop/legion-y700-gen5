@@ -348,6 +348,9 @@ Window {
                 readonly property int rowGap: 14
                 // a tile's width three across a column: the far column's first row and the tray tiles under it share it
                 readonly property real third: (win.colW - 2 * rowGap) / 3
+                // four across (the thumb column's row 6, 11-10): (340 - 3 x 14) / 4 = 74.5, two of them and a gap = 163,
+                // the width of the wide tiles under them, so the row stands on their two-column grid
+                readonly property real quarter: (win.colW - 3 * rowGap) / 4
                 // what the tray section's heading and tiles may take: the far column's blank (between the toggles
                 // and the power row) less what the taller confirm card grows by, so either card still opens under
                 // the tiles and the bottom line stays put. While shown the section is the column's filler (the
@@ -666,7 +669,7 @@ Window {
                         }
                     }
 
-                    // the thumb grid: 2 x 100 tiles / pills / performance / 2 x 100 tiles / 2 x 2 actions of 60 (698 high)
+                    // the thumb grid: 2 x 100 tiles / pills / performance / 2 x 100 tiles / 3 x 100 tiles / 2 x 2 actions of 60 (698 high)
                     GridLayout {
                         id: gridB
                         Layout.fillWidth: true
@@ -752,38 +755,72 @@ Window {
                                 }
                             }
                         }
-                        // row 6, y 612: the rest of the game cluster
-                        Tile {
-                            Layout.fillWidth: true
-                            // the chip shows the configured rate; a tap cycles 60 -> 90 -> 120 -> 164 (panel max)
-                            glyph: st.hz ? String(st.hz) : "–"; title: "刷新率"
-                            onTapped: {
-                                const steps = [60, 90, 120, 164]
-                                // a rate outside the cycle (y700-refresh-auto lowered the panel to 30 Hz for a video)
-                                // counts as 120, the usual base: the next tap goes to 164, not to 60 (2026-10-16)
-                                const i = steps.indexOf(Number(st.hz)), cur = i < 0 ? steps.indexOf(120) : i
-                                const next = steps[(cur + 1) % steps.length]
-                                backend.setLocal("hz", next)
-                                // the helper's refresh policy can only float BELOW the KDE mode's rate, so the
-                                // tile switches the KDE mode itself (kscreen-doctor) and leaves the helper on auto
-                                // (idle drops to 60/30 still apply); MaxHz in the status follows the mode
-                                // `&&`: a failed mode switch must not be hidden by the helper call succeeding after it
-                                backend.act("hz", "kscreen-doctor output.DSI-1.mode.1904x3040@" + next + " >/dev/null && tb323fu-ctl refresh auto")
-                                win.lockInput()
+                        // row 6, y 612: the rest of the game cluster, 「台前调度」 (11-08) and 「分屏」 (11-10, linux/split): four
+                        // across (ctl.quarter, 74.5; three across at 104 until 11-10). Titles of four glyphs at most (64 px
+                        // at 16 DemiBold, 5 px to spare each side)
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.columnSpan: 2
+                            spacing: ctl.rowGap
+                            Tile {
+                                Layout.fillWidth: true; Layout.preferredWidth: ctl.quarter
+                                // the chip shows the configured rate; a tap cycles 60 -> 90 -> 120 -> 164 (panel max)
+                                glyph: st.hz ? String(st.hz) : "–"; title: "刷新率"
+                                onTapped: {
+                                    const steps = [60, 90, 120, 164]
+                                    // a rate outside the cycle (y700-refresh-auto lowered the panel to 30 Hz for a video)
+                                    // counts as 120, the usual base: the next tap goes to 164, not to 60 (2026-10-16)
+                                    const i = steps.indexOf(Number(st.hz)), cur = i < 0 ? steps.indexOf(120) : i
+                                    const next = steps[(cur + 1) % steps.length]
+                                    backend.setLocal("hz", next)
+                                    // the helper's refresh policy can only float BELOW the KDE mode's rate, so the
+                                    // tile switches the KDE mode itself (kscreen-doctor) and leaves the helper on auto
+                                    // (idle drops to 60/30 still apply); MaxHz in the status follows the mode
+                                    // `&&`: a failed mode switch must not be hidden by the helper call succeeding after it
+                                    backend.act("hz", "kscreen-doctor output.DSI-1.mode.1904x3040@" + next + " >/dev/null && tb323fu-ctl refresh auto")
+                                    win.lockInput()
+                                }
                             }
-                        }
-                        Tile {
-                            Layout.fillWidth: true
-                            // three steps: off -> full (everything) -> mini (FPS + watts) -> off
-                            icon: "speedometer"
-                            title: st.hud === "full" ? "浮层·全部" : st.hud === "mini" ? "浮层·帧数功耗" : "性能浮层"
-                            active: st.hud === "full" || st.hud === "mini"
-                            // the target step is passed explicitly (not "next"): three fast taps must end in the
-                            // state of the last tap, and a queued "next" after a running "next" would not
-                            onTapped: {
-                                const next = st.hud === "full" ? "mini" : st.hud === "mini" ? "off" : "full"
-                                backend.setLocal("hud", next)
-                                backend.act("hud", "$HOME/.local/bin/y700-hud-toggle " + next)
+                            Tile {
+                                Layout.fillWidth: true; Layout.preferredWidth: ctl.quarter
+                                // three steps: off -> full (everything) -> mini (FPS + watts) -> off. Four glyphs each
+                                // (「浮层·帧数功耗」 was 98 px, over 74.5)
+                                icon: "speedometer"
+                                title: st.hud === "full" ? "全部浮层" : st.hud === "mini" ? "帧数功耗" : "性能浮层"
+                                active: st.hud === "full" || st.hud === "mini"
+                                // the target step is passed explicitly (not "next"): three fast taps must end in the
+                                // state of the last tap, and a queued "next" after a running "next" would not
+                                onTapped: {
+                                    const next = st.hud === "full" ? "mini" : st.hud === "mini" ? "off" : "full"
+                                    backend.setLocal("hud", next)
+                                    backend.act("hud", "$HOME/.local/bin/y700-hud-toggle " + next)
+                                }
+                            }
+                            // Stage Manager (linux/stage): the KWin script y700-stage reads [Script-y700-stage] Active when it loads,
+                            // and the shortcut turns it on / off now. Not installed: Active is written, nothing happens
+                            Tile {
+                                Layout.fillWidth: true; Layout.preferredWidth: ctl.quarter
+                                icon: "stage"; title: "台前调度"
+                                active: !!st.stage
+                                onTapped: {
+                                    const on = !st.stage
+                                    backend.setLocal("stage", on)
+                                    backend.act("stage", "kwriteconfig6 --file kwinrc --group Script-y700-stage --key Active " + on
+                                        + " && busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s y700-stage-" + (on ? "on" : "off"))
+                                }
+                            }
+                            // split screen (linux/split): the KWin script y700-split's shortcut puts the app under the
+                            // curtain on the left half and the picker on the right. An action, not a toggle (never
+                            // accent): the curtain goes first, and the script waits up to 1 s for the app it leaves to.
+                            // 0.3 s: the curtain's 240 ms slide-out, as 「多任务」. While the stage manager is on the
+                            // script stands aside: the tile is dimmed and only says so (as 「截图」 during a recording)
+                            Tile {
+                                Layout.fillWidth: true; Layout.preferredWidth: ctl.quarter
+                                icon: "split"; title: "分屏"
+                                opacity: st.stage ? 0.4 : 1
+                                onTapped: {
+                                    if (st.stage) { backend.notify("台前调度开着，把卡片拖到舞台上就能并排"); return }
+                                    backend.hide(); backend.launch("sleep 0.3; busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s y700-split")
+                                }
                             }
                         }
                         // rows 7-8, y 726 / 800: four actions that close the curtain, 60 high (11-01: show desktop and

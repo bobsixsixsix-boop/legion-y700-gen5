@@ -75,6 +75,15 @@ FocusScope {
     property point glowAt: Qt.point(0, 0)   // the press point on the clear button, for its glow
     property string toastText: ""
     property bool toastOn: false
+    // the header's ▾ menu (11-10): one item, 「分屏」 (linux/split). splitOk: the split screen script runs (its handle
+    // window, parked off screen, is listed while it is loaded) and the stage manager is off (its strip's caption
+    // ends in " on", Stage.qml); fixed while the cards are up, as the rest of the geometry
+    property bool splitOk: false
+    property var menuCard: null      // the card whose menu is up
+    property rect menuRect: Qt.rect(0, 0, 150, 60)   // on screen (this view's coordinates)
+    property real menuOx: 0          // where it grows from: the ▾, relative to menuRect
+    property bool menuPressed: false
+    property var splitAfter: null    // 「分屏」 chosen: the card opens, then the split shortcut
 
     // ---- frame clock: KWin drives QML animations by presentation time (RenderLoopDrivenQAnimationDriver),
     // so a linear NumberAnimation's value is the frame's time; FrameAnimation would use the wall clock ----
@@ -134,6 +143,8 @@ FocusScope {
         // (10-23: minimizeAll() puts the active window away last and KWin hands the focus to the desktop before
         // minimizedChanged), kept so it cannot happen when something else minimized the app
         state.updateWasInActiveTask(aw && !aw.minimized ? aw : null);
+        const all = KWinComponents.Workspace.windows;
+        splitOk = all.some(w => w.caption === "y700-split handle") && !all.some(w => w.caption === "y700-stage strip on");
 
         spr = {
             s: Stack.spring(0, Stack.K.scroll),
@@ -202,6 +213,7 @@ FocusScope {
             zoomK: geo.k,
             dpr: targetScreen.devicePixelRatio || 1,
             reduced: root.reduced,
+            menuable: root.splitOk && !Stack.guarded(w.resourceClass, w.desktopFileName),
         });
         return {
             item: item, window: w, mobj: mobj, guarded: item.guarded,
@@ -308,9 +320,10 @@ FocusScope {
         spr.z.to(0, ...Stack.K.zoom);
         kick();
     }
-    function disarmAll(): void {      // a confirmation never outlives the card screen it was given on
+    function disarmAll(): void {      // a confirmation (or the ▾ menu) never outlives the card screen it was given on
         clearArmed = false;
         clearTimer.stop();
+        closeMenu();
         cards.concat(flying).forEach(c => { if (c.item) c.item.disarm(); });
     }
     function openCard(c, vs): void {  // tap, quick switch, or "close the cards = back to where I was"
@@ -366,6 +379,13 @@ FocusScope {
     }
     function finishOpen(c): void {
         activate(c);
+        // 「分屏」 (the ▾ menu): the app is active and on screen now; the split script (linux/split) takes it to the
+        // left half once this effect is gone (the call comes back to KWin through kglobalaccel after this returns;
+        // the script also waits up to 1 s for an active app)
+        if (splitAfter === c) {
+            splitAfter = null;
+            splitShortcut.call();
+        }
         // only the chosen app comes back: an opening caught and retargeted (or an edge swipe that caught
         // it) had already un-minimized the first target, which would stay up behind this one. c is active,
         // so minimizing the rest does not move the focus
@@ -662,6 +682,14 @@ FocusScope {
                 t: layerY + (top - Stack.HEAD * sc) * Ls, b: layerY + (top + g.ch * sc) * Ls,
                 z: c.zk, hidden: !it.shown,
             };
+            // the header (icon, name, ▾: card-local x 9..9 + headW, y -40..-10), 6 px more each way: a tap there opens
+            // its menu instead of the app; only while the header is plainly there
+            c.head = it.menuable && it.phead > .5 ? {
+                l: layerX + (x + 3 * sc) * Ls, r: layerX + (x + (15 + it.headW) * sc) * Ls,
+                t: layerY + (top - 46 * sc) * Ls, b: layerY + (top - 4 * sc) * Ls,
+                x0: layerX + (x + 9 * sc) * Ls, bot: layerY + (top - 10 * sc) * Ls,
+                chev: layerX + (x + (9 + it.headW - 6) * sc) * Ls,
+            } : null;
         }
 
         const rv = mode === "recents" || mode === "opening" || mode === "leaving"
@@ -689,6 +717,43 @@ FocusScope {
             if (on) sp.vel = 0;
         }
     }
+    function overHead(c, p): bool {
+        const h = c && c.head;
+        return !!h && mode === "recents" && p.x >= h.l && p.x <= h.r && p.y >= h.t && p.y <= h.b;
+    }
+    // the menu under the ▾, left-aligned with the header's icon, 8 px below the header; kept on screen
+    function openMenu(c): void {
+        const h = c.head;
+        if (!h) return;
+        const mw = 150, mh = 6 + 48 + 6;
+        const x = Math.max(12, Math.min(width - mw - 12, h.x0));
+        const y = Math.min(height - mh - 12, h.bot + 8);
+        menuRect = Qt.rect(x, y, mw, mh);
+        menuOx = Math.max(0, Math.min(mw, h.chev - x));
+        menuPressed = false;
+        menuCard = c;
+        console.info("y700-taskswitcher: menu " + Math.round(x) + "," + Math.round(y));
+    }
+    function closeMenu(): void {
+        menuCard = null;
+        menuPressed = false;
+    }
+    function overMenuItem(p): bool {
+        const r = menuRect;
+        return !!menuCard && p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y + 6 && p.y <= r.y + 54;
+    }
+    function splitCard(c): void {
+        closeMenu();
+        if (!c || cards.indexOf(c) < 0) return;
+        console.info("y700-taskswitcher: menu split");
+        splitAfter = c;
+        openCard(c, 0);
+    }
+    KWinComponents.DBusCall {
+        id: splitShortcut
+        service: "org.kde.kglobalaccel"; path: "/component/kwin"; dbusInterface: "org.kde.kglobalaccel.Component"
+        method: "invokeShortcut"; arguments: ["y700-split"]
+    }
     function overClear(p): bool {
         const cx = width / 2, cy = height * .904, hw = clearArmed ? 130 : 32;
         return clearOpacity > .01 && mode === "recents" && cards.length > 0
@@ -699,7 +764,10 @@ FocusScope {
     function down(p): void {
         if (ended || gesture) return;
         const g = { start: p, last: p, samples: [p], kind: null, card: null, edge: false };
-        if (overClear(p)) {
+        if (menuCard) {        // the menu up: this finger is for it (its item, or anywhere else = close it)
+            g.kind = "menu";
+            menuPressed = overMenuItem(p);
+        } else if (overClear(p)) {
             g.kind = "clear";
             clearPressed = true;
             glowAt = face.mapFromItem(root, p.x, p.y);
@@ -711,7 +779,9 @@ FocusScope {
                 spr.b.to(1, ...Stack.K.blur);
             }
             g.card = hitCard(p); g.kind = "pending"; g.s0 = spr.s.v;
-            if (g.card && !reduced) g.card.press.to(.97, ...Stack.K.press);
+            g.head = !g.caught && overHead(g.card, p);
+            if (g.head) g.card.item.headDown = true;
+            else if (g.card && !reduced) g.card.press.to(.97, ...Stack.K.press);
             spr.s.held = true; spr.s.vel = 0;
         } else {
             return;            // opening / homing: the finger only counts from the edge
@@ -728,7 +798,8 @@ FocusScope {
         g.last = p;
         if (g.kind === "pending" && Math.hypot(dx, dy) > 8) {
             g.kind = Math.abs(dx) > Math.abs(dy) || !g.card ? "scroll" : "swipe";
-            if (g.card) g.card.press.to(1, ...Stack.K.press);
+            if (g.card) { g.card.press.to(1, ...Stack.K.press); g.card.item.headDown = false; }
+            g.head = false;
             if (g.kind === "swipe") { g.card.ty.held = true; g.card.ty.vel = 0; g.ty0 = g.card.ty.v; }
         }
         if (g.kind === "scroll") {
@@ -758,6 +829,8 @@ FocusScope {
             spr.lift.v = spr.lift.t = Math.min(0, dy) * .28;
         } else if (g.kind === "clear") {
             clearPressed = overClear(p);
+        } else if (g.kind === "menu") {
+            menuPressed = overMenuItem(p);
         }
         kick();
         // the touch comes in after this frame's animation tick (Qt hands it over when the frame is built):
@@ -781,10 +854,15 @@ FocusScope {
         if (g.kind === "clear") {
             clearPressed = false;
             if (overClear(last)) onClear();
+        } else if (g.kind === "menu") {
+            const c = menuCard;
+            if (overMenuItem(last)) splitCard(c);
+            else closeMenu();
         } else if (g.kind === "pending") {
             spr.s.held = false;
-            if (g.card) g.card.press.to(1, ...Stack.K.press);
+            if (g.card) { g.card.press.to(1, ...Stack.K.press); g.card.item.headDown = false; }
             if (g.caught) spr.s.to(restS(idxAt(spr.s.v)), ...Stack.K.scroll);
+            else if (g.head && overHead(g.card, last)) openMenu(g.card);
             else if (g.card) openCard(g.card, 0);
             else dismiss();
         } else if (g.kind === "scroll") {
@@ -848,7 +926,8 @@ FocusScope {
         holdAll(false);
         spr.s.held = false;
         clearPressed = false;
-        if (g.card) { g.card.press.to(1, ...Stack.K.press); g.card.ty.held = false; }
+        menuPressed = false;
+        if (g.card) { g.card.press.to(1, ...Stack.K.press); g.card.ty.held = false; g.card.item.headDown = false; }
         if (g.kind === "pending" || g.kind === "scroll") spr.s.to(restS(idxAt(spr.s.v)), ...Stack.K.scroll);
         else if (g.kind === "swipe" && cards.indexOf(g.card) >= 0) g.card.ty.to(0, ...Stack.K.back);
         else if (g.kind === "edgeApp") { spr.lift.to(0, 260, .9); openCard(focusCard, 0); }
@@ -860,6 +939,8 @@ FocusScope {
     // ---- the bottom edge, from the C++ plugin: cumulative offsets since the finger touched it ----
     // p0: where the gesture starts in the plugin's cumulative offsets; {0,0} unless picked up late
     function edgeDown(p0): bool {
+        closeMenu();
+        splitAfter = null;     // 「分屏」 caught on its way: the swipe decides where it goes, split screen is off
         const p = { x: p0.x, y: p0.y, t: Date.now() };
         const g = { start: p, last: p, samples: [p], kind: null, card: null, edge: true };
         if (mode === "homing") {     // caught on its way home: it is the desktop now, and the swipe starts from there
@@ -950,7 +1031,10 @@ FocusScope {
     // keyboard: the same springs, nothing extra; not while a finger is down
     Keys.onPressed: (event) => {
         if (root.gesture || root.ended) return;
-        if (event.key === Qt.Key_Escape) {
+        if (event.key === Qt.Key_Escape && root.menuCard) {
+            root.closeMenu();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Escape) {
             root.dismiss();
             event.accepted = true;
         } else if (root.mode === "recents" && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
@@ -1258,6 +1342,68 @@ FocusScope {
                 }
             }
         }
+    }
+
+    // the header's ▾ menu (vivo's long-press menu, as linux/split's handle menu: #282828, radius 18, a row 48 high,
+    // icon 16 at 20, text 15 at 46, 6 px top and bottom; in 0.3 -> 1.02 -> 1 from the ▾, out to 0.3 in 200 ms)
+    Kirigami.ShadowedRectangle {
+        id: menuBox
+        property real s: 0.3
+        x: root.menuRect.x; y: root.menuRect.y; width: root.menuRect.width; height: root.menuRect.height
+        radius: 18
+        color: "#282828"
+        shadow.size: 22
+        shadow.yOffset: 6
+        shadow.color: Qt.rgba(0, 0, 0, 0.39)
+        transform: Scale { origin.x: root.menuOx; origin.y: 0; xScale: menuBox.s; yScale: menuBox.s }
+        opacity: 0
+        visible: opacity > 0.005
+        // the press: radius 12 keeps its corners inside the box's 18 at 6 px in
+        Rectangle {
+            visible: root.menuPressed
+            x: 0; y: 6; width: parent.width; height: 48
+            radius: 12
+            color: Qt.rgba(1, 1, 1, 0.15)
+        }
+        Kirigami.Icon {
+            x: 20; y: 6 + (48 - 16) / 2; width: 16; height: 16
+            source: "view-split-left-right"
+            isMask: true
+            color: Qt.rgba(1, 1, 1, 0.9)
+        }
+        Text {
+            renderType: Text.QtRendering
+            x: 46; y: 6; height: 48
+            verticalAlignment: Text.AlignVCenter
+            text: "分屏"
+            color: Qt.rgba(1, 1, 1, 0.9)
+            font.pixelSize: 15
+        }
+    }
+    readonly property bool menuUp: menuCard !== null
+    onMenuUpChanged: {
+        if (menuUp) {
+            menuOut.stop();
+            if (reduced) { menuBox.s = 1; menuBox.opacity = 1; return; }
+            menuBox.s = 0.3; menuBox.opacity = 0; menuIn.restart();
+        } else if (menuBox.opacity > 0) {
+            menuIn.stop();
+            if (reduced) { menuBox.opacity = 0; return; }
+            menuOut.restart();
+        }
+    }
+    SequentialAnimation {
+        id: menuIn
+        ParallelAnimation {
+            NumberAnimation { target: menuBox; property: "s"; to: 1.02; duration: 250; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.37, 0.75, 0.46, 1, 1, 1] }
+            NumberAnimation { target: menuBox; property: "opacity"; to: 1; duration: 250; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 0, 0.67, 1, 1, 1] }
+        }
+        NumberAnimation { target: menuBox; property: "s"; to: 1; duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.33, 0, 0.67, 1, 1, 1] }
+    }
+    ParallelAnimation {
+        id: menuOut
+        NumberAnimation { target: menuBox; property: "s"; to: 0.3; duration: 200; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.3, 0, 0.5, 1, 1, 1] }
+        NumberAnimation { target: menuBox; property: "opacity"; to: 0; duration: 200; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.3, 0, 0.5, 1, 1, 1] }
     }
 
     // toast

@@ -1,11 +1,12 @@
 #!/bin/bash
-# install-yuv709-shim.sh (2026-10-23): ROOT on the tablet, from a copy of y700/linux/video (needs yuv709-shim.c and
-# nv12-egl-matrix.c). Installs the BT.709 shim for every Chrome start (menu, taskbar, xdg-open, Plasma session restore,
+# install-yuv709-shim.sh (2026-10-23): ROOT on the tablet, from a copy of y700/linux/video (needs yuv709-shim.c,
+# nv12-egl-matrix.c and, since 11-09, test-yuv709-loader-lock.sh). Installs the BT.709 shim for every Chrome start (menu, taskbar, xdg-open, Plasma session restore,
 # which replays Chrome's own command line and bypasses the launchers), the same way as linux/gpu/install-no-waitboost.sh:
 #   1. builds yuv709-shim.c and nv12-egl-matrix.c, and tests the shim (LD_PRELOAD, ld.so.preload hidden):
 #      nv12m as the desktop user with Y700_YUV709=1 (stands in for Chrome): 1280x720 NV12 and 1920x1080 P010 with the 601
 #      hint must come out BT.709 and 640x480 stay BT.601; without Y700_YUV709 (not Chrome) 1280x720 must stay BT.601; a
-#      process with no libgallium calling it must get NULL back, not an abort
+#      process with no libgallium calling it must get NULL back, not an abort; its first call must not deadlock with a
+#      dlopen in another thread (test-yuv709-loader-lock.sh, 11-09)
 #   2. tries the new library, still in the temp dir, as an LD_PRELOAD on ls, sh, bash, python3, systemctl, sudo,
 #      sshd -t (before step 3: with the line already in /etc/ld.so.preload the mv makes it live everywhere), with
 #      only this library's own line hidden from /etc/ld.so.preload: a missing or broken installed copy would otherwise
@@ -22,6 +23,8 @@
 # Undo: install-yuv709-shim.sh --uninstall (removes the line, keeps the .so and the apt hook, which does nothing without
 # the line); then restart Chrome. One Chrome without it:
 # start it with Y700_YUV709=0 in its environment.
+# install-yuv709-shim.sh --test: step 1 only (build and test the yuv709-shim.c next to this script, e.g. a candidate),
+# prints TESTS_OK; nothing installed, /etc/ld.so.preload untouched (2026-11-09).
 set -eu
 SO=/usr/local/lib/y700-yuv709.so
 PRE=/etc/ld.so.preload
@@ -80,7 +83,12 @@ t "Chrome, 1920x1080 P010, 601 hint" "709 limited" "$(nv Y700_YUV709=1 p010 1920
 t "Chrome, 640x480 NV12 (SD), 601 hint" "601 limited" "$(nv Y700_YUV709=1 640x480)"
 t "not Chrome, 1280x720 NV12, 601 hint" "601 limited" "$(nv "" 1280x720)"
 t "Chrome, no libgallium loaded" "NULL" "$(iso env Y700_YUV709=1 $W/nogallium $W/y700-yuv709.so 2>/dev/null || true)"
+# the 11-09 loader deadlock (dl* called inside dl_iterate_phdr's callback): a missing test file is a FAIL, not a skip
+LT=$H/test-yuv709-loader-lock.sh
+t "no loader deadlock against a dlopen in another thread, 20 runs" "LOCKTEST_OK" \
+	"$(if [ -f "$LT" ]; then iso bash "$LT" $W/y700-yuv709.so 20 2>&1 | tail -n 1; else echo "$LT missing"; fi)"
 [ $bad = 0 ] || { echo "shim tests FAILED, not installing" >&2; exit 5; }
+[ "${1:-}" = --test ] && { echo "TESTS_OK (--test: nothing installed)"; exit 0; }
 
 CHECKS=("ls /" "sh -c true" "bash -c true" "python3 -c 1" "systemctl --version" "sudo -n true" "/usr/sbin/sshd -t")
 run_checks() { # $1: label; prints the failures, returns 1 if any
@@ -127,7 +135,7 @@ if [ -f "$H/y700-yuv709-aptcheck" ]; then
 	/usr/local/libexec/y700-yuv709-aptcheck --stamp >/dev/null
 	echo "apt hook: /etc/apt/apt.conf.d/99y700-yuv709 (Mesa recorded: $(cat /usr/local/share/y700-video/yuv709.mesa))"
 else
-	echo "WARNING: $H/y700-yuv709-aptcheck missing, no apt hook (copy all of linux/video/{yuv709-shim.c,nv12-egl-matrix.c,install-yuv709-shim.sh,y700-yuv709-aptcheck})" >&2
+	echo "WARNING: $H/y700-yuv709-aptcheck missing, no apt hook (copy all of linux/video/{yuv709-shim.c,nv12-egl-matrix.c,install-yuv709-shim.sh,y700-yuv709-aptcheck,test-yuv709-loader-lock.sh})" >&2
 fi
 if [ -x /opt/google/chrome/chrome ]; then
 	LD_TRACE_LOADED_OBJECTS=1 /opt/google/chrome/chrome 2>&1 | grep -q y700-yuv709 && echo "a plain chrome start loads the shim (ldd view)" || echo "WARNING: chrome does not list the shim" >&2

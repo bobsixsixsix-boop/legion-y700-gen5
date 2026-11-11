@@ -16,7 +16,8 @@
 | y1–y4 | 上游 tb323fu-linux `kernel-t47`（Linux v7.3-rc4 加上游补丁 0001–0130） |
 | y5–y13 | 上游 `kernel-t49`：源码与 t47 相同，配置改用 t49 的（多了 `baldur-extra.fragment`） |
 | y14 | 上游 `kernel-t52`（Linux v7.3），2026-10-23 至 10-29 日常使用 |
-| y15–y17 | 上游 `kernel-t52`（Linux v7.3）；y16、y17 的内置 initramfs 换成上游 `kernel-t54` 的 init。y17 从 2026-11-01 起日常使用 |
+| y15–y17 | 上游 `kernel-t52`（Linux v7.3）；y16、y17 的内置 initramfs 换成上游 `kernel-t54` 的 init。y17 在 2026-11-01 至 11-04 日常使用 |
+| y18–y20 | 仍是 `kernel-t52`，加上上游 `kernel-t58` 的 0144、0147–0153（y19、y20 不带 0153）。y20 从 2026-11-04 起日常使用 |
 
 ## linux/kernel-y1
 
@@ -147,12 +148,36 @@ y15 的补丁加上 1058；配置多开一项 `CONFIG_WATCHDOG_SYSFS`；内置 i
 |---|---|---|---|
 | `1058-firmware-qcom-scm-disable-SDI-when-download-mode-is-switched-off.patch` | bobsixsixsix-boop（`From:` 写作 `y700 workspace`） | 自有 | — |
 
-## linux/kernel-y17（当前内核）
+## linux/kernel-y17
 
 没有新补丁：内核与 y16 相同（同一棵树、同样的补丁和配置），只换了内置 initramfs 里的两个文件。
 
 - `init`：上游 `kernel-t54` 的 init 加上挂根之前的磁盘检查 `rootfsck`。与上游一样以 MIT 发布，版权归 tb323fu-linux 的作者和本项目所有；`test-root-selection.sh` 是它的离线测试，同样派生自上游。
 - `/bin/e2fsck`：构建时取自 Ubuntu 的 `e2fsck-static` 包，不随附。
+
+## linux/kernel-y18
+
+y16 的补丁加上上游 `kernel-t58` 的 8 个补丁；配置去掉命令行里的 `no_console_suspend`（随 0148），并设 `CONFIG_BOOTPARAM_HUNG_TASK_PANIC=0`（同 t58 的配置）。从 y16 沿用的补丁与 `linux/kernel-y16/patches/` 里的文件逐字节相同，下表只列新增的：
+
+| 补丁 | 作者 | 来源 | 处理 |
+|---|---|---|---|
+| `0144-drm-panel-nt36523-baldur-report-the-panel-physical-size.patch` | Joonhoe Kim | 上游 tb323fu-linux `kernel-t58` 的同名补丁 | 原样 |
+| `0147-usb-typec-ucsi-Leave-the-mux-to-the-altmode-driver-f.patch` … `0152-mmc-sd-Keep-the-card-when-its-extension-registers-fa.patch`（6 个） | Joonhoe Kim | 同上 | 原样 |
+| `0153-input-nt36536-report-the-pen-tilt-in-the-screen-s-ax.patch` | Joonhoe Kim | 同上 | 改动的两行逐字节相同，只有上下文不同：上游是在 0145 之上切的，本项目没收 0145，所以对着 t52 的 `nt36xxx.c` 重切；提交说明里加了一段来源说明 |
+
+## linux/kernel-y19
+
+y18 去掉 0153（这台平板没有笔，验不了），其余补丁和配置与 y18 相同。
+
+## linux/kernel-y20（当前内核）
+
+没有新补丁：源码树与 y19 相同，配置多开一项 `CONFIG_HID_MAGICMOUSE=m`（来自 `linux/kernel-y8/owner-devices.fragment`，给 Magic Mouse 2 用）。
+
+## linux/kernel-next（排队，还没编进任何内核）
+
+| 补丁 | 作者 | 来源 | 处理 |
+|---|---|---|---|
+| `1059-arm64-dts-qcom-baldur-stats-hand-qcom_stats-the-AOSS-QMP.patch` | bobsixsixsix-boop（`From:` 写作 `y700 workspace`） | 自有 | — |
 
 ## 其他目录里的补丁
 
@@ -164,7 +189,7 @@ y15 的补丁加上 1058；配置多开一项 `CONFIG_WATCHDOG_SYSFS`；内置 i
 | `linux/audio/aw882xx-mute-on-trigger.DRAFT.patch`、`aw882xx-quiet-stream-log.DRAFT.patch` | 上游的树外 aw882xx 驱动 | GPL-2.0-only | 草稿 |
 | `linux/power/soc-qcom-ice-runtime-pm.DRAFT.patch` | 内核 `drivers/soc/qcom/ice.c` | GPL-2.0-only | 草稿，没有编译，也没有上机验证 |
 | `linux/wifi/ath12k-wcn7860-mlo-param.patch` | 内核 ath12k 驱动 | GPL-2.0-only | — |
-| `linux/power/helperd-slow-poll.patch` | 上游 helper（main `0c7c0c4`） | GPL-3.0-or-later | 没有提交给上游 |
+| `linux/power/helperd-slow-poll.patch` | 上游 helper（`helper-v0.4.2`） | GPL-3.0-or-later | 没有编译、没有安装；没有提交给上游 |
 | `linux/power/keyhold-event-driven.patch` | 上游 `userspace/platform/src/keyhold.c` | MIT | 没有编译，也没有上机验证；没有提交给上游 |
 | `linux/games/sgsr/kwin-effect-upscale-sgsr.patch` | kwin-effect-upscale | GPL-2.0-or-later | — |
 | `linux/gesture/taskswitcher/y700-taskswitcher.patch` | Plasma Mobile 的 mobiletaskswitcher | GPL-2.0-or-later | — |
@@ -181,8 +206,8 @@ y15 的补丁加上 1058；配置多开一项 `CONFIG_WATCHDOG_SYSFS`；内置 i
 
 This file records, for every kernel patch under `linux/kernel-y*/`, its author, its origin and what this project did to it. Imported patches keep their original `From:` and `Signed-off-by:` lines; where the original author could not be found locally, the `From:` line is a placeholder and an `Originally from:` line names the source (for 1053 and 1054, which keep armada's placeholder `From: Armada`, the `y700 (kernel y15): source …` paragraph of the commit message does). Patches signed `bobsixsixsix-boop` or `y700 workspace` are this project's own, except 00y1, 1049 and 1050, whose `y700 workspace` From: is a placeholder for an imported patch (origin in the table); most of the project's own patches have not been submitted upstream. `y700.patch` and `y700-y*.patch` are cumulative diffs of one kernel generation against its upstream base, not single patches.
 
-Bases: y1–y4 on upstream tb323fu-linux `kernel-t47` (Linux v7.3-rc4 plus upstream patches 0001–0130); y5–y13 on upstream `kernel-t49`, which is the t47 source with the t49 configuration (adding `baldur-extra.fragment`); y14, in daily use from 2026-10-23 to 10-29, and y15–y17 on `kernel-t52` (Linux v7.3). y15 drops 1049 and adds 1052–1057; y16 adds 1058, `CONFIG_WATCHDOG_SYSFS` and upstream `kernel-t54`'s initramfs init; y17, in daily use since 2026-11-01, is y16's kernel unchanged with a boot-time root file system check added to that init (MIT, like upstream).
+Bases: y1–y4 on upstream tb323fu-linux `kernel-t47` (Linux v7.3-rc4 plus upstream patches 0001–0130); y5–y13 on upstream `kernel-t49`, which is the t47 source with the t49 configuration (adding `baldur-extra.fragment`); y14, in daily use from 2026-10-23 to 10-29, and y15–y20 on `kernel-t52` (Linux v7.3). y15 drops 1049 and adds 1052–1057; y16 adds 1058, `CONFIG_WATCHDOG_SYSFS` and upstream `kernel-t54`'s initramfs init; y17, in daily use from 2026-11-01 to 11-04, is y16's kernel unchanged with a boot-time root file system check added to that init (MIT, like upstream). y18 adds upstream `kernel-t58`'s 0144 and 0147–0153 (Joonhoe Kim; 0153 re-cut against t52 because 0145 is not carried), drops `no_console_suspend` from the command line and sets `CONFIG_BOOTPARAM_HUNG_TASK_PANIC=0`; y19 is y18 without 0153; y20, in daily use since 2026-11-04, is y19's tree with `CONFIG_HID_MAGICMOUSE=m`. `linux/kernel-next/` queues patches for the next kernel (1059, this project's own); none of them is built yet.
 
-Third-party sources: tb323fu-linux (Joonhoe Kim: 0097, 0117, 0131, 0132), armada-os/armada (0540, 0622, 1049; also the channel for gennro's 0620 / 0621 from Kettle and Diogo Trindade's 1030 / 1031 from PR #718), code002-2/sm8750-video-accel (Xilin Wu: the iris decode-order / deblock controls, 00y1), radxa-pkg/libva-v4l2 (Xilin Wu: 1051, and 1052 from tag v1.1.1), armada-os/armada 0569 and 1008 (1053, 1054; original authors unknown), Shenghan Gao's ath12k patch on lore, carried by armada as 1021 (1055), h0cheung/tb322fc-linux-kernel after xiaqinghuan's lore patch (1050), justririll/x1e-sleep with Marc Zyngier's out-of-tree erratum (1044), linux-next (Akhil P Oommen: 1046–1048), and reference copies from SuperTurtleDev/iceland-mainline-kernel-linux (Yibo Wang).
+Third-party sources: tb323fu-linux (Joonhoe Kim: 0097, 0117, 0131, 0132, 0144, 0147–0153), armada-os/armada (0540, 0622, 1049; also the channel for gennro's 0620 / 0621 from Kettle and Diogo Trindade's 1030 / 1031 from PR #718), code002-2/sm8750-video-accel (Xilin Wu: the iris decode-order / deblock controls, 00y1), radxa-pkg/libva-v4l2 (Xilin Wu: 1051, and 1052 from tag v1.1.1), armada-os/armada 0569 and 1008 (1053, 1054; original authors unknown), Shenghan Gao's ath12k patch on lore, carried by armada as 1021 (1055), h0cheung/tb322fc-linux-kernel after xiaqinghuan's lore patch (1050), justririll/x1e-sleep with Marc Zyngier's out-of-tree erratum (1044), linux-next (Akhil P Oommen: 1046–1048), and reference copies from SuperTurtleDev/iceland-mainline-kernel-linux (Yibo Wang).
 
 License: the patches under `linux/kernel-*/` (including cumulative diffs and `.patch.upstream` originals) and the kernel configuration are released under GPL-2.0-only, like the Linux kernel, with copyright held by the authors named in each patch's `From:` and `Signed-off-by:` lines. The files they touch keep their own license identifiers (for example BSD-3-Clause for device-tree files); taken as a whole, the patches are offered under GPL-2.0-only. Patches in other directories follow the license of the project they modify, as listed in the table above; the libcamera patches under `linux/camera/patches/` are LGPL-2.1-or-later, 0001–0004 by Osilvfe and mzak from mzakamin-hub/iceland-mainline (0002 hand-ported to 0.7.0) and 0005 this project's own.

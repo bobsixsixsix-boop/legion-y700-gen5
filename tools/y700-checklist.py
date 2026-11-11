@@ -96,12 +96,17 @@ GOOD_KERNEL_TAG = re.compile(r"-tb323fu-t\d+-y\d+$")    # our builds: ...-tb323f
 # the kernel's ext4 complaints that matter (in order with them) and the boot's "Linux version" line
 FSCK_GREP = (r"^Linux version \S+|fsck \S+ \(/dev/\S+\): (exit |no e2fsck)|EXT4-fs (error \(device \S+\)|\(\S+\): "
              r"(warning: mounting fs with errors|Couldn't remount RDWR|Errors on filesystem, clearing orphan list))")
+# hci_qca's lines for each setup of the Bluetooth chip (check_bt_firmware); uppercase in it = journalctl -g matches case
+# sensitively
+BT_GREP = r"hci[0-9]+: (setting up |QCA (Failed to|FW build version: |setup on UART is completed))"
 FSCK_RESULT = re.compile(r"fsck (\S+) \((/dev/\S+)\): exit (\d+) \(([^)]*)\), (\d+) s$")
 FSCK_FIRST_Y = 17                                     # the first kernel whose initramfs runs it
+PANEL_MM_FIRST_Y = 18                                 # the first kernel reporting the panel's real 118 x 190 mm (upstream 0144)
 
 # package -> what to do when it changes
 PACKAGES = {
     "kwin-wayland": "KWin 升级：键盘门卫特效由 apt 钩子自动重编（journalctl -t y700-oskgate 看结果，下次登录生效）；"
+                    "台前调度的圆角特效同样由 apt 钩子自动重编（journalctl -t y700-stagecorners）；"
                     "控制中心用的 registerTouchScreenEdge / LayerShellQt 接口看一眼；SGSR 特效（已停用）要用时需重编；"
                     "底边上滑手势跑一次 linux/gesture/tests/taskswitcher-test.sh（装了多任务卡片时；否则 home-test.sh；会动屏幕，先确认没人在用）",
     "plasma-mobile": "Plasma Mobile 升级（多任务卡片的上游）：重跑 linux/gesture/taskswitcher/install.sh（补丁对不上会停下，"
@@ -249,7 +254,7 @@ def current():
     mesa = os.path.realpath("/var/lib/tb323fu/mesa/current") if os.path.exists("/var/lib/tb323fu/mesa/current") else None
     cur["tb323fu_mesa"] = os.path.basename(mesa) if mesa else None
     cur["fex"] = file_hash("/home/user/.local/share/Steam/steamapps/common/FEX-Emu/VERSIONS.txt")
-    cur["livi"] = os.path.basename(os.path.realpath("/opt/livi")) if os.path.exists("/opt/livi") else None   # -> livi-10.0.0
+    cur["livi"] = os.path.basename(os.path.realpath("/opt/livi")) if os.path.exists("/opt/livi") else None   # -> livi-10.3.0
     boots = list_boots()
     ended = [b for b in boots if b["boot_id"][:8] != cur["boot8"]] if cur["boot8"] else boots[:-1]
     cur["prev_boot"] = ended[-1]["boot_id"] if ended else None
@@ -1100,6 +1105,189 @@ def main():
                 + "".join(f"，{n}" for n in notes) + ("" if steam is None else f"，Steam 按 {steam:g} 倍画"))
     guard("X11 程序缩放", check_xft_dpi)
 
+    # the panel's physical size as the kernel reports it (kernel y18, upstream 0144, linux/kernel-y18/NOTES.md): 118 x 190 mm
+    # since y18, a 12.4" panel's 168 x 268 before. KWin keeps its saved output config (scale 1.9) either way - the size only
+    # feeds the default scale of an output without one and the tablet/touch-to-output mapping - so the scale is printed,
+    # not judged: a scale that moved with a kernel change is what to look at (README「Steam 字太小」, check_xft_dpi above)
+    def check_panel_size():
+        ky = re.search(r"-y(\d+)$", cur["kernel"])
+        try:
+            # a Qt GUI app: without WAYLAND_DISPLAY it tries xcb and exits (11-04 on the tablet); KWin's socket is wayland-0
+            j = run(["env", "WAYLAND_DISPLAY=wayland-0", "kscreen-doctor", "-j"], user=True)
+            outs = [o for o in json.loads(j)["outputs"] if o.get("connected") and "DSI" in o.get("name", "")]
+        except (ValueError, KeyError, TypeError):
+            say("INFO", "面板尺寸：kscreen-doctor -j 读不到输出列表（桌面会话没起来？），这项没查")
+            return
+        if len(outs) != 1:
+            say("INFO", f"面板尺寸：kscreen-doctor 里连着的 DSI 输出有 {len(outs)} 个，这项没查")
+            return
+        mm = outs[0].get("sizeMM") or {}
+        size, sc = f"{mm.get('width')} × {mm.get('height')} mm", outs[0].get("scale")
+        if not ky or int(ky.group(1)) < PANEL_MM_FIRST_Y:
+            say("INFO", f"面板尺寸：内核报 {size}（y{PANEL_MM_FIRST_Y} 前的内核报的是 12.4 寸屏的 168 × 268；"
+                        f"y{PANEL_MM_FIRST_Y} 起 118 × 190），显示缩放 {sc}")
+        elif (mm.get("width"), mm.get("height")) == (118, 190):
+            say("OK", f"面板尺寸：内核报 {size}（y{PANEL_MM_FIRST_Y} 起的真实尺寸），显示缩放 {sc}")
+        else:
+            say("WARN", f"面板尺寸：{cur['kernel']} 该报 118 × 190 mm，KWin 看到的是 {size}（上游 0144 没在这个内核里？"
+                        f"linux/kernel-y18/NOTES.md），显示缩放 {sc}")
+    guard("面板尺寸", check_panel_size)
+
+    # zram B (2026-11-04, the owner's choice over installing tb323fu-platform 0.4.6; README「内核 y19」): /dev/zram0 is the
+    # only swap and as big as RAM (zram-generator.conf zram-size = ram), zstd; vm.swappiness 100 and vm.page-cluster 0 come
+    # from /etc/sysctl.d/90-y700-zram.conf. Each line below names the file to look at; no swap at all is its own WARN (a
+    # broken zram-generator.conf leaves the tablet without swap, silently)
+    def check_zram():
+        swaps = [l.split() for l in (read("/proc/swaps") or "").splitlines()[1:] if l.strip()]
+        if not swaps:
+            say("WARN", "zram：/proc/swaps 里没有任何 swap——systemd-zram-setup@zram0 没起来（systemctl status 它；"
+                        "/etc/systemd/zram-generator.conf 写坏了也是这样，README「内核 y19」zram 一段）")
+            return
+        bad, z = [], [s for s in swaps if s[0] == "/dev/zram0"]
+        if len(swaps) != 1 or not z:
+            bad.append("swap 不是只有 zram0：" + "、".join(s[0] for s in swaps))
+        try:
+            mt = int(re.search(r"^MemTotal:\s+(\d+)", read("/proc/meminfo") or "", re.M).group(1)) * 1024
+            ds = int(read("/sys/block/zram0/disksize") or 0)
+        except (AttributeError, ValueError):
+            mt, ds = 0, 0
+            bad.append("读不到 /proc/meminfo 的 MemTotal 或 /sys/block/zram0/disksize")
+        if abs(ds - mt) >= 2 << 20:       # zram-generator: ram = MemTotal in MiB, so disksize = MemTotal up to a page
+            bad.append(f"zram0 {ds / 2**30:.1f} GiB，内存 {mt / 2**30:.1f} GiB：/etc/systemd/zram-generator.conf 的 zram-size 不是 ram"
+                       "（改回半内存了？改完要 daemon-reload + restart systemd-zram-setup@zram0）")
+        if "[zstd]" not in (read("/sys/block/zram0/comp_algorithm") or ""):
+            bad.append("zram0 的压缩算法不是 zstd（/etc/systemd/zram-generator.conf 的 compression-algorithm）")
+        sw, pc = read("/proc/sys/vm/swappiness"), read("/proc/sys/vm/page-cluster")
+        if (sw, pc) != ("100", "0"):
+            bad.append(f"vm.swappiness {sw}、vm.page-cluster {pc}（要 100、0）：/etc/sysctl.d/90-y700-zram.conf 没了或没生效（sysctl --system）")
+        if bad:
+            say("WARN", "zram：" + "；".join(bad) + "（README「内核 y19」zram 一段）")
+        else:
+            say("OK", f"zram：zram0 {ds / 2**30:.1f} GiB = 整个内存，zstd，优先级 {z[0][4]}；swappiness 100、page-cluster 0")
+    guard("zram", check_zram)
+
+    # Magic Mouse 2 (2026-11-04, README「Magic 键鼠」): the driver hid-magicmouse is the kernel's own module from y20 on
+    # (CONFIG_HID_MAGICMOUSE=m); on y19 it is the out-of-tree build /usr/local/lib/y700-extra-modules/<release>/
+    # hid-magicmouse.ko that 90-y700-magicmouse.rules loads through /usr/local/sbin/y700-extra-modules. Without either the
+    # mouse binds to hid-generic and has no scrolling. Files only: the hid devices' uevent (HID_ID, DRIVER), the module
+    # files, the module parameters. A tablet without the two transition files never had the mouse set up: no item.
+    def check_magicmouse():
+        rule = read("/etc/udev/rules.d/90-y700-magicmouse.rules") is not None
+        loader = read("/usr/local/sbin/y700-extra-modules") is not None
+        if not rule and not loader:
+            return
+        rel = cur["kernel"]
+        intree = os.path.exists(f"/lib/modules/{rel}/kernel/drivers/hid/hid-magicmouse.ko")
+        extra = os.path.exists(f"/usr/local/lib/y700-extra-modules/{rel}/hid-magicmouse.ko")
+        src = "内核自带" if intree else ("树外 /usr/local/lib/y700-extra-modules/" if extra else "")
+        bad = []
+        if not (rule and loader):
+            bad.append("90-y700-magicmouse.rules 和 /usr/local/sbin/y700-extra-modules 少了一个（sh linux/owner-devices/install.sh）")
+        if not src:
+            bad.append(f"内核 {rel} 没带 hid-magicmouse，/usr/local/lib/y700-extra-modules/{rel}/ 也没有——换内核忘了带（y20 起内核自带）")
+        mice = []
+        for ue in glob.glob("/sys/bus/hid/devices/*/uevent"):
+            u = read(ue) or ""
+            if re.search(r"^HID_ID=000[35]:0000(004C|05AC):00000269$", u, re.M):
+                drv = re.search(r"^DRIVER=(.*)$", u, re.M)
+                mice.append(drv.group(1) if drv else "（没绑驱动）")
+        for drv in mice:
+            if drv != "magicmouse":
+                bad.append(f"鼠标接着，驱动却是 {drv}（没滚轮）：hid-magicmouse 没装上去（手跑 /usr/local/sbin/y700-extra-modules hid-magicmouse 看报错）")
+        acc = read("/sys/module/hid_magicmouse/parameters/scroll_acceleration")
+        if acc is not None and acc.strip() != "Y":
+            bad.append(f"hid_magicmouse scroll_acceleration={acc.strip()}（要 Y）：/etc/modprobe.d/hid_magicmouse.conf 没了或没生效")
+        fn = read("/sys/module/hid_apple/parameters/fnmode")
+        if fn is not None and fn.strip() != "2":
+            bad.append(f"hid_apple fnmode={fn.strip()}（要 2，F 键是 F 键）：/etc/modprobe.d/hid_apple.conf 没了或没生效")
+        if bad:
+            say("WARN", "Magic 鼠标驱动：" + "；".join(bad) + "（README「Magic 键鼠」）")
+        else:
+            say("OK", "Magic 鼠标驱动：" + (f"接着 {len(mice)} 个，驱动 magicmouse" if mice else "没接") + f"；hid-magicmouse {src}，规则和加载脚本在")
+    guard("Magic 鼠标驱动", check_magicmouse)
+
+    # Bluetooth firmware (11-05, README「每日体检」): hci_qca loads qca/brhbtfw20.mbn + brhbtnv20.bin into the chip; when
+    # that fails (file missing: ArmadaOS shipped without them, armadaos-freedom fefd745b) qca_setup carries on with the
+    # chip's ROM firmware ("run with original fw/config") and Bluetooth still pairs, so only the kernel log tells.
+    # Every setup of this boot counts (the tablet sets the chip up twice per boot, both complete when all is well).
+    def check_bt_firmware():
+        # -q like the other journalctl -g calls: the default output prints "-- No entries --" on no match (-o cat does
+        # not, tablet 11-05). -g exits 1 both for "nothing matched" and for a real failure (said on stderr): with run()
+        # a failure read as "no Bluetooth this boot" and the item silently vanished (11-05 review)
+        rc, out, err = run_rc(["journalctl", "-k", "-b", "--no-pager", "-q", "-o", "cat", "-g", BT_GREP])
+        if rc not in (0, 1) or (rc == 1 and err):
+            say("INFO", f"蓝牙固件：查不了，journalctl 没答上来（{err or out or ('超时' if rc is None else rc)}）")
+            return
+        # One "setting up" per setup. An error other than -ENOENT / -EAGAIN retries inside the same setup (no new
+        # "setting up"), so a "QCA Failed to" line followed by a completion is a hiccup, not the ROM fallback. The chip
+        # runs what the LAST setup ended with: a completion = the downloaded firmware; a (-2) / (-11) failure = ROM
+        # firmware (hci_qca sets QCA_ROM_FW and carries on); any other failure last = that setup gave up
+        segs = []
+        for l in out.splitlines():
+            if "setting up" in l or not segs:
+                segs.append([])
+            segs[-1].append(l)
+        if not segs:
+            return                      # no Bluetooth chip set up this boot: nothing to judge
+        ends = [next((l.split(": ", 1)[-1] for l in reversed(s) if "QCA Failed to" in l or "setup on UART is completed" in l), "")
+                for s in segs]
+        done = sum("setup on UART is completed" in e for e in ends)
+        ver = [l.split("QCA FW build version: ", 1)[1].split()[0] for l in segs[-1] if "QCA FW build version: " in l]
+        errs = [l.split(": ", 1)[-1] for l in out.splitlines() if "QCA Failed to" in l]
+        last = ends[-1]
+        if "QCA Failed to" in last and ("(-2)" in last or "(-11)" in last):
+            say("WARN", f"蓝牙固件没加载上，芯片在用自带的旧固件跑：{last}（ls /lib/firmware/qca/brhbt*；linux-firmware 包；"
+                        "journalctl -k -b | grep hci0）")
+        elif "QCA Failed to" in last:
+            say("WARN", f"蓝牙芯片最后一次初始化失败：{last}（journalctl -k -b | grep hci0）")
+        elif not last or not ver:
+            say("WARN", f"蓝牙芯片最后一次初始化没走完：这次开机初始化 {len(segs)} 次，完成 {done} 次、"
+                        f"固件版本 {ver[-1] if ver else '没报'}（journalctl -k -b | grep hci0）")
+        else:
+            clean = done == len(segs) and not errs
+            say("OK", f"蓝牙固件 {ver[-1]}，这次开机初始化 {len(segs)} 次" + ("都加载上了" if clean else "，最后一次加载上了"))
+            if not clean:
+                say("INFO", "蓝牙：这次开机的初始化出过岔子、后来好了："
+                            + (errs[-1] if errs else f"{len(segs) - done} 次没走完") + "（journalctl -k -b | grep hci0）")
+    guard("蓝牙固件", check_bt_firmware)
+
+    # The bottom USB-C port with a DisplayPort monitor (2026-11-04, README「USB-C 外接屏」): while the tablet sinks power
+    # from the monitor the PD firmware and the monitor re-attach every 5-10 s, so 71-y700-dp-source.rules makes the tablet
+    # the source once DP-1 is connected; and y700-usb-port's delayed "device" write after a partner remove must not land
+    # after a re-attach (the controller then sits in device mode with a UFP partner: the monitor's hub is gone).
+    def check_usbc_port():
+        if read("/usr/local/libexec/y700-usb-port") is None:
+            return                      # usbport not installed our way
+        if read("/usr/local/libexec/y700-dp-source") is None:
+            say("WARN", "USB-C 底部口：/usr/local/libexec/y700-dp-source 没装——接外接屏会反复断开"
+                        "（bash linux/usbport/install.sh；README「USB-C 外接屏」）")
+            return
+        rule = read("/etc/udev/rules.d/71-y700-dp-source.rules") is not None
+        if not rule:                    # removed on purpose to charge through a DP dock (README「USB-C 外接屏」有意不做)
+            say("INFO", "USB-C 底部口：外接屏供电规则 71-y700-dp-source.rules 被拿掉了（经扩展坞充电？恢复：bash linux/usbport/install.sh）")
+        partner = os.path.exists("/sys/class/typec/port0-partner")
+        dr, pr = read("/sys/class/typec/port0/data_role") or "", read("/sys/class/typec/port0/power_role") or ""
+        role = read("/sys/class/usb_role/a600000.usb-role-switch/role") or "?"
+        side = (read("/run/y700-usb-port.state") or "").startswith("side")   # controller given to the side port's gamepad
+        dp = [p for p in glob.glob("/sys/class/drm/card*-DP-1/status") if read(p) == "connected"]
+        if not partner:
+            say("OK", "USB-C 底部口：没接东西" + ("；外接屏供电规则在" if rule else ""))
+            return
+        bad = []
+        if "[host]" in dr and role != "host":
+            bad.append(f"伙伴是 UFP（data_role {dr}）而控制器 role 是 {role}：y700-usb-port 把拔掉后的 device 写在了重连之后？"
+                       "（echo host > /sys/class/usb_role/a600000.usb-role-switch/role 立即恢复）")
+        if "[device]" in dr and role != "device" and not side:
+            bad.append(f"伙伴是 DFP（data_role {dr}）而控制器 role 是 {role}：电脑看不到平板的 gadget，y700-usb-port 把侧边口的 host "
+                       "写在了重连之后？（echo device > /sys/class/usb_role/a600000.usb-role-switch/role 立即恢复）")
+        if dp and "[sink]" in pr and rule:
+            bad.append(f"接着外接屏却在从它取电（power_role {pr}）：y700-dp-source 没跑或固件没换（journalctl -t y700-dp-source）")
+        if bad:
+            say("WARN", "USB-C 底部口：" + "；".join(bad) + "（README「USB-C 外接屏」）")
+        else:
+            say("OK", f"USB-C 底部口：有伙伴，data_role {dr}、power_role {pr}、控制器 {role}" + ("，外接屏在" if dp else ""))
+    guard("USB-C 底部口", check_usbc_port)
+
     # Steam's UI on the GPU with zink's render-pass tracking off (2026-10-30, README "Steam 界面花屏"): with it on (ANGLE
     # GL -> zink -> Turnip) store pages show noise blocks where faded/masked layers are. Our launcher exports
     # ZINK_DEBUG=norp, which the steamwebhelper browser process (no --type=) then carries in its environment;
@@ -1283,6 +1471,101 @@ def main():
         else:
             say("OK", "控制中心手势就绪（顶边下拉、左右边缘返回、模糊特效）")
     guard("控制中心手势", check_control_center_gestures)
+
+    # Stage Manager (linux/stage, 11-08): the KWin script y700-stage, off until the control centre's 「台前调度」 tile,
+    # which writes kwinrc [Script-y700-stage] Active and then calls the shortcut y700-stage-on / -off. KWin keeps the
+    # QML it compiled per URL, so install.sh puts each build in contents/build-<BuildId>/ (a BuildId with no folder = a
+    # script that loads nothing). Active and the script's last word must agree (a shortcut that did not land, a reload
+    # that failed); a QML error at run time is a bug (11-08 in ts-bed: calls into an unloaded instance's dead root)
+    def check_stage():
+        sdir = "/home/user/.local/share/kwin/scripts/y700-stage"
+        if not os.path.exists(sdir):
+            return
+        if "true" not in run(["busctl", "--user", "call", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting",
+                              "isScriptLoaded", "s", "y700-stage"], user=True):
+            say("WARN", "台前调度：KWin 脚本 y700-stage 没加载（sh linux/stage/install.sh；journalctl --user -b | grep y700-stage）")
+            return
+        bid = run(["kreadconfig6", "--file", "kwinrc", "--group", "Script-y700-stage", "--key", "BuildId"], user=True)
+        if not re.fullmatch(r"[0-9]+", bid) or not os.path.exists(f"{sdir}/contents/build-{bid}/ui/Stage.qml"):
+            say("WARN", f"台前调度：kwinrc 的 BuildId「{bid}」对不上装着的构建目录，脚本什么都没加载（重跑 sh linux/stage/install.sh）")
+            return
+        errs = run(["sh", "-c", "journalctl --user -b --no-pager -o cat | grep -cE "
+                                "'kwin/scripts/y700-stage/contents/[^ ]*[.]qml:[0-9]+'"], user=True)
+        if errs not in ("", "0"):
+            say("WARN", f"台前调度：这次开机 y700-stage 报了 {errs} 条 QML 错误"
+                        "（journalctl --user -b | grep 'y700-stage/contents' 看是哪一行）")
+            return
+        for attempt in (1, 2):              # a tap on the tile between the two reads: Active is written first
+            want = run(["kreadconfig6", "--file", "kwinrc", "--group", "Script-y700-stage", "--key", "Active"], user=True) == "true"
+            last = run(["sh", "-c", "journalctl --user -b --no-pager -o cat | grep -E "
+                                    "'y700-stage: (loaded, (on|off)$|on, |off, )' | tail -1"], user=True)
+            got = None if not last else bool(re.search(r"y700-stage: (loaded, on$|on, )", last))
+            if got == want:
+                break
+            time.sleep(1.5)
+        if got is None:
+            say("WARN", "台前调度：这次开机的日志里没有 y700-stage 的加载记录（journalctl --user -b | grep y700-stage）")
+        elif got != want:
+            say("WARN", f"台前调度：kwinrc 记的是「{'开' if want else '关'}」，脚本最后一句是「{last.split('y700-stage: ', 1)[-1]}」"
+                        "（控制中心的「台前调度」点两下对齐；还不对看 journalctl --user -b | grep y700-stage）")
+        else:
+            say("OK", f"台前调度就绪（y700-stage 已加载，{'开着' if want else '关着'}，和控制中心的开关一致）")
+        # the round corners (kwin-corners/, 11-09): a KWin upgrade makes the old plugin unloadable and the apt hook
+        # rebuilds it; a rebuild that failed leaves the stage square-cornered without a word. Loaded only once the
+        # stage has been on (the script asks for it), so "not loaded" counts only while it is on. No stamp = never
+        # built here (no kwin-dev at install): no line
+        stamp = (slurp("/usr/local/share/y700-stage/stagecorners.kwin-version") or "").strip() or None
+        kv = cur["pkgs"]["kwin-wayland"]
+        if stamp and stamp != kv:
+            say("WARN", f"台前调度的圆角特效是为 KWin {stamp} 编的，现在是 {kv}：自动重编没成功，舞台窗口是方角"
+                        "（journalctl -t y700-stagecorners；手动 sh /usr/local/src/y700-stage/install.sh，下次登录生效）")
+        elif stamp and want and got and "true" not in run(["busctl", "--user", "call", "org.kde.KWin", "/Effects",
+                                                           "org.kde.kwin.Effects", "isEffectLoaded", "s", "y700_stagecorners"], user=True):
+            say("WARN", "台前调度开着，圆角特效却没加载，舞台窗口是方角（journalctl --user -b | grep -i stagecorners）")
+    guard("台前调度", check_stage)
+
+    # split screen (linux/split, 11-10): the KWin script y700-split, its BuildId's folder (as the stage's), no QML error
+    # this boot; kwinrc [Windows] ElectricBorderTiling / ElectricBorderMaximize false (install.sh: else KWin's own quick
+    # tiling takes the same title bar drag to an edge); the corner effect, once loaded, must have its split part
+    # (setSplitWindows: an effect built before 27d19a8 has none: square halves, no gap colour, the card follows the
+    # cursor, until linux/stage/install.sh has rebuilt it and a login has loaded the new one)
+    def check_split():
+        sdir = "/home/user/.local/share/kwin/scripts/y700-split"
+        if not os.path.exists(sdir):
+            return
+        if "true" not in run(["busctl", "--user", "call", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting",
+                              "isScriptLoaded", "s", "y700-split"], user=True):
+            say("WARN", "分屏：KWin 脚本 y700-split 没加载（sh /usr/local/src/y700-split/install.sh；journalctl --user -b | grep y700-split）")
+            return
+        bid = run(["kreadconfig6", "--file", "kwinrc", "--group", "Script-y700-split", "--key", "BuildId"], user=True)
+        if not re.fullmatch(r"[0-9]+", bid) or not os.path.exists(f"{sdir}/contents/build-{bid}/ui/Split.qml"):
+            say("WARN", f"分屏：kwinrc 的 BuildId「{bid}」对不上装着的构建目录，脚本什么都没加载（重跑 sh /usr/local/src/y700-split/install.sh）")
+            return
+        errs = run(["sh", "-c", "journalctl --user -b --no-pager -o cat | grep -cE "
+                                "'kwin/scripts/y700-split/contents/[^ ]*[.]qml:[0-9]+'"], user=True)
+        if errs not in ("", "0"):
+            say("WARN", f"分屏：这次开机 y700-split 报了 {errs} 条 QML 错误"
+                        "（journalctl --user -b | grep 'y700-split/contents' 看是哪一行）")
+            return
+        edges = [k for k in ("ElectricBorderTiling", "ElectricBorderMaximize")
+                 if run(["kreadconfig6", "--file", "kwinrc", "--group", "Windows", "--key", k], user=True) != "false"]
+        if edges:
+            say("WARN", "分屏：kwinrc [Windows] " + "、".join(edges) + " 不是 false，拖标题栏到边时 KWin 自己的贴边会抢"
+                        "（重跑 sh /usr/local/src/y700-split/install.sh）")
+            return
+        fx = run(["busctl", "--user", "introspect", "org.kde.KWin", "/org/y700/StageCorners"], user=True)
+        if fx and "setSplitWindows" not in fx:
+            # the library on disk already has it (moc keeps the method names): built and installed, the session is older
+            try:
+                built = b"setSplitWindows" in open("/usr/lib/aarch64-linux-gnu/qt6/plugins/kwin/effects/plugins/"
+                                                   "y700_stagecorners.so", "rb").read()
+            except OSError:
+                built = False
+            say("WARN", "分屏：KWin 里跑的圆角特效是旧的，没有分屏那部分（两半方角、缝里不上色、拖标题栏时卡片跟鼠标不跟手指）："
+                        + ("新的已经装好，重新登录一次" if built else "sh /usr/local/src/y700-stage/install.sh 重编后重新登录一次"))
+            return
+        say("OK", "分屏就绪（y700-split 已加载，KWin 自带的贴边已关）")
+    guard("分屏", check_split)
 
     # the curtain's blur on the live screen (linux/controlpanel/y700-control-center/tests/blur-flicker.sh, 10-22): a fake
     # finger pulls the curtain while every frame KWin renders is kept; a frame tinted but sharp is the flicker that was

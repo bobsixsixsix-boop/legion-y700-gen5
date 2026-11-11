@@ -21,10 +21,10 @@
 
 ### 现状
 
-截至 2026 年 11 月初的实际情况：
+截至 2026 年 11 月 11 日的实际情况：
 
 - **只在一台设备上验证过**，就是作者自己的 TB323FU。恢复工具只在 ROW 18.0.12.187 固件上验证过。其他型号、其他固件版本都没有试过。
-- **Linux 一侧日常在用。** 当前内核是 y17，即上游 `kernel-t52`（Linux v7.3）加 28 个补丁（顺序见 `linux/kernel-y16/patches/series`），内置 initramfs 用上游 t54 的 init 加开机磁盘检查，2026-11-01 起作为日常内核。y14–y16 是它的前几代，y1–y13 基于 Linux v7.3-rc4（上游 t47 / t49），都保留作历史记录。
+- **Linux 一侧日常在用。** 当前内核是 y20，即上游 `kernel-t52`（Linux v7.3）加 35 个补丁（顺序见 `linux/kernel-y19/patches/series`，其中 7 个来自上游 `kernel-t58`），配置比 y19 多开 Magic Mouse 驱动，内置 initramfs 用上游 t54 的 init 加开机磁盘检查，2026-11-04 起作为日常内核。y14–y19 是它的前几代，y1–y13 基于 Linux v7.3-rc4（上游 t47 / t49），都保留作历史记录。下一版要带的补丁先排在 `linux/kernel-next/`。
 - **很多内容是实验和测量**：带日期的工作笔记、A/B 测试脚本、只在某次实验里用过的工具。文件名带 `DRAFT` 的补丁没有编译过，或者没有上机验证过。CarPlay 部分仍在进行中。
 - **没有统一的安装器。** 各目录的 `install*.sh` 按作者的环境写死：桌面用户名 `user`（uid 1000）、安装路径、tailnet 地址的占位符等。**这些脚本都不检查机型**，多数要在平板上以 root 运行。用之前请先读一遍脚本。
 - **文档以中文工作笔记为主**，写给没有上下文的下一个接手者。文中提到的「仓库 README 的某一节」和 `runs/` 下的日志，指的是未公开的开发日志和原始测量数据（见「有意不包含的内容」），在本仓库里找不到。文档里的第一人称多半是执笔的 AI 助手，「作者」指项目作者。
@@ -36,7 +36,7 @@
 
 | 想了解 | 先读 |
 |---|---|
-| 当前内核、补丁栈和装机后的体检 | [linux/kernel-y17/NOTES.md](linux/kernel-y17/NOTES.md)，补丁的变化见 [linux/kernel-y15/NOTES.md](linux/kernel-y15/NOTES.md) 和 [linux/kernel-y16/NOTES.md](linux/kernel-y16/NOTES.md)；上一代见 [linux/kernel-y14/NOTES.md](linux/kernel-y14/NOTES.md)；y8 起的背景见 [linux/kernel-y8/PLAN.md](linux/kernel-y8/PLAN.md) 和 [Y10-NOTES.md](linux/kernel-y8/Y10-NOTES.md) |
+| 当前内核、补丁栈和装机后的体检 | [linux/kernel-y20/NOTES.md](linux/kernel-y20/NOTES.md)，补丁的变化见 [linux/kernel-y18/NOTES.md](linux/kernel-y18/NOTES.md) 和 [linux/kernel-y19/NOTES.md](linux/kernel-y19/NOTES.md)；排队给下一版的见 [linux/kernel-next/README.md](linux/kernel-next/README.md)；更早几代见 [linux/kernel-y17/NOTES.md](linux/kernel-y17/NOTES.md)、[linux/kernel-y15/NOTES.md](linux/kernel-y15/NOTES.md)、[linux/kernel-y14/NOTES.md](linux/kernel-y14/NOTES.md)；y8 起的背景见 [linux/kernel-y8/PLAN.md](linux/kernel-y8/PLAN.md) 和 [Y10-NOTES.md](linux/kernel-y8/Y10-NOTES.md) |
 | 熄屏但不休眠时的省电 | [linux/power/PLAN-deep-powersave.md](linux/power/PLAN-deep-powersave.md) 的 §0，然后是 [WAKEUPS.md](linux/power/WAKEUPS.md)、[ALWAYS-ON.md](linux/power/ALWAYS-ON.md)、[KEYHOLD.md](linux/power/KEYHOLD.md) |
 | 运行时 CX / 系统域下电实验 | [linux/power/cx-collapse/PROTOCOL.md](linux/power/cx-collapse/PROTOCOL.md)，背景见 [RESEARCH.md](linux/power/cx-collapse/RESEARCH.md) |
 | 视频硬解与功耗 | [linux/video/VIDEO-POWER-MEMO.md](linux/video/VIDEO-POWER-MEMO.md) |
@@ -45,6 +45,8 @@
 | 「电池」页（各应用的用电统计） | [linux/power/BATTERY-PAGE.md](linux/power/BATTERY-PAGE.md)，设计见 [linux/power/battery/DESIGN.md](linux/power/battery/DESIGN.md) |
 | 后摄自动对焦与镜头供电（libcamera） | [linux/camera/README.md](linux/camera/README.md) |
 | 无线 CarPlay / Android Auto | [linux/carplay/README.md](linux/carplay/README.md) |
+| 台前调度（左边一列窗口卡片、中间一个舞台） | [linux/stage/README.md](linux/stage/README.md) |
+| 普通桌面下两个应用并排的分屏 | [linux/split/README.md](linux/split/README.md) |
 | Android 一侧的精简与 KernelSU 模块 | [android-debloat/README.md](android-debloat/README.md) |
 | 原厂 ZUI 固件研究、在移植系统上恢复杜比 | [stock-zui/README.md](stock-zui/README.md) |
 | 删掉 Android、换回联想原版系统、升级底层固件的调研 | [android-remove-zui.md](android-remove-zui.md)、[firmware-upgrade-research.md](firmware-upgrade-research.md) |
@@ -66,24 +68,28 @@
 | `linux/audio/` | 扬声器保护守护 `y700-speaker-guard`（Rust）、调音链的接口约定（作者的调音配置不随附）、爆音与挂起的研究、EQ 测试、`DRAFT` 补丁 |
 | `linux/camera/` | 给 libcamera 0.7.0 打的后摄自动对焦补丁，和修镜头一直上电的补丁；构建、安装、检查脚本，镜头功耗 A/B |
 | `linux/carplay/` | LIVI 集成：热点调优、启动器、systemd 与 NetworkManager 集成，`aptest/` 下是离线调试热点的工具 |
-| `linux/controlpanel/` | Qt/QML 控制中心 `y700-control-center`、自动旋转 |
+| `linux/controlpanel/` | Qt/QML 控制中心 `y700-control-center`（含台前调度和分屏的开关）、自动旋转 |
 | `linux/daily/` | 日常使用的配置（输入法、播放器、刷新率与功耗等） |
 | `linux/devaccess/`、`linux/usbstick/` | USB gadget 网络上的 ssh 配置；用 U 盘一次性开启 ssh 的脚本（必须换成你自己的公钥） |
 | `linux/display/` | 环境光自动亮度（Rust）；刷新率跟随视频（Rust 守护进程、KWin 脚本、Chrome 扩展和 native host） |
-| `linux/dock/` | Dock 与状态栏 `y700-shellbar`（含通知和下拉面板）及其设计稿 |
+| `linux/dock/` | Dock 与状态栏 `y700-shellbar`（含通知、下拉面板、勿扰模式和开着窗口的应用下面的运行点）及其设计稿、无头测试床 |
 | `linux/gamepad/` | 把手柄的 Home 键当作系统键；熄屏时关掉 G9 手柄的灯、按手柄键亮屏（都是 Rust） |
 | `linux/games/` | 用 FEX 运行 x86 Steam 游戏所需的 rootfs 挂载、性能 HUD、移植给 kwin-effect-upscale 的 SGSR 超分 |
 | `linux/gesture/` | 底边上滑回桌面的 KWin 脚本；基于 Plasma Mobile 任务切换器的多任务卡片；测试 |
 | `linux/gpu/` | 给 Chrome 用的 LD_PRELOAD 垫片 `y700-no-waitboost`、drirc、复现脚本 |
-| `linux/kernel-y1/` … `linux/kernel-y8/`、`linux/kernel-y14/` … `linux/kernel-y17/` | 各代内核的构建脚本、补丁、配置、体检脚本和笔记（y9–y13 在 `kernel-y8/` 里）。补丁的来源见 [PATCHES.md](PATCHES.md) |
+| `linux/kernel-y1/` … `linux/kernel-y8/`、`linux/kernel-y14/` … `linux/kernel-y20/` | 各代内核的构建脚本、补丁、配置、体检脚本和笔记（y9–y13 在 `kernel-y8/` 里）；`linux/kernel-next/` 是下一版要带的补丁。补丁的来源见 [PATCHES.md](PATCHES.md) |
+| `linux/owner-devices/` | Magic Mouse 2 / Magic Keyboard 的 udev 规则、模块加载和参数 |
 | `linux/net/` | 事件驱动的看门狗 `y700-kmsg-watch`（Rust）、Wi‑Fi 与显示看门狗、Tailscale 安装脚本 |
 | `linux/osk/`、`linux/osk-design/` | Qt6/QML 屏幕键盘 `y700-osk`（fcitx5 插件、KWin 效果、可选的语音输入），以及它的设计稿和拼音词表 |
 | `linux/power/` | 熄屏不休眠时的省电：唤醒源治理、常开外设、PCIe L1.2、事件驱动的紧急组合键、几个 Rust 守护进程。`battery/` 是「电池」页（记录器、报告生成器、页面），`flightrec/` 是功耗飞行记录器，`cx-collapse/` 是运行时 CX 下电实验 |
 | `linux/sensors/` | 修正传感器 hub 开机时的竞争问题 |
+| `linux/split/` | 分屏 KWin 脚本 `y700-split`（三个入口：拖标题栏到屏幕边、控制中心磁贴、多任务卡片菜单；拖分隔线调宽度）及其设计稿 |
+| `linux/stage/` | 台前调度 KWin 脚本 `y700-stage`、圆角特效、功耗 A/B 脚本、设计稿和调研 |
 | `linux/streaming/` | Moonlight 120 fps 串流的调校和分析脚本 |
-| `linux/usbport/` | 上游 `tb323fu-usb-port` 的本地替换（两个 USB-C 口共用一个控制器） |
+| `linux/usbport/` | 上游 `tb323fu-usb-port` 的本地替换（两个 USB-C 口共用一个控制器）；接 DisplayPort 显示器时让平板供电的 `y700-dp-source` |
 | `linux/video/` | VA-API、Chrome、wiliwili 的视频功耗工作；`yuv709` 垫片；对 libva-v4l2 和 wiliwili 的补丁 |
 | `linux/wifi/` | 6 GHz 优先、监管域 udev 规则、ath12k 参数补丁、5 GHz 评估 |
+| `linux/zram/` | zram 交换的配置（zram-generator 和 sysctl） |
 | `linux/serve_script.py`、`linux/restore-coloros-boot.sh` | 早期调试用的小工具（经 USB 网络下发脚本、在 9008 模式下写回 ColorOS 启动镜像） |
 
 ### 有意不包含的内容
@@ -121,6 +127,7 @@
 | 内核补丁和内核配置（`linux/kernel-*/` 下，以及其他目录里针对内核的补丁） | GPL-2.0-only，与 Linux 内核一致；`linux/audio/` 下只改设备树的那个补丁草稿为 BSD-3-Clause，与上游设备树一致 |
 | 来自 tb323fu-linux 的副本和改写（平台脚本、USB 口路由、切换脚本、keyhold、y17 的 initramfs init） | MIT，与上游相同 |
 | 针对上游 helper 的补丁 | GPL-3.0-or-later，与上游 helper 相同 |
+| 台前调度和分屏的 KWin 脚本（`linux/stage/y700-stage/`、`linux/split/y700-split/`）；两者共用的圆角特效（`linux/stage/kwin-corners/`） | 脚本为 MIT（自有代码，与包里 `metadata.json` 的声明一致）；圆角特效为 GPL-2.0-or-later，与 KWin 相同 |
 | 其他第三方派生代码 | 各自沿用原项目的许可证，见 [NOTICE.md](NOTICE.md) |
 
 内核补丁的作者和来源见 [PATCHES.md](PATCHES.md)，第三方致谢见 [NOTICE.md](NOTICE.md)。
@@ -150,10 +157,10 @@ This repository ships no kernel, helper or other binaries and runs no update cha
 
 ### Status
 
-As of early November 2026:
+As of 11 November 2026:
 
 - **Tested on one device only**: the author's own TB323FU. The recovery tools were verified only on firmware ROW 18.0.12.187. No other model or firmware version has been tried.
-- **The Linux side is in daily use.** The current kernel is y17: upstream `kernel-t52` (Linux v7.3) plus 28 patches (order in `linux/kernel-y16/patches/series`), with upstream t54's initramfs init plus a boot-time disk check built in, the daily kernel since 2026-11-01. y14–y16 are its predecessors; y1–y13 were based on Linux v7.3-rc4 (upstream t47 / t49). All are kept as history.
+- **The Linux side is in daily use.** The current kernel is y20: upstream `kernel-t52` (Linux v7.3) plus 35 patches (order in `linux/kernel-y19/patches/series`; 7 of them from upstream `kernel-t58`), y19's configuration plus the Magic Mouse driver, with upstream t54's initramfs init plus a boot-time disk check built in, the daily kernel since 2026-11-04. y14–y19 are its predecessors; y1–y13 were based on Linux v7.3-rc4 (upstream t47 / t49). All are kept as history. Patches for the next kernel are queued in `linux/kernel-next/`.
 - **Much of the content is experiments and measurement**: dated working notes, A/B test scripts and tools used for a single experiment. Patches with `DRAFT` in the name have not been compiled or not been tested on the device. The CarPlay work is still in progress.
 - **There is no unified installer.** The `install*.sh` scripts in each directory assume the author's setup: the desktop user `user` (uid 1000), install paths, a placeholder tailnet address and so on. **None of them checks the device model**, and most of them must run as root on the tablet. Read a script before you run it.
 - **The documentation is mostly working notes in Chinese**, written for the next person picking the work up without context. References to "a section of the repository README" and to logs under `runs/` point at the unpublished development log and raw measurement data (see "What is intentionally not included"); they cannot be found here. "I" in the notes is usually the AI assistant that wrote them; "the author" is the project's author.
@@ -165,7 +172,7 @@ Install upstream tb323fu-linux first and make sure it boots. Everything here ass
 
 | Topic | Read first |
 |---|---|
-| Current kernel, patch stack and post-install checks | [linux/kernel-y17/NOTES.md](linux/kernel-y17/NOTES.md), the patch changes in [linux/kernel-y15/NOTES.md](linux/kernel-y15/NOTES.md) and [linux/kernel-y16/NOTES.md](linux/kernel-y16/NOTES.md); the previous generation in [linux/kernel-y14/NOTES.md](linux/kernel-y14/NOTES.md); background from y8 on in [linux/kernel-y8/PLAN.md](linux/kernel-y8/PLAN.md) and [Y10-NOTES.md](linux/kernel-y8/Y10-NOTES.md) |
+| Current kernel, patch stack and post-install checks | [linux/kernel-y20/NOTES.md](linux/kernel-y20/NOTES.md), the patch changes in [linux/kernel-y18/NOTES.md](linux/kernel-y18/NOTES.md) and [linux/kernel-y19/NOTES.md](linux/kernel-y19/NOTES.md); what is queued for the next kernel in [linux/kernel-next/README.md](linux/kernel-next/README.md); earlier generations in [linux/kernel-y17/NOTES.md](linux/kernel-y17/NOTES.md), [linux/kernel-y15/NOTES.md](linux/kernel-y15/NOTES.md), [linux/kernel-y14/NOTES.md](linux/kernel-y14/NOTES.md); background from y8 on in [linux/kernel-y8/PLAN.md](linux/kernel-y8/PLAN.md) and [Y10-NOTES.md](linux/kernel-y8/Y10-NOTES.md) |
 | Power saving with the screen off but the system awake | §0 of [linux/power/PLAN-deep-powersave.md](linux/power/PLAN-deep-powersave.md), then [WAKEUPS.md](linux/power/WAKEUPS.md), [ALWAYS-ON.md](linux/power/ALWAYS-ON.md), [KEYHOLD.md](linux/power/KEYHOLD.md) |
 | Runtime CX / system-domain power-collapse experiments | [linux/power/cx-collapse/PROTOCOL.md](linux/power/cx-collapse/PROTOCOL.md), background in [RESEARCH.md](linux/power/cx-collapse/RESEARCH.md) |
 | Hardware video decoding and its power cost | [linux/video/VIDEO-POWER-MEMO.md](linux/video/VIDEO-POWER-MEMO.md) |
@@ -174,6 +181,8 @@ Install upstream tb323fu-linux first and make sure it boots. Everything here ass
 | The "Battery" page (energy use per app) | [linux/power/BATTERY-PAGE.md](linux/power/BATTERY-PAGE.md), design in [linux/power/battery/DESIGN.md](linux/power/battery/DESIGN.md) |
 | Rear-camera autofocus and lens power (libcamera) | [linux/camera/README.md](linux/camera/README.md) |
 | Wireless CarPlay / Android Auto | [linux/carplay/README.md](linux/carplay/README.md) |
+| Stage Manager (a column of window cards on the left, one stage in the middle) | [linux/stage/README.md](linux/stage/README.md) |
+| Split screen: two apps side by side on the normal desktop | [linux/split/README.md](linux/split/README.md) |
 | Android-side debloating and KernelSU modules | [android-debloat/README.md](android-debloat/README.md) |
 | Stock ZUI firmware research, Dolby on the port | [stock-zui/README.md](stock-zui/README.md) |
 | Research on removing Android, going back to Lenovo's stock system and upgrading the low-level firmware | [android-remove-zui.md](android-remove-zui.md), [firmware-upgrade-research.md](firmware-upgrade-research.md) |
@@ -195,24 +204,28 @@ Many directories have no README of their own; the comments at the top of each sc
 | `linux/audio/` | The speaker protection guard `y700-speaker-guard` (Rust), the interface of the tuning stage (the author's tuning configuration is not included), research on speaker pops and suspend, EQ tests, `DRAFT` patches |
 | `linux/camera/` | Patches for libcamera 0.7.0: rear-camera autofocus, and a fix for the lens staying powered; build, install and check scripts, a lens power A/B test |
 | `linux/carplay/` | LIVI integration: hotspot tuning, launcher, systemd and NetworkManager integration; `aptest/` holds offline hotspot debugging tools |
-| `linux/controlpanel/` | The Qt/QML control center `y700-control-center`, auto-rotation |
+| `linux/controlpanel/` | The Qt/QML control center `y700-control-center` (with Stage Manager and split-screen toggles), auto-rotation |
 | `linux/daily/` | Everyday configuration (input method, media player, refresh rate and power, and so on) |
 | `linux/devaccess/`, `linux/usbstick/` | ssh over the USB gadget network; a script that enables ssh once from a USB stick (you must put in your own public key) |
 | `linux/display/` | Automatic brightness from the ambient light sensor (Rust); refresh rate that follows the video (a Rust daemon, KWin script, Chrome extension and native host) |
-| `linux/dock/` | The dock and status bar `y700-shellbar` (with notifications and a pull-down panel) and its design mockups |
+| `linux/dock/` | The dock and status bar `y700-shellbar` (with notifications, a pull-down panel, do-not-disturb and a running dot under apps with a window open), its design mockups and a headless test bed |
 | `linux/gamepad/` | Uses the gamepad's Home key as a system key; turns a G9 pad's lights off with the screen and the screen on from a pad button (both Rust) |
 | `linux/games/` | Rootfs mounts for running x86 Steam games with FEX, a performance HUD, an SGSR upscaler port for kwin-effect-upscale |
 | `linux/gesture/` | A KWin script for the bottom-edge swipe home; task cards based on the Plasma Mobile task switcher; tests |
 | `linux/gpu/` | The LD_PRELOAD shim `y700-no-waitboost` for Chrome, drirc, reproducer scripts |
-| `linux/kernel-y1/` … `linux/kernel-y8/`, `linux/kernel-y14/` … `linux/kernel-y17/` | Build scripts, patches, configuration, check scripts and notes for each kernel generation (y9–y13 live in `kernel-y8/`). Patch provenance is in [PATCHES.md](PATCHES.md) |
+| `linux/kernel-y1/` … `linux/kernel-y8/`, `linux/kernel-y14/` … `linux/kernel-y20/` | Build scripts, patches, configuration, check scripts and notes for each kernel generation (y9–y13 live in `kernel-y8/`); `linux/kernel-next/` holds patches queued for the next kernel. Patch provenance is in [PATCHES.md](PATCHES.md) |
+| `linux/owner-devices/` | udev rule, module loading and options for a Magic Mouse 2 / Magic Keyboard |
 | `linux/net/` | The event-driven watchdog `y700-kmsg-watch` (Rust), Wi‑Fi and display watchdogs, a Tailscale install script |
 | `linux/osk/`, `linux/osk-design/` | The Qt6/QML on-screen keyboard `y700-osk` (fcitx5 add-on, KWin effect, optional voice input), its design mockup and pinyin word list |
 | `linux/power/` | Power saving with the screen off but the system awake: wakeup-source control, always-on peripherals, PCIe L1.2, an event-driven emergency key chord, several Rust daemons. `battery/` is the "Battery" page (recorder, report generator, page), `flightrec/` a power flight recorder, `cx-collapse/` the runtime CX power-collapse experiments |
 | `linux/sensors/` | Fixes for a sensor-hub race at boot |
+| `linux/split/` | The split-screen KWin script `y700-split` (three ways in: drag a title bar to the screen edge, a control-center tile, the task-card menu; drag the divider to resize) and its mockup |
+| `linux/stage/` | The Stage Manager KWin script `y700-stage`, a rounded-corner effect, a power A/B script, the mockup and research notes |
 | `linux/streaming/` | Tuning and analysis scripts for 120 fps Moonlight streaming |
-| `linux/usbport/` | A local replacement for upstream `tb323fu-usb-port` (two USB-C ports share one controller) |
+| `linux/usbport/` | A local replacement for upstream `tb323fu-usb-port` (two USB-C ports share one controller); `y700-dp-source`, which makes the tablet the power source when a DisplayPort monitor is attached |
 | `linux/video/` | Video power work for VA-API, Chrome and wiliwili; the `yuv709` shim; patches against libva-v4l2 and wiliwili |
 | `linux/wifi/` | 6 GHz preference, a regulatory-domain udev rule, an ath12k parameter patch, a 5 GHz evaluation |
+| `linux/zram/` | zram swap configuration (zram-generator and sysctl) |
 | `linux/serve_script.py`, `linux/restore-coloros-boot.sh` | Small early debugging tools (serving a script over the USB network, writing the ColorOS boot image back in 9008 mode) |
 
 ### What is intentionally not included
@@ -250,6 +263,7 @@ A file's own SPDX header takes precedence; files without one are covered by [REU
 | Kernel patches and kernel configuration (under `linux/kernel-*/`, and kernel patches in other directories) | GPL-2.0-only, as the Linux kernel; the device-tree-only draft patch in `linux/audio/` is BSD-3-Clause, as the upstream device trees |
 | Copies and adaptations of tb323fu-linux files (platform scripts, USB port routing, switch script, keyhold, y17's initramfs init) | MIT, as upstream |
 | The patch against the upstream helper | GPL-3.0-or-later, as the upstream helper |
+| The Stage Manager and split-screen KWin scripts (`linux/stage/y700-stage/`, `linux/split/y700-split/`); the corner effect both use (`linux/stage/kwin-corners/`) | The scripts MIT (own code, as their `metadata.json` declares); the corner effect GPL-2.0-or-later, as KWin |
 | Other third-party derived code | The license of the original project; see [NOTICE.md](NOTICE.md) |
 
 Kernel patch authorship and origin are listed in [PATCHES.md](PATCHES.md); third-party credits are in [NOTICE.md](NOTICE.md).

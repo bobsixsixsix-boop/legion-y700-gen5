@@ -16,7 +16,7 @@ OUT=/root/livi-dryrun-wireless.txt
 U=user
 H=/home/$U
 CFG=$H/.config/LIVI/config.json
-CORE='^/opt/livi-10.0.0/resources/core/livi-core'
+CORE='^/opt/livi-10.3.0/resources/core/livi-core'
 UE="sudo -u $U env -u SUDO_USER -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
 AA_UUID=4de17a00-52cb-11e6-bdf4-0800200c9a66
 

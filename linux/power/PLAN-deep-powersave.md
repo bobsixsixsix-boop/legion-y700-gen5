@@ -292,7 +292,7 @@
 **WK-4 chrony rtcsync（rtc@6100 失败写）**
 - 收益：≈0 W（`ALWAYS-ON.md` §5b：写失败 -ENODEV 但仍计一次唤醒，61 次/25 min）；代理 −2.4 唤醒/min。风险：无功能变化（RTC 本来写不进，fake-hwclock 保持）。文件：`linux/power/y700-rtc-sync-off.sh`（备份到 `/etc/chrony/chrony.conf.y700bak`；**无 `--undo`，撤销只在注释里——本稿要求加 `--undo`**）。验证：先 `DIAG:` 步的 `always-on-check.sh --rtc 90` 确认 `rtc_set_time … err=-19` 每 20–30 s 一次；N2 `E3a+K=rtcsync:15 / E3a+K=noop:15` 只看代理。重启·重编：否。授权：否。体检：`check_rtc_sync`（新）。回退：`--undo`。阶段：N2。
 
-**WK-5 helperd 熄屏慢轮询** — `linux/power/helperd-slow-poll.patch` + drop-in `/etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf`（ExecStart 指到 `/usr/local/libexec`，**绝不替换厂商二进制**）已上线；体检**已有**（内联 :1019-1025，升级提示 :67-68）；无新实验。
+**WK-5 helperd 熄屏慢轮询** — `linux/power/helperd-slow-poll.patch` + drop-in `/etc/systemd/system/tb323fu-helperd.service.d/y700-local.conf`（ExecStart 指到 `/usr/local/libexec`，**绝不替换厂商二进制**）**没装**（2026-11-08 更正：这里原写「已上线」是错的。README「熄屏唤醒治理」记的是没装：要从源码编 0.4.2，和 dpkg 包打架；平板上没有那个 drop-in，体检也没打出「自编的熄屏慢轮询版」那行；11-03 实测 helperd 熄屏 9.62 次/秒，和 10-16 没打补丁时的 9.9 次/秒一样）。**11-08 已按平板装着的 0.4.2 重写**（只在熄屏 + 用电池 + 没在重启充电 + 热档不是 performance 时 30 s 一轮，中间每 5 s 看一眼屏幕和充电器；LED 线程跟着放慢，变速时当场重读一次），对干净的 `helper-v0.4.2` 树打得上；**没编没装**：平板缺约 28 个 crate 要先 `cargo fetch`，作者 11-08 说先不下。以后升到 ≥0.4.7 还得再改（0.4.7 起 led.rs 多了旋转分支，0.4.8 又改了同样三处等待）；体检**已有**（drop-in 在才查，升级提示在 `tools/y700-checklist.py` 的 tb323fu-helper 一条）；无新实验。
 
 **WK-6 keyhold 事件驱动**
 - 收益：代理唤醒；功耗 <0.03 W。风险：**紧急键（音量键 10 s 回安卓）失效**。文件：`linux/power/keyhold-event-driven.patch`、`y700-keyhold-local.conf`、`keyhold.c`、`keyhold-model-test.py`；上游草稿**已有**（未入公开仓库）。验证：`keyhold-model-test.py` 桩 + 平板上长按音量键 10 s 仍触发。重启·重编：否（drop-in + restart）。授权：§7-24（提交上游另点头）。体检：`check_keyhold`（新）。回退：删 drop-in。阶段：P3。
